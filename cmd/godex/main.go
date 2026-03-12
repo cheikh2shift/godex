@@ -114,6 +114,7 @@ func main() {
 	fmt.Printf("MCP Servers: %d\n", len(servers))
 	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Escape to cancel")
 	fmt.Println("Type your prompt or /help for more options.")
+	fmt.Println("Multiline: Enter to add new line, Enter again on empty line to submit")
 
 	// Get working directory for session files
 	wd, _ := os.Getwd()
@@ -162,7 +163,7 @@ func main() {
 		if !strings.Contains(input, "\n") && !strings.HasPrefix(input, "/") {
 			// Keep prompting for more input until user submits empty line
 			for {
-				time.Sleep(300 * time.Millisecond)
+				// Prompt immediately for more input
 				moreInput, err := rl.Prompt("... ")
 				if err != nil {
 					break
@@ -171,8 +172,9 @@ func main() {
 					// Empty line - user pressed Enter to finish multiline input
 					break
 				}
-				// Got more input, accumulate and continue waiting
+				// Got more input, accumulate and wait briefly for more
 				accumulated = accumulated + "\n" + moreInput
+				time.Sleep(500 * time.Millisecond)
 			}
 		}
 
