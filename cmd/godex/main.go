@@ -87,7 +87,7 @@ func main() {
 		log.Fatalf("no provider configured; use --wizard to create one")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	servers, err := initMCPServers(ctx, provider)
 	if err != nil {
@@ -209,8 +209,31 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 		if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 			toolTimeout = *provider.ToolTimeout
 		}
+
+		// Start escape key listener for cancellation
+		escapeCh := make(chan struct{}, 1)
+		go func() {
+			buf := make([]byte, 1)
+			for {
+				n, err := os.Stdin.Read(buf)
+				if n > 0 && buf[0] == 27 { // Escape key
+					select {
+					case escapeCh <- struct{}{}:
+					default:
+					}
+				}
+				if err != nil {
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}()
+
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
+
+			// Create a cancellable context for this round
+			roundCtx, roundCancel := context.WithCancel(ctx)
 
 			// Show loading indicator with timer
 			stopSpinner := make(chan bool)
@@ -229,13 +252,29 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 				}
 			}()
 
-			resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
+			// Listen for escape in background
+			go func() {
+				select {
+				case <-escapeCh:
+					roundCancel()
+				case <-roundCtx.Done():
+				}
+			}()
+
+			resp, err := agent.SendPromptWithThink(roundCtx, provider, fullPrompt, func(think string) {
 				streamed.WriteString(think)
 			})
 
 			// Stop spinner and clear line
 			stopSpinner <- true
 			fmt.Print("\r               \r")
+
+			// Check if cancelled
+			if roundCtx.Err() == context.Canceled {
+				fmt.Println("\n[Cancelled]")
+				agent.CancelPrompt(provider)
+				break
+			}
 
 			if err != nil {
 				fmt.Printf("\nError: %v\n", err)
@@ -328,6 +367,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 		}
 	}
 
+	cancel()
 	cleanup(servers)
 	fmt.Println("Goodbye!")
 }
