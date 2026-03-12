@@ -155,15 +155,23 @@ func main() {
 		}
 
 		// Handle multiline paste: check if input already contains newlines (paste captured full text)
-		// If not a command (doesn't start with /), wait briefly for more input
+		// If not a command (doesn't start with /), wait for more input until user submits empty line
 		accumulated := input
 
 		// If input already has newlines, it's a multiline paste - use as-is
 		if !strings.Contains(input, "\n") && !strings.HasPrefix(input, "/") {
-			// Wait and check for more input (for cases where liner only got first line)
-			time.Sleep(150 * time.Millisecond)
-			moreInput, err := rl.Prompt("... ")
-			if err == nil && moreInput != "" {
+			// Keep prompting for more input until user submits empty line
+			for {
+				time.Sleep(300 * time.Millisecond)
+				moreInput, err := rl.Prompt("... ")
+				if err != nil {
+					break
+				}
+				if moreInput == "" {
+					// Empty line - user pressed Enter to finish multiline input
+					break
+				}
+				// Got more input, accumulate and continue waiting
 				accumulated = accumulated + "\n" + moreInput
 			}
 		}
