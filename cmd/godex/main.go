@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -261,6 +262,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 					finalResp := resp
 					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
 						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
+						go playSound()
 						fmt.Printf("\n\n========================================\n%s\n", finalResp)
 					} else {
 						fmt.Printf("%s\n", resp)
@@ -779,6 +781,23 @@ func loadAgentsFile(cwd string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func playSound() {
+	var cmd *exec.Cmd
+	// Try different sound playback methods based on OS
+	if _, err := exec.LookPath("paplay"); err == nil {
+		cmd = exec.Command("paplay", "/usr/share/sounds/gnome/default/alerts/glass.ogg")
+	} else if _, err := exec.LookPath("afplay"); err == nil {
+		cmd = exec.Command("afplay", "/System/Library/Sounds/Glass.aiff")
+	} else if _, err := exec.LookPath("espeak"); err == nil {
+		cmd = exec.Command("espeak", "-s 150", "ding")
+	} else {
+		// Fallback to terminal bell
+		fmt.Print("\a")
+		return
+	}
+	cmd.Run()
 }
 
 func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provider) {
