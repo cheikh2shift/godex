@@ -189,7 +189,10 @@ FINAL_ANSWER:
 
 User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 
-		maxToolRounds := 5
+		maxToolRounds := 10
+		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+			maxToolRounds = *provider.MaxToolRounds
+		}
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
 			resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
@@ -210,6 +213,8 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			// Only execute tool calls if response is primarily tool calls (JSON format)
 			// If there's substantial explanatory text, don't treat as tool call
 			toolCalls, isToolCallResponse := shouldExecuteToolCall(resp)
+
+			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No tool calls - print final response and stop
@@ -233,11 +238,13 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 
 			// Execute all tool calls
 			fmt.Printf("\n")
-			fmt.Print("\033[90m")
-			fmt.Printf("> %s\n", input)
-			fmt.Printf("%s\n", resp)
-			fmt.Print("\033[0m")
-			fmt.Printf("[Executing %d tool(s)]\n", len(toolCalls))
+			if round == 0 {
+				fmt.Print("\033[90m")
+				fmt.Printf("> %s\n", input)
+				fmt.Printf("%s\n", resp)
+				fmt.Print("\033[0m")
+			}
+			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 			var toolResults []string
 			hasError := false
 			for _, tc := range toolCalls {
@@ -269,8 +276,11 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			}
 
 			// Ask for final answer with all tool results (including errors)
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nIf any tools failed, either retry with corrected arguments or explain the error. Provide the final answer now.", input, strings.Join(toolResults, "\n---\n"))
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:'", input, strings.Join(toolResults, "\n---\n"))
 		}
+
+		// If we exited the loop without breaking (hit max rounds), print a message
+		fmt.Printf("\n[Max tool rounds (%d) reached - exiting]\n", maxToolRounds)
 	}
 
 	cleanup(servers)
@@ -335,6 +345,11 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 			fmt.Printf("[MCP]   Type: inline (Go - command execution)\n")
 			fmt.Printf("[MCP]   Allowed paths: %v\n", paths)
 			server = mcp.NewBashServer(paths)
+		} else if serverConfig.Name == "webscraper" || serverConfig.Name == "web" || serverConfig.Name == "browser" {
+			paths = uniqueStrings(paths)
+			fmt.Printf("[MCP]   Type: inline (Go - web scraper with JS rendering)\n")
+			fmt.Printf("[MCP]   Allowed URLs: %v\n", paths)
+			server = mcp.NewWebScraperServer(paths)
 		} else {
 			fmt.Printf("[MCP]   Type: external\n")
 			fmt.Printf("[MCP]   Command: %s %v\n", serverConfig.Command, serverConfig.Args)
@@ -404,7 +419,7 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 			return
 		}
 		fmt.Printf("Added path '%s' to %s\n", path, server.Tools()[0].Name)
-		return
+		//return
 	}
 }
 
@@ -455,10 +470,16 @@ Available MCP tools:
   bash:
     run_command(command)  - Run a shell command
 
+  webscraper:
+    fetch_url(url)       - Fetch URL with JavaScript rendering
+    search_html(html, selector, text) - Search HTML content
+    get_links(html)      - Extract all links from HTML
+
 Examples:
   > read_file /home/user/project/main.go
   > write_file /home/user/project/test.txt "Hello World"
-  > run_command "ls -la"`)
+  > run_command "ls -la"
+  > fetch_url "https://example.com"`)
 }
 
 func uniqueStrings(input []string) []string {

@@ -105,6 +105,7 @@ default_provider: ollama
 | `model` | Model name (e.g., `codeqwen`, `codellama`, `minimax-m2.5:cloud`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
+| `max_tool_rounds` | Max tool call rounds (default: 10) |
 | `api_key_env` | Environment variable for API key (Gemini) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |
@@ -117,6 +118,7 @@ GoDex includes built-in MCP servers:
 |--------|-------------|
 | `filesystem` | Read, write, list directories, create/delete files |
 | `bash` | Run shell commands, Python, Node.js |
+| `webscraper` | Fetch URLs with JavaScript rendering, search HTML, extract links |
 
 #### Adding Allowed Paths
 
@@ -131,6 +133,10 @@ mcp_servers:
   - name: bash
     allowed_paths:
       - /home/user/project1
+  - name: webscraper
+    allowed_urls:
+      - https://example.com
+      - https://docs.example.com
 ```
 
 ## Usage
