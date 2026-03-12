@@ -200,6 +200,13 @@ The user is asking about: %s
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
 
+BASH TOOL LIMITATIONS:
+- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
+- Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
+- Shell aliases are NOT expanded - use full command names
+- Use background: true to run long-running processes (returns PID immediately)
+- Use kill_command with the PID to stop background processes when done
+
 To call a tool, respond with ONLY a JSON object like:
 {"name": "tool_name", "arguments": {"arg1": "value1"}}
 

@@ -34,6 +34,11 @@ func NewBashServer(allowedPaths []string) *BashServer {
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"},"background":{"type":"boolean","description":"Run in background using nohup (default false)"}},"required":["command"]}`),
 			},
 			{
+				Name:        "kill_command",
+				Description: "Kill a background process by PID (returned from run_command with background: true)",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"pid":{"type":"number","description":"Process ID to kill"}},"required":["pid"]}`),
+			},
+			{
 				Name:        "run_python",
 				Description: "Run a Python script and return its output",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Python code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 30)"}},"required":["code"]}`),
@@ -55,6 +60,8 @@ func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[st
 	switch name {
 	case "run_command":
 		return s.runCommand(arguments)
+	case "kill_command":
+		return s.killCommand(arguments)
 	case "run_python":
 		return s.runPython(arguments)
 	case "run_node":
@@ -117,6 +124,25 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 	}
 
 	return string(output), nil
+}
+
+func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
+	pid, ok := args["pid"].(float64)
+	if !ok {
+		return "", fmt.Errorf("pid is required")
+	}
+
+	proc, err := os.FindProcess(int(pid))
+	if err != nil {
+		return "", fmt.Errorf("failed to find process: %v", err)
+	}
+
+	err = proc.Kill()
+	if err != nil {
+		return "", fmt.Errorf("failed to kill process: %v", err)
+	}
+
+	return fmt.Sprintf("Killed process %d", int(pid)), nil
 }
 
 func (s *BashServer) runPython(args map[string]interface{}) (string, error) {
