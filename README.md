@@ -225,6 +225,36 @@ go build -o godex ./cmd/godex
 ./godex
 ```
 
+## Troubleshooting
+
+### Ollama Model Not Found
+
+If you get an error like `{"error":"model 'qwen3-coder-next:cloud' not found"}`, it means the model hasn't been pulled yet. Run:
+
+```bash
+ollama pull <model-name>
+```
+
+Then test it works with:
+
+```bash
+ollama run <model-name>
+```
+
+### Ollama Not Running
+
+Make sure Ollama is running in the background. You can start it with:
+
+```bash
+ollama serve
+```
+
+### Connection Issues
+
+If GoDex can't connect to Ollama, check that the Ollama API is accessible at `http://localhost:11434`.
+
+
+
 ---
 
 For developers: [DEV.md](DEV.md) - Guide to adding new MCP servers and providers
