@@ -106,6 +106,7 @@ default_provider: ollama
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |
+| `tool_timeout` | Tool execution timeout in seconds (default: 180) |
 | `api_key_env` | Environment variable for API key (Gemini) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |

@@ -107,8 +107,11 @@ func main() {
 	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Escape to cancel")
 	fmt.Println("Type your prompt or /help for more options.")
 
-	// Load previous session summary
-	prevSession := loadPreviousSession(home)
+	// Get working directory for session files
+	wd, _ := os.Getwd()
+
+	// Load previous session summary from ./.godex
+	prevSession := loadPreviousSession(wd)
 	if prevSession != "" {
 		fmt.Println("[Session] Loaded previous session context")
 	}
@@ -143,7 +146,7 @@ func main() {
 			break
 		}
 		if input == "/save" || input == "/save-exit" {
-			saveSessionAsync(home, sessionEntries, provider)
+			saveSessionSync(wd, sessionEntries, provider)
 			break
 		}
 		if input == "/help" {
@@ -193,11 +196,38 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
 			maxToolRounds = *provider.MaxToolRounds
 		}
+		toolTimeout := 180 // default 3 minutes
+		if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+			toolTimeout = *provider.ToolTimeout
+		}
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
+
+			// Show loading indicator with timer
+			stopSpinner := make(chan bool)
+			go func() {
+				elapsed := 0
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						elapsed++
+						fmt.Printf("\r\033[90m[%ds]...\033[0m", elapsed)
+					case <-stopSpinner:
+						return
+					}
+				}
+			}()
+
 			resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
 				streamed.WriteString(think)
 			})
+
+			// Stop spinner and clear line
+			stopSpinner <- true
+			fmt.Print("\r               \r")
+
 			if err != nil {
 				fmt.Printf("\nError: %v\n", err)
 				break
@@ -259,7 +289,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
-				result, err := callTool(servers, toolName, args)
+				result, err := callTool(servers, toolName, args, toolTimeout)
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
 					fmt.Printf("  Error: %v\n", err)
@@ -279,8 +309,13 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:'", input, strings.Join(toolResults, "\n---\n"))
 		}
 
-		// If we exited the loop without breaking (hit max rounds), print a message
-		fmt.Printf("\n[Max tool rounds (%d) reached - exiting]\n", maxToolRounds)
+		// Save session entry for max rounds case
+		if len(sessionEntries) == 0 || sessionEntries[len(sessionEntries)-1].Prompt != input {
+			sessionEntries = append(sessionEntries, sessionEntry{
+				Prompt:   input,
+				Response: "Max tool rounds reached",
+			})
+		}
 	}
 
 	cleanup(servers)
@@ -609,11 +644,13 @@ func parseArgs(argsStr string) map[string]interface{} {
 	return args
 }
 
-func callTool(servers []MCPServer, name string, args map[string]interface{}) (string, error) {
+func callTool(servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
 			if tool.Name == name {
-				return server.CallTool(context.Background(), name, args)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
+				defer cancel()
+				return server.CallTool(ctx, name, args)
 			}
 		}
 	}
@@ -718,8 +755,8 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 	return toolCalls, true
 }
 
-func loadPreviousSession(home string) string {
-	sessionPath := filepath.Join(home, ".godex", sessionFileName)
+func loadPreviousSession(cwd string) string {
+	sessionPath := filepath.Join(cwd, ".godex", sessionFileName)
 	data, err := os.ReadFile(sessionPath)
 	if err != nil {
 		return ""
@@ -727,32 +764,39 @@ func loadPreviousSession(home string) string {
 	return strings.TrimSpace(string(data))
 }
 
-func saveSessionAsync(home string, entries []sessionEntry, provider *config.Provider) {
+func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provider) {
 	if len(entries) == 0 {
+		fmt.Println("[Session] No entries to save")
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	fmt.Printf("[Session] Saving %d entries...\n", len(entries))
 
-		var promptBuilder strings.Builder
-		promptBuilder.WriteString("Create the shortest possible summary (1-2 sentences max) of what was accomplished in this session:\n\n")
-		for _, e := range entries {
-			promptBuilder.WriteString(fmt.Sprintf("Q: %s\nA: %s\n\n", e.Prompt, truncate(e.Response, 150)))
-		}
-		promptBuilder.WriteString("\nRespond with ONLY the summary sentence(s), no preamble.")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-		summary, err := agent.SendPrompt(ctx, provider, promptBuilder.String())
-		if err != nil {
-			fmt.Printf("[Session] Failed to get summary: %v\n", err)
-			return
-		}
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("Create the shortest possible summary (1-2 sentences max) of what was accomplished in this session:\n\n")
+	for _, e := range entries {
+		promptBuilder.WriteString(fmt.Sprintf("Q: %s\nA: %s\n\n", e.Prompt, truncate(e.Response, 150)))
+	}
+	promptBuilder.WriteString("\nRespond with ONLY the summary sentence(s), no preamble.")
 
-		sessionPath := filepath.Join(home, ".godex", sessionFileName)
-		err = os.WriteFile(sessionPath, []byte(summary), 0644)
-		if err != nil {
-			fmt.Printf("[Session] Failed to save session: %v\n", err)
-		}
-	}()
+	summary, err := agent.SendPrompt(ctx, provider, promptBuilder.String())
+	if err != nil {
+		fmt.Printf("[Session] Failed to get summary: %v\n", err)
+		return
+	}
+
+	sessionPath := filepath.Join(cwd, ".godex", sessionFileName)
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
+		fmt.Printf("[Session] Failed to create directory: %v\n", err)
+		return
+	}
+	err = os.WriteFile(sessionPath, []byte(summary), 0644)
+	if err != nil {
+		fmt.Printf("[Session] Failed to save session: %v\n", err)
+	} else {
+		fmt.Printf("[Session] Saved to %s\n", sessionPath)
+	}
 }

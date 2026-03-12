@@ -28,6 +28,7 @@ type Provider struct {
 	APIKeyEnv     string            `yaml:"api_key_env,omitempty"`
 	Temperature   *float64          `yaml:"temperature,omitempty"`
 	MaxToolRounds *int              `yaml:"max_tool_rounds,omitempty"`
+	ToolTimeout   *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180
 	Params        map[string]string `yaml:"params,omitempty"`
 	MCPServers    []MCPServer       `yaml:"mcp_servers,omitempty"`
 }
