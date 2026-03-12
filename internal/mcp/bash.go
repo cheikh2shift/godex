@@ -15,8 +15,9 @@ func GetWorkingDir() (string, error) {
 }
 
 type BashServer struct {
-	allowedPaths []string
-	tools        []Tool
+	allowedPaths   []string
+	tools          []Tool
+	backgroundPIDs []int
 }
 
 func NewBashServer(allowedPaths []string) *BashServer {
@@ -62,6 +63,8 @@ func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[st
 		return s.runCommand(arguments)
 	case "kill_command":
 		return s.killCommand(arguments)
+	case "kill_all_background":
+		return s.killAllBackground(arguments)
 	case "run_python":
 		return s.runPython(arguments)
 	case "run_node":
@@ -89,9 +92,13 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("command is required")
 	}
 
-	timeout := 60
+	timeout := 180 // default 3 minutes
 	if t, ok := args["timeout"].(float64); ok {
 		timeout = int(t)
+	}
+	// Cap at 5 minutes max to prevent hanging
+	if timeout > 300 {
+		timeout = 300
 	}
 
 	background := false
@@ -110,16 +117,23 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to start background command: %v", err)
 		}
+		s.backgroundPIDs = append(s.backgroundPIDs, cmd.Process.Pid)
 		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", cmd.Process.Pid), nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	output, err := cmd.CombinedOutput()
 
+	// Cancel after command completes (either success or error)
+	cancel()
+
 	if err != nil {
+		// Check if it was a timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Sprintf("TIMEOUT: Command exceeded %d seconds and was killed", timeout), nil
+		}
 		return fmt.Sprintf("Error: %v\nOutput: %s", err, string(output)), nil
 	}
 
@@ -142,7 +156,48 @@ func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("failed to kill process: %v", err)
 	}
 
+	// Remove from tracking
+	for i, p := range s.backgroundPIDs {
+		if p == int(pid) {
+			s.backgroundPIDs = append(s.backgroundPIDs[:i], s.backgroundPIDs[i+1:]...)
+			break
+		}
+	}
+
 	return fmt.Sprintf("Killed process %d", int(pid)), nil
+}
+
+func (s *BashServer) killAllBackground(args map[string]interface{}) (string, error) {
+	if len(s.backgroundPIDs) == 0 {
+		return "No background processes running", nil
+	}
+
+	var killed []int
+	var failed []int
+	for _, pid := range s.backgroundPIDs {
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			if err := proc.Kill(); err == nil {
+				killed = append(killed, pid)
+			} else {
+				failed = append(failed, pid)
+			}
+		} else {
+			failed = append(failed, pid)
+		}
+	}
+
+	s.backgroundPIDs = nil
+
+	msg := fmt.Sprintf("Killed %d processes: %v", len(killed), killed)
+	if len(failed) > 0 {
+		msg += fmt.Sprintf("\nFailed to kill: %v", failed)
+	}
+	return msg, nil
+}
+
+func (s *BashServer) KillAllBackground() (string, error) {
+	return s.killAllBackground(nil)
 }
 
 func (s *BashServer) runPython(args map[string]interface{}) (string, error) {
@@ -209,4 +264,44 @@ func (s *BashServer) AllowedPaths() []string {
 
 func (s *BashServer) Close() error {
 	return nil
+}
+
+func (s *BashServer) ListBackground() (string, error) {
+	s.cleanupDeadProcesses()
+	if len(s.backgroundPIDs) == 0 {
+		return "No background processes", nil
+	}
+	var pids []string
+	for _, pid := range s.backgroundPIDs {
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			err = proc.Signal(nil) // Check if process is alive
+			if err == nil {
+				pids = append(pids, fmt.Sprintf("PID %d (running)", pid))
+			}
+		}
+	}
+	if len(pids) == 0 {
+		return "No background processes", nil
+	}
+	return "Background processes: " + strings.Join(pids, ", "), nil
+}
+
+func (s *BashServer) BackgroundCount() int {
+	s.cleanupDeadProcesses()
+	return len(s.backgroundPIDs)
+}
+
+func (s *BashServer) cleanupDeadProcesses() {
+	var alive []int
+	for _, pid := range s.backgroundPIDs {
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			err = proc.Signal(nil) // Signal 0 checks if process exists
+			if err == nil {
+				alive = append(alive, pid)
+			}
+		}
+	}
+	s.backgroundPIDs = alive
 }

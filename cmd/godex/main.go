@@ -9,9 +9,11 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cheikh-seck/godex/internal/agent"
@@ -112,8 +114,9 @@ func main() {
 
 	fmt.Printf("GoDex - Connected to %s (%s)\n", provider.Name, provider.Model)
 	fmt.Printf("MCP Servers: %d\n", len(servers))
-	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Escape to cancel")
+	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Ctrl+C to cancel")
 	fmt.Println("Type your prompt or /help for more options.")
+	fmt.Println("Multiline: Enter to add new line, Enter again on empty line to submit")
 
 	// Get working directory for session files
 	wd, _ := os.Getwd()
@@ -137,7 +140,14 @@ func main() {
 	var sessionEntries []sessionEntry
 
 	for {
-		input, err := rl.Prompt("> ")
+		// Show prompt with background process count
+		bgCount := getBgCount(servers)
+		prompt := "> "
+		if bgCount > 0 {
+			prompt = fmt.Sprintf("[%d bg] ", bgCount)
+		}
+
+		input, err := rl.Prompt(prompt)
 		if err != nil {
 			if err == liner.ErrPromptAborted {
 				fmt.Println("\n[Cancelled]")
@@ -147,6 +157,30 @@ func main() {
 			break
 		}
 
+		// Handle multiline paste: check if input already contains newlines (paste captured full text)
+		// If not a command (doesn't start with /), wait for more input until user submits empty line
+		accumulated := input
+
+		// If input already has newlines, it's a multiline paste - use as-is
+		if !strings.Contains(input, "\n") && !strings.HasPrefix(input, "/") {
+			// Keep prompting for more input until user submits empty line
+			for {
+				moreInput, err := rl.Prompt("... ")
+				if err != nil {
+					if err == liner.ErrPromptAborted {
+						accumulated = "" // Discard on cancellation
+					}
+					break
+				}
+				if moreInput == "" {
+					break
+				}
+				accumulated = accumulated + "\n" + moreInput
+			}
+		}
+
+		input = accumulated
+
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
@@ -155,13 +189,23 @@ func main() {
 		rl.AppendHistory(input)
 
 		if input == "/exit" || input == "/quit" {
-		}
-		if input == "/exit" || input == "/quit" {
 			break
 		}
 		if input == "/save" || input == "/save-exit" {
 			saveSessionSync(wd, sessionEntries, provider)
 			break
+		}
+		if input == "/killbg" {
+			handleKillBg(servers)
+			continue
+		}
+		if input == "/bg" {
+			handleListBg(servers)
+			continue
+		}
+		if input == "/clear" {
+			fmt.Print("\033[2J\033[H")
+			continue
 		}
 		if input == "/help" {
 			printHelp()
@@ -195,7 +239,6 @@ func main() {
 
 CRITICAL: The current working directory is: %s
 Use this path when the user asks about "this folder", "current directory", or similar.
-The user is asking about: %s
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
@@ -204,16 +247,28 @@ BASH TOOL LIMITATIONS:
 - Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
 - Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
 - Shell aliases are NOT expanded - use full command names
-- Use background: true to run long-running processes (returns PID immediately)
+- NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
+- ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
+- After starting a background process, use sleep before making requests to it
 - Use kill_command with the PID to stop background processes when done
 
-To call a tool, respond with ONLY a JSON object like:
-{"name": "tool_name", "arguments": {"arg1": "value1"}}
+To call tools, respond with one or more JSON objects, each in its own markdown code block.
+You can call multiple tools at once to be more efficient.
+
+Example:
+`+"```json"+`
+{
+  "name": "read_file",
+  "arguments": {
+    "path": "/absolute/path/to/file"
+  }
+}
+`+"```"+`
 
 When you have completed the task and want to provide the final answer, start your response with:
 FINAL_ANSWER:
 
-User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
+User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -224,24 +279,9 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			toolTimeout = *provider.ToolTimeout
 		}
 
-		// Start escape key listener for cancellation
-		escapeCh := make(chan struct{}, 1)
-		go func() {
-			buf := make([]byte, 1)
-			for {
-				n, err := os.Stdin.Read(buf)
-				if n > 0 && buf[0] == 27 { // Escape key
-					select {
-					case escapeCh <- struct{}{}:
-					default:
-					}
-				}
-				if err != nil {
-					return
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-		}()
+		// Setup signal handling for cancellation during AI round
+		stopSignal := make(chan os.Signal, 1)
+		signal.Notify(stopSignal, os.Interrupt, syscall.SIGTERM)
 
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
@@ -266,10 +306,10 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 				}
 			}()
 
-			// Listen for escape in background
+			// Listen for interrupt in background
 			go func() {
 				select {
-				case <-escapeCh:
+				case <-stopSignal:
 					roundCancel()
 				case <-roundCtx.Done():
 				}
@@ -344,6 +384,14 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 				toolName := tc["name"].(string)
 				args := tc["arguments"].(map[string]interface{})
 
+				// Get tool description
+				toolDesc := getToolDescription(servers, toolName)
+				if toolDesc != "" {
+					fmt.Print("\033[90m")
+					fmt.Printf("  %s\n", toolDesc)
+					fmt.Print("\033[0m")
+				}
+
 				var argsStr string
 				for k, v := range args {
 					if argsStr != "" {
@@ -371,6 +419,9 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			// Ask for final answer with all tool results (including errors)
 			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:'", input, strings.Join(toolResults, "\n---\n"))
 		}
+
+		signal.Stop(stopSignal)
+		close(stopSignal)
 
 		// Save session entry for max rounds case
 		if len(sessionEntries) == 0 || sessionEntries[len(sessionEntries)-1].Prompt != input {
@@ -546,6 +597,56 @@ func handleTools(servers []MCPServer) {
 	}
 }
 
+func handleKillBg(servers []MCPServer) {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			result, err := bs.KillAllBackground()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println(result)
+			}
+			return
+		}
+	}
+	fmt.Println("No bash server found")
+}
+
+func getToolDescription(servers []MCPServer, toolName string) string {
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			if tool.Name == toolName {
+				return tool.Description
+			}
+		}
+	}
+	return ""
+}
+
+func handleListBg(servers []MCPServer) {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			result, err := bs.ListBackground()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println(result)
+			}
+			return
+		}
+	}
+	fmt.Println("No bash server found")
+}
+
+func getBgCount(servers []MCPServer) int {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			return bs.BackgroundCount()
+		}
+	}
+	return 0
+}
+
 func printHelp() {
 	fmt.Println(`
 Commands:
@@ -553,8 +654,16 @@ Commands:
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
   /save, /save-exit - Save session and exit
-  /exit, /quit      - Exit the program
-  /help             - Show this help
+  /killbg           - Kill all background processes
+  /bg               - List background processes
+  /clear            - Clear the terminal
+  /exit, /quit     - Exit the program
+  /help            - Show this help
+
+Tips:
+  - Paste multiline text - waits for more input automatically
+  - Up/Down arrows for command history
+  - Tab to autocomplete / commands
 
 Available MCP tools:
   filesystem:
@@ -608,10 +717,11 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
 
 func NewLiner() *liner.State {
 	l := liner.NewLiner()
+	l.SetCtrlCAborts(true)
 	l.SetCompleter(func(line string) []string {
 		if !strings.HasPrefix(line, "/") {
 			return nil
@@ -731,54 +841,38 @@ func truncate(s string, maxLen int) string {
 func extractAllToolCalls(text string) []map[string]interface{} {
 	var results []map[string]interface{}
 
-	// Try JSON format: {"name": "...", "arguments": {...}}
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}") {
-			var data map[string]interface{}
-			if err := json.Unmarshal([]byte(line), &data); err == nil {
-				if name, ok := data["name"].(string); ok {
-					args := make(map[string]interface{})
-					if a, ok := data["arguments"].(map[string]interface{}); ok {
-						args = a
-						// Unescape HTML-encoded entities in string arguments
-						for k, v := range args {
-							if s, ok := v.(string); ok {
-								s = strings.ReplaceAll(s, "\\u0026", "&")
-								s = strings.ReplaceAll(s, "&#38;", "&")
-								s = strings.ReplaceAll(s, "&amp;", "&")
-								args[k] = s
-							}
-						}
-					}
-					results = append(results, map[string]interface{}{"name": name, "arguments": args})
-				}
+	// First, try to find markdown code blocks (```json ... ``` or ``` ... ```)
+	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\n(.*?)\n```")
+	blocks := codeBlockRe.FindAllStringSubmatch(text, -1)
+
+	for _, block := range blocks {
+		content := strings.TrimSpace(block[1])
+		// Try to parse the whole block as one JSON object
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &data); err == nil {
+			if _, ok := data["name"].(string); ok {
+				results = append(results, processToolData(data))
 			}
+		} else {
+			// If not a single object, maybe multiple objects in the block?
+			results = append(results, extractJsonObjects(content)...)
 		}
 	}
 
-	// Try <tool_code>name</tool_code> format
-	re := `<tool_code>\s*(\w+)\s*</tool_code>`
-	if r, err := regexp.Compile(re); err == nil {
-		matches := r.FindAllStringSubmatch(text, -1)
-		for _, m := range matches {
+	// If no tools found in code blocks, search the whole text for { ... } blobs
+	if len(results) == 0 {
+		results = append(results, extractJsonObjects(text)...)
+	}
+
+	// Safety fallback for the specific [TOOL_CALL] format
+	if len(results) == 0 {
+		toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
+		tcMatches := toolCallRe.FindAllStringSubmatch(text, -1)
+		for _, m := range tcMatches {
 			if len(m) > 1 {
-				results = append(results, map[string]interface{}{"name": m[1], "arguments": map[string]interface{}{}})
-			}
-		}
-	}
-
-	// Try "call: tool_name" or "execute: tool_name" format
-	for _, line := range lines {
-		lower := strings.ToLower(strings.TrimSpace(line))
-		if strings.HasPrefix(lower, "call:") || strings.HasPrefix(lower, "execute:") || strings.HasPrefix(lower, "tool_call:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) > 1 {
-				name := strings.TrimSpace(parts[1])
-				name = strings.Trim(name, "() ")
-				if name != "" {
-					results = append(results, map[string]interface{}{"name": name, "arguments": map[string]interface{}{}})
+				nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
+				if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
+					results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
 				}
 			}
 		}
@@ -787,32 +881,79 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 	return results
 }
 
+// extractJsonObjects finds all balanced { ... } strings and tries to parse them as tool calls
+func extractJsonObjects(text string) []map[string]interface{} {
+	var results []map[string]interface{}
+	startIdx := -1
+	braceCount := 0
+
+	for i, char := range text {
+		if char == '{' {
+			if braceCount == 0 {
+				startIdx = i
+			}
+			braceCount++
+		} else if char == '}' {
+			if braceCount > 0 {
+				braceCount--
+				if braceCount == 0 && startIdx != -1 {
+					potentialJson := text[startIdx : i+1]
+					var data map[string]interface{}
+					if err := json.Unmarshal([]byte(potentialJson), &data); err == nil {
+						if _, ok := data["name"].(string); ok {
+							results = append(results, processToolData(data))
+						}
+					}
+				}
+			}
+		}
+	}
+	return results
+}
+
+func processToolData(data map[string]interface{}) map[string]interface{} {
+	name, _ := data["name"].(string)
+	args := make(map[string]interface{})
+	if a, ok := data["arguments"].(map[string]interface{}); ok {
+		args = a
+	} else if a, ok := data["args"].(map[string]interface{}); ok {
+		args = a
+	}
+
+	// Clean up string arguments
+	for k, v := range args {
+		if s, ok := v.(string); ok {
+			s = strings.ReplaceAll(s, "\\u0026", "&")
+			s = strings.ReplaceAll(s, "&#38;", "&")
+			s = strings.ReplaceAll(s, "&amp;", "&")
+			args[k] = s
+		}
+	}
+	return map[string]interface{}{"name": name, "arguments": args}
+}
+
 func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 	toolCalls := extractAllToolCalls(text)
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
 
-	// Check if the response is primarily tool calls (JSON format at start)
-	lines := strings.Split(text, "\n")
-	nonToolText := 0
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "{") && strings.Contains(line, "\"name\":") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") || strings.HasPrefix(line, "]") {
-			continue
-		}
-		nonToolText++
+	trimmed := strings.TrimSpace(text)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "```json") || strings.HasPrefix(trimmed, "```\n{") {
+		return toolCalls, true
 	}
 
-	// If there's a lot of explanatory text, don't execute tool calls
-	if nonToolText > 3 && !strings.HasPrefix(strings.TrimSpace(text), "{") {
+	lines := strings.Split(text, "\n")
+	nonToolLines := 0
+	for _, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "```") || strings.HasPrefix(trimmedLine, "}") || strings.HasPrefix(trimmedLine, "{") || strings.Contains(trimmedLine, "\"name\":") {
+			continue
+		}
+		nonToolLines++
+	}
+
+	if nonToolLines > 5 {
 		return toolCalls, false
 	}
 

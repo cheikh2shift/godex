@@ -4,6 +4,8 @@
 
 ![GoDex Screenshot](screen.gif)
 
+![GoDex TUI](screen2.png)
+
 GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
 
 ## Requirements
@@ -175,14 +177,23 @@ curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh |
 ### Run
 
 ```bash
-# Run the CLI
+# Run the CLI (uses default provider from config)
 godex
 
-# Run with custom config
+# Run with custom config file
 godex --config /path/to/providers.yaml
+
+# Run with specific provider (must exist in config)
+godex --provider ollama
+
+# Run with custom config and specific provider
+godex --config /path/to/providers.yaml --provider gemini
 
 # Run a single prompt (non-interactive)
 godex --prompt "list files in current directory"
+
+# Run wizard to create config
+godex --wizard
 ```
 
 ### Commands in TUI
@@ -213,5 +224,10 @@ MCP Servers: 2
 go build -o godex ./cmd/godex
 ./godex
 ```
+
+---
+
+For developers: [DEV.md](DEV.md) - Guide to adding new MCP servers and providers
+
 
 
