@@ -789,15 +789,22 @@ func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provid
 
 	fmt.Printf("[Session] Saving %d entries...\n", len(entries))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	var promptBuilder strings.Builder
-	promptBuilder.WriteString("Create the shortest possible summary (1-2 sentences max) of what was accomplished in this session:\n\n")
+	promptBuilder.WriteString("Create a comprehensive summary of this session. Include:\n")
+	promptBuilder.WriteString("1. What the user asked for\n")
+	promptBuilder.WriteString("2. What tools were used and what they revealed\n")
+	promptBuilder.WriteString("3. Key findings, decisions, or code that was written\n")
+	promptBuilder.WriteString("4. Any errors encountered and how they were resolved\n\n")
+	promptBuilder.WriteString("Be thorough - this will be used as context for future sessions.\n\n")
+	promptBuilder.WriteString("Session transcript:\n\n")
 	for _, e := range entries {
-		promptBuilder.WriteString(fmt.Sprintf("Q: %s\nA: %s\n\n", e.Prompt, truncate(e.Response, 150)))
+		promptBuilder.WriteString(fmt.Sprintf("User: %s\n", e.Prompt))
+		promptBuilder.WriteString(fmt.Sprintf("Response: %s\n\n", e.Response))
 	}
-	promptBuilder.WriteString("\nRespond with ONLY the summary sentence(s), no preamble.")
+	promptBuilder.WriteString("\nProvide a detailed summary covering all the above points.")
 
 	summary, err := agent.SendPrompt(ctx, provider, promptBuilder.String())
 	if err != nil {
