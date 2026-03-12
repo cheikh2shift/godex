@@ -154,6 +154,22 @@ func main() {
 			break
 		}
 
+		// Handle multiline paste: check if input already contains newlines (paste captured full text)
+		// If not a command (doesn't start with /), wait briefly for more input
+		accumulated := input
+
+		// If input already has newlines, it's a multiline paste - use as-is
+		if !strings.Contains(input, "\n") && !strings.HasPrefix(input, "/") {
+			// Wait and check for more input (for cases where liner only got first line)
+			time.Sleep(150 * time.Millisecond)
+			moreInput, err := rl.Prompt("... ")
+			if err == nil && moreInput != "" {
+				accumulated = accumulated + "\n" + moreInput
+			}
+		}
+
+		input = accumulated
+
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
@@ -637,6 +653,11 @@ Commands:
   /clear            - Clear the terminal
   /exit, /quit     - Exit the program
   /help            - Show this help
+
+Tips:
+  - Paste multiline text - waits for more input automatically
+  - Up/Down arrows for command history
+  - Tab to autocomplete / commands
 
 Available MCP tools:
   filesystem:

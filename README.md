@@ -223,4 +223,9 @@ go build -o godex ./cmd/godex
 ./godex
 ```
 
+---
+
+For developers: [DEV.md](DEV.md) - Guide to adding new MCP servers and providers
+
+
 
