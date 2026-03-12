@@ -1,10 +1,14 @@
+**NOTICE** : Please help me identify any security issues with this program.
+
 # GoDex - AI-Powered CLI Agent
+
+![GoDex Screenshot](screen.png)
 
 GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
 
 ## Requirements
 
-- **Go 1.21+** - Build from source
+- **Go 1.25.7+** - Build from source
 - **Ollama** - For the default LLM backend (or use Gemini)
 
 ### Ollama Setup
@@ -48,12 +52,12 @@ providers:
   - name: ollama
     type: ollama
     endpoint: http://localhost:11434
-    model: codeqwen
+    model: minimax-m2.5:cloud
     description: Ollama with codeqwen
     temperature: 0.2
     mcp_servers:
-      - name: filesystem
-      - name: bash
+      - name: filesystem # enable file exploring
+      - name: bash # enable command execution
 
 default_provider: ollama
 ```

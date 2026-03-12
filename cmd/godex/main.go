@@ -210,7 +210,14 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No tool calls - print final response and stop
 				if strings.TrimSpace(resp) != "" {
-					fmt.Printf("%s\n", resp)
+					// Check for FINAL_ANSWER marker
+					finalResp := resp
+					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
+						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
+						fmt.Printf("\n\n%s\n", finalResp)
+					} else {
+						fmt.Printf("%s\n", resp)
+					}
 				}
 				// Save to session
 				sessionEntries = append(sessionEntries, sessionEntry{
@@ -252,14 +259,13 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 				}
 			}
 
-			// If there was an error, stop here
+			// Continue even if there were errors - send results to LLM
 			if hasError {
-				fmt.Printf("\nTool execution had errors. Stopping.\n")
-				break
+				fmt.Printf("\n[Some tools had errors, asking LLM to handle...]\n")
 			}
 
-			// Ask for final answer with all tool results
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nIMPORTANT: Provide the final answer now. Do NOT make more tool calls.", input, strings.Join(toolResults, "\n---\n"))
+			// Ask for final answer with all tool results (including errors)
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nIf any tools failed, either retry with corrected arguments or explain the error. Provide the final answer now.", input, strings.Join(toolResults, "\n---\n"))
 		}
 	}
 
