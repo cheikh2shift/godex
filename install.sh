@@ -2,7 +2,7 @@
 
 set -e
 
-REPO="cheikh-seck/godex"
+REPO="cheikh2shift/godex"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="godex"
 

@@ -38,15 +38,24 @@ GoDex reads provider configuration from `~/.godex/providers.yaml`.
 
 ## Installation
 
+### Build from Source
+
+```bash
+git clone https://github.com/cheikh2shift/godex.git
+cd godex
+go build -o godex ./cmd/godex
+sudo mv godex /usr/local/bin/
+```
+
 ### Quick Install (Linux/macOS)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/cheikh-seck/godex/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
 ```
 
 ### Manual Download
 
-Download the latest release from [GitHub Releases](https://github.com/cheikh-seck/godex/releases):
+Download from [GitHub Releases](https://github.com/cheikh2shift/godex/releases):
 
 | OS | Architecture | File |
 |----|-------------|------|
@@ -59,12 +68,17 @@ Download the latest release from [GitHub Releases](https://github.com/cheikh-sec
 Example:
 ```bash
 # Linux
-curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-linux-amd64
+curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-linux-amd64
 chmod +x godex
 sudo mv godex /usr/local/bin/
 
-# macOS
-curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-darwin-arm64
+# macOS (Intel)
+curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-darwin-amd64
+chmod +x godex
+sudo mv godex /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-darwin-arm64
 chmod +x godex
 sudo mv godex /usr/local/bin/
 ```
@@ -145,12 +159,12 @@ mcp_servers:
 ### Quick Install
 
 ```bash
-# Linux/macOS
-curl -sSL https://raw.githubusercontent.com/cheikh-seck/godex/main/install.sh | sh
-
-# Or build from source
+# Build from source (recommended)
 go build -o godex ./cmd/godex
 sudo mv godex /usr/local/bin/
+
+# Or use install script (requires release)
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
 ```
 
 ### Run
