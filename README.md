@@ -142,15 +142,28 @@ mcp_servers:
 
 ## Usage
 
+### Quick Install
+
+```bash
+# Linux/macOS
+curl -sSL https://raw.githubusercontent.com/cheikh-seck/godex/main/install.sh | sh
+
+# Or build from source
+go build -o godex ./cmd/godex
+sudo mv godex /usr/local/bin/
+```
+
+### Run
+
 ```bash
 # Run the CLI
-go run ./cmd/godex
+godex
 
 # Run with custom config
-go run ./cmd/godex --config /path/to/providers.yaml
+godex --config /path/to/providers.yaml
 
 # Run a single prompt (non-interactive)
-go run ./cmd/godex --prompt "list files in current directory"
+godex --prompt "list files in current directory"
 ```
 
 ### Commands in TUI
@@ -166,7 +179,7 @@ go run ./cmd/godex --prompt "list files in current directory"
 ### Example Session
 
 ```
-$ go run ./cmd/godex
+$ godex
 GoDex - Connected to ollama (codeqwen)
 MCP Servers: 2
 
