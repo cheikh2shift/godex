@@ -20,11 +20,11 @@ GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) throug
    ollama serve
    ```
 
-3. **Pull a model** (recommended: codeqwen or codellama):
+3. **Pull a model** (recommended: codeqwen or minimax-m2.5:cloud):
    ```bash
    ollama pull codeqwen
    # or
-   ollama pull codellama
+   ollama pull minimax-m2.5:cloud
    ```
 
 4. **Verify Ollama is running**:
