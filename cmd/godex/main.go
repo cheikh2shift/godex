@@ -18,6 +18,7 @@ import (
 	"github.com/cheikh-seck/godex/internal/config"
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
 	"github.com/cheikh-seck/godex/internal/mcp"
+	"github.com/cheikh-seck/godex/internal/wizard"
 
 	"github.com/peterh/liner"
 )
@@ -56,14 +57,16 @@ func main() {
 	}
 
 	flag.StringVar(&configPath, "config", filepath.Join(home, ".godex", defaultConfigFile), "provider configuration YAML")
-	flag.StringVar(&providerName, "provider", "", "provider entry to use (defaults to configured default or first provider)")
+	flag.StringVar(&providerName, "provider", "", "provider name to use (defaults to configured default or first provider)")
 	flag.BoolVar(&runWizard, "wizard", false, "launch the provider configuration wizard")
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
 	flag.Parse()
 
 	if runWizard {
-		fmt.Println("Run with: godex --wizard")
+		if err := wizard.RunWizard(configPath); err != nil {
+			log.Fatalf("wizard failed: %v", err)
+		}
 		return
 	}
 
@@ -80,7 +83,11 @@ func main() {
 		if p := cfg.ProviderByName(providerName); p != nil {
 			provider = p
 		} else {
-			log.Fatalf("provider %q not found", providerName)
+			var available []string
+			for _, p := range cfg.Providers {
+				available = append(available, p.Name)
+			}
+			log.Fatalf("provider %q not found. Available: %v", providerName, available)
 		}
 	}
 	if provider == nil {

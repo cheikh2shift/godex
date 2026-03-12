@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultOllamaModel = "codeqwen:chat"
+	DefaultOllamaModel = "minimax-m2.5:cloud"
 	defaultOllamaBase  = "http://localhost:11434"
 	ollamaKeepAlive    = "30m"
 )

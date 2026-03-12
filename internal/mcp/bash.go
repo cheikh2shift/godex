@@ -30,8 +30,8 @@ func NewBashServer(allowedPaths []string) *BashServer {
 		tools: []Tool{
 			{
 				Name:        "run_command",
-				Description: "Run a shell command and return its output",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"}},"required":["command"]}`),
+				Description: "Run a shell command and return its output. Use background: true to run in background with nohup.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"},"background":{"type":"boolean","description":"Run in background using nohup (default false)"}},"required":["command"]}`),
 			},
 			{
 				Name:        "run_python",
@@ -85,6 +85,25 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 	timeout := 60
 	if t, ok := args["timeout"].(float64); ok {
 		timeout = int(t)
+	}
+
+	background := false
+	if b, ok := args["background"].(bool); ok {
+		background = b
+	}
+
+	// Run in background with nohup
+	if background {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+		defer cancel()
+
+		// Use nohup to run in background, redirect output to nohup.out
+		cmd := exec.CommandContext(ctx, "sh", "-c", "nohup "+command+" > nohup.out 2>&1 &")
+		err := cmd.Start()
+		if err != nil {
+			return "", fmt.Errorf("failed to start background command: %v", err)
+		}
+		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", cmd.Process.Pid), nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
