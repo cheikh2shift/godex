@@ -116,6 +116,12 @@ func main() {
 		fmt.Println("[Session] Loaded previous session context")
 	}
 
+	// Load AGENTS.md if present
+	agentsContext := loadAgentsFile(wd)
+	if agentsContext != "" {
+		fmt.Println("[Agents] Loaded AGENTS.md")
+	}
+
 	rl := NewLiner()
 	defer rl.Close()
 
@@ -167,11 +173,13 @@ func main() {
 		}
 
 		toolsDesc := getToolsDescription(servers)
-		wd, _ := os.Getwd()
 
 		sessionContext := ""
 		if prevSession != "" {
 			sessionContext = fmt.Sprintf("\n\nPrevious session summary:\n%s\n", prevSession)
+		}
+		if agentsContext != "" {
+			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
 		}
 
 		fullPrompt := fmt.Sprintf(`You have access to these tools:
@@ -758,6 +766,15 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 func loadPreviousSession(cwd string) string {
 	sessionPath := filepath.Join(cwd, ".godex", sessionFileName)
 	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func loadAgentsFile(cwd string) string {
+	agentsPath := filepath.Join(cwd, "AGENTS.md")
+	data, err := os.ReadFile(agentsPath)
 	if err != nil {
 		return ""
 	}
