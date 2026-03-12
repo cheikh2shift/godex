@@ -137,7 +137,14 @@ func main() {
 	var sessionEntries []sessionEntry
 
 	for {
-		input, err := rl.Prompt("> ")
+		// Show prompt with background process count
+		bgCount := getBgCount(servers)
+		prompt := "> "
+		if bgCount > 0 {
+			prompt = fmt.Sprintf("[%d bg] ", bgCount)
+		}
+
+		input, err := rl.Prompt(prompt)
 		if err != nil {
 			if err == liner.ErrPromptAborted {
 				fmt.Println("\n[Cancelled]")
@@ -162,6 +169,14 @@ func main() {
 		if input == "/save" || input == "/save-exit" {
 			saveSessionSync(wd, sessionEntries, provider)
 			break
+		}
+		if input == "/killbg" {
+			handleKillBg(servers)
+			continue
+		}
+		if input == "/bg" {
+			handleListBg(servers)
+			continue
 		}
 		if input == "/help" {
 			printHelp()
@@ -546,6 +561,45 @@ func handleTools(servers []MCPServer) {
 	}
 }
 
+func handleKillBg(servers []MCPServer) {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			result, err := bs.KillAllBackground()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println(result)
+			}
+			return
+		}
+	}
+	fmt.Println("No bash server found")
+}
+
+func handleListBg(servers []MCPServer) {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			result, err := bs.ListBackground()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println(result)
+			}
+			return
+		}
+	}
+	fmt.Println("No bash server found")
+}
+
+func getBgCount(servers []MCPServer) int {
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			return bs.BackgroundCount()
+		}
+	}
+	return 0
+}
+
 func printHelp() {
 	fmt.Println(`
 Commands:
@@ -553,8 +607,10 @@ Commands:
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
   /save, /save-exit - Save session and exit
-  /exit, /quit      - Exit the program
-  /help             - Show this help
+  /killbg           - Kill all background processes
+  /bg               - List background processes
+  /exit, /quit     - Exit the program
+  /help            - Show this help
 
 Available MCP tools:
   filesystem:
@@ -608,7 +664,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/help"}
 
 func NewLiner() *liner.State {
 	l := liner.NewLiner()
