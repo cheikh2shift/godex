@@ -144,7 +144,7 @@ func main() {
 		bgCount := getBgCount(servers)
 		prompt := "> "
 		if bgCount > 0 {
-			prompt = fmt.Sprintf("[%d bg] ", bgCount)
+			prompt = fmt.Sprintf("[%d bg] >", bgCount)
 		}
 
 		input, err := rl.Prompt(prompt)
