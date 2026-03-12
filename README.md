@@ -66,18 +66,23 @@ Download from [GitHub Releases](https://github.com/cheikh2shift/godex/releases):
 | Windows | AMD64 | `godex-windows-amd64.exe` |
 
 Example:
+
+**Linux (AMD64):**
 ```bash
-# Linux
 curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-linux-amd64
 chmod +x godex
 sudo mv godex /usr/local/bin/
+```
 
-# macOS (Intel)
+**macOS (Intel):**
+```bash
 curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-darwin-amd64
 chmod +x godex
 sudo mv godex /usr/local/bin/
+```
 
-# macOS (Apple Silicon)
+**macOS (Apple Silicon):**
+```bash
 curl -L -o godex https://github.com/cheikh2shift/godex/releases/latest/download/godex-darwin-arm64
 chmod +x godex
 sudo mv godex /usr/local/bin/
