@@ -142,6 +142,10 @@ func main() {
 		if input == "/exit" || input == "/quit" {
 			break
 		}
+		if input == "/save" || input == "/save-exit" {
+			saveSessionAsync(home, sessionEntries, provider)
+			break
+		}
 		if input == "/help" {
 			printHelp()
 			continue
@@ -214,7 +218,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 					finalResp := resp
 					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
 						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
-						fmt.Printf("\n\n%s\n", finalResp)
+						fmt.Printf("\n\n========================================\n%s\n", finalResp)
 					} else {
 						fmt.Printf("%s\n", resp)
 					}
@@ -268,9 +272,6 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nIf any tools failed, either retry with corrected arguments or explain the error. Provide the final answer now.", input, strings.Join(toolResults, "\n---\n"))
 		}
 	}
-
-	// Save session summary on exit (async)
-	saveSessionAsync(home, sessionEntries, provider)
 
 	cleanup(servers)
 	fmt.Println("Goodbye!")
@@ -437,8 +438,9 @@ Commands:
   /add-path <path>  - Add allowed path to MCP filesystem server
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
-  /exit, /quit     - Exit the program
-  /help            - Show this help
+  /save, /save-exit - Save session and exit
+  /exit, /quit      - Exit the program
+  /help             - Show this help
 
 Available MCP tools:
   filesystem:
@@ -486,7 +488,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/help"}
 
 func NewLiner() *liner.State {
 	l := liner.NewLiner()

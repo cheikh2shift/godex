@@ -2,7 +2,7 @@
 
 # GoDex - AI-Powered CLI Agent
 
-![GoDex Screenshot](screen.png)
+![GoDex Screenshot](screen.gif)
 
 GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
 
@@ -35,6 +35,39 @@ GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) throug
 ## Configuration
 
 GoDex reads provider configuration from `~/.godex/providers.yaml`.
+
+## Installation
+
+### Quick Install (Linux/macOS)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh-seck/godex/main/install.sh | sh
+```
+
+### Manual Download
+
+Download the latest release from [GitHub Releases](https://github.com/cheikh-seck/godex/releases):
+
+| OS | Architecture | File |
+|----|-------------|------|
+| Linux | AMD64 | `godex-linux-amd64` |
+| Linux | ARM64 | `godex-linux-arm64` |
+| macOS | AMD64 | `godex-darwin-amd64` |
+| macOS | ARM64 | `godex-darwin-arm64` |
+| Windows | AMD64 | `godex-windows-amd64.exe` |
+
+Example:
+```bash
+# Linux
+curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-linux-amd64
+chmod +x godex
+sudo mv godex /usr/local/bin/
+
+# macOS
+curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-darwin-arm64
+chmod +x godex
+sudo mv godex /usr/local/bin/
+```
 
 ### Quick Setup
 
@@ -141,3 +174,5 @@ MCP Servers: 2
 go build -o godex ./cmd/godex
 ./godex
 ```
+
+
