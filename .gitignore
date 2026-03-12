@@ -1,0 +1,15 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+# Editor/IDE
+.vscode/
+.DS_Store
+# Generated agent state
+/gtext/
+# User provider config (might contain secrets)
+/.godex/providers.yaml
+.git/
+.gtree

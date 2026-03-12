@@ -1,0 +1,258 @@
+package agent
+
+import (
+	"fmt"
+	"strings"
+
+	projectctx "github.com/cheikh-seck/godex/internal/context"
+)
+
+const (
+	toolIntroFmt = `You have access to MCP tools. Use them to accomplish tasks.
+
+When you need to read files, use the read tool.
+When you need to search code, use the grep tool.
+When you need to run shell commands, use the bash tool.
+When you need to create or edit files, use the write tool.
+
+After writing code, use appropriate tooling to run/lint the source code you generate (e.g., "go build ./...", "go vet ./...", "golangci-lint run", etc.).
+
+Project tree:
+%s
+
+User prompt:
+%s`
+	toolFollowupFmt = "Here are the tool results:\n%s\n\nProvide the final answer."
+)
+
+type ToolRequest struct {
+	Reads       []string
+	Greps       []projectctx.GrepRequest
+	Tree        bool
+	Description string
+}
+
+func ToolIntroPrompt(prompt, tree string) string {
+	if strings.TrimSpace(tree) == "" {
+		tree = "(tree unavailable)"
+	}
+	return fmt.Sprintf(toolIntroFmt, tree, prompt)
+}
+
+func ToolFollowupPrompt(excerpts string) string {
+	return fmt.Sprintf(toolFollowupFmt, excerpts)
+}
+
+func ParseToolRequests(text string) (ToolRequest, bool) {
+	lines := strings.Split(text, "\n")
+	req := ToolRequest{}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case lower == "tree":
+			req.Tree = true
+		case strings.HasPrefix(lower, "read:") || strings.HasPrefix(lower, "request:"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			req.Reads = append(req.Reads, splitList(parts[1])...)
+		case strings.HasPrefix(lower, "grep:"):
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			spec := strings.TrimSpace(parts[1])
+			if pattern, paths, ok := parseGrepSpec(spec); ok {
+				req.Greps = append(req.Greps, projectctx.GrepRequest{Pattern: pattern, Paths: paths})
+				continue
+			}
+			if looksLikePath(spec) {
+				req.Reads = append(req.Reads, spec)
+			}
+		}
+	}
+
+	if len(req.Reads) == 0 && len(req.Greps) == 0 && !req.Tree {
+		return ToolRequest{}, false
+	}
+
+	var descParts []string
+	if req.Tree {
+		descParts = append(descParts, "TREE")
+	}
+	if len(req.Reads) > 0 {
+		descParts = append(descParts, fmt.Sprintf("READ: %s", strings.Join(req.Reads, ", ")))
+	}
+	for _, grep := range req.Greps {
+		descParts = append(descParts, fmt.Sprintf("GREP: %s | %s", grep.Pattern, strings.Join(grep.Paths, ", ")))
+	}
+	req.Description = strings.Join(descParts, " | ")
+	return req, true
+}
+
+func parseGrepSpec(spec string) (string, []string, bool) {
+	pieces := strings.SplitN(spec, "|", 2)
+	if len(pieces) < 2 {
+		return "", nil, false
+	}
+	left := strings.TrimSpace(pieces[0])
+	right := strings.TrimSpace(pieces[1])
+	if left == "" || right == "" {
+		return "", nil, false
+	}
+
+	if looksLikePath(left) && looksLikeGrepCommand(right) {
+		if extracted := extractGrepPattern(right); extracted != "" {
+			return extracted, []string{left}, true
+		}
+	}
+
+	pattern := left
+	paths := filterPaths(splitList(right))
+	if pattern == "" || len(paths) == 0 {
+		return "", nil, false
+	}
+	if looksLikeGrepCommand(pattern) {
+		return "", nil, false
+	}
+	return pattern, paths, true
+}
+
+func looksLikePath(value string) bool {
+	if strings.ContainsAny(value, " \t") {
+		return false
+	}
+	return strings.Contains(value, "/") || strings.Contains(value, ".")
+}
+
+func looksLikeGrepCommand(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "grep") || strings.Contains(lower, "rg ") || strings.Contains(lower, "ripgrep")
+}
+
+func extractGrepPattern(value string) string {
+	if extracted := extractQuoted(value); extracted != "" {
+		return extracted
+	}
+	lower := strings.ToLower(value)
+	if idx := strings.Index(lower, "grep"); idx >= 0 {
+		rest := strings.TrimSpace(value[idx+4:])
+		rest = strings.TrimLeft(rest, "-n ")
+		if rest != "" {
+			return strings.Fields(rest)[0]
+		}
+	}
+	return ""
+}
+
+func extractQuoted(value string) string {
+	for _, quote := range []string{"'", `"`} {
+		if start := strings.Index(value, quote); start >= 0 {
+			if end := strings.Index(value[start+1:], quote); end >= 0 {
+				return value[start+1 : start+1+end]
+			}
+		}
+	}
+	return ""
+}
+
+func filterPaths(paths []string) []string {
+	var out []string
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if looksLikeGrepCommand(p) || strings.Contains(p, "|") {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func ExtractCommandsFromResponse(text string) []string {
+	return extractCommandBlocks(text)
+}
+
+func ExtractCommandFromResponse(text string) (string, bool) {
+	commands := extractCommandBlocks(text)
+	if len(commands) == 0 {
+		return "", false
+	}
+	return commands[0], true
+}
+
+func extractCommandBlocks(text string) []string {
+	lines := strings.Split(text, "\n")
+	var commands []string
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		lower := strings.ToLower(trimmed)
+		prefix := ""
+		for _, p := range []string{"run:", "command:", "execute:"} {
+			if strings.HasPrefix(lower, p) {
+				prefix = p
+				break
+			}
+		}
+		if prefix == "" {
+			continue
+		}
+		command := strings.TrimSpace(trimmed[len(prefix):])
+		if command == "" {
+			continue
+		}
+		marker := heredocMarker(command)
+		if marker == "" {
+			commands = append(commands, command)
+			continue
+		}
+		var block strings.Builder
+		block.WriteString(command)
+		block.WriteString("\n")
+		for j := i + 1; j < len(lines); j++ {
+			block.WriteString(lines[j])
+			block.WriteString("\n")
+			if strings.TrimSpace(lines[j]) == marker {
+				i = j
+				break
+			}
+		}
+		commands = append(commands, strings.TrimRight(block.String(), "\n"))
+	}
+	return commands
+}
+
+func heredocMarker(command string) string {
+	idx := strings.Index(command, "<<")
+	if idx == -1 {
+		return ""
+	}
+	rest := strings.TrimSpace(command[idx+2:])
+	if rest == "" {
+		return ""
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	marker := strings.Trim(fields[0], "'\"")
+	if marker == "" {
+		return ""
+	}
+	return marker
+}
+
+func splitList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	var out []string
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
