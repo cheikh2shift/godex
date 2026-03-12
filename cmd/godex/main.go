@@ -706,16 +706,99 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	tree, _ := godexcontext.BuildTree(".")
 	fullPrompt := agent.ToolIntroPrompt(prompt, tree)
 
-	resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
-		fmt.Print(think)
-	})
-	if err != nil {
-		return err
+	// Get tool settings
+	maxToolRounds := 10
+	if provider.MaxToolRounds != nil {
+		maxToolRounds = *provider.MaxToolRounds
+	}
+	toolTimeout := 180
+	if provider.ToolTimeout != nil {
+		toolTimeout = *provider.ToolTimeout
 	}
 
-	fmt.Println(resp)
+	input := prompt
+
+	for round := 0; round < maxToolRounds; round++ {
+		resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
+			fmt.Print(think)
+		})
+		if err != nil {
+			return err
+		}
+
+		// Only execute tool calls if response is primarily tool calls (JSON format)
+		toolCalls, isToolCallResponse := shouldExecuteToolCall(resp)
+
+		fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+
+		if !isToolCallResponse || len(toolCalls) == 0 {
+			// No tool calls - print final response and stop
+			if strings.TrimSpace(resp) != "" {
+				// Check for FINAL_ANSWER marker
+				if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
+					finalResp := strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
+					fmt.Printf("\n\n========================================\n%s\n", finalResp)
+				} else {
+					fmt.Printf("%s\n", resp)
+				}
+			}
+			break
+		}
+
+		// Execute all tool calls
+		fmt.Printf("\n")
+		if round == 0 {
+			fmt.Print("\033[90m")
+			fmt.Printf("> %s\n", input)
+			fmt.Printf("%s\n", resp)
+			fmt.Print("\033[0m")
+		}
+		fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
+		var toolResults []string
+		hasError := false
+		for _, tc := range toolCalls {
+			toolName := tc["name"].(string)
+			args := tc["arguments"].(map[string]interface{})
+
+			// Get tool description
+			toolDesc := getToolDescription(servers, toolName)
+			if toolDesc != "" {
+				fmt.Print("\033[90m")
+				fmt.Printf("  %s\n", toolDesc)
+				fmt.Print("\033[0m")
+			}
+
+			var argsStr string
+			for k, v := range args {
+				if argsStr != "" {
+					argsStr += ", "
+				}
+				argsStr += fmt.Sprintf("%s=%v", k, v)
+			}
+			fmt.Printf("[%s] %s\n", toolName, argsStr)
+			result, err := callTool(servers, toolName, args, toolTimeout)
+			if err != nil {
+				errMsg := fmt.Sprintf("ERROR: %v", err)
+				fmt.Printf("  Error: %v\n", err)
+				toolResults = append(toolResults, errMsg)
+				hasError = true
+			} else {
+				toolResults = append(toolResults, truncate(result, 500))
+			}
+		}
+
+		// Continue even if there were errors - send results to LLM
+		if hasError {
+			fmt.Printf("\n[Some tools had errors, asking LLM to handle...]\n")
+		}
+
+		// Ask for final answer with all tool results (including errors)
+		fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:", input, strings.Join(toolResults, "\n---\n"))
+	}
+
 	return nil
 }
+
 
 var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
 
