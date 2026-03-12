@@ -2,7 +2,7 @@
 
 # GoDex - AI-Powered CLI Agent
 
-![GoDex Screenshot](screen.png)
+![GoDex Screenshot](screen.gif)
 
 GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
 
@@ -35,6 +35,39 @@ GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) throug
 ## Configuration
 
 GoDex reads provider configuration from `~/.godex/providers.yaml`.
+
+## Installation
+
+### Quick Install (Linux/macOS)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh-seck/godex/main/install.sh | sh
+```
+
+### Manual Download
+
+Download the latest release from [GitHub Releases](https://github.com/cheikh-seck/godex/releases):
+
+| OS | Architecture | File |
+|----|-------------|------|
+| Linux | AMD64 | `godex-linux-amd64` |
+| Linux | ARM64 | `godex-linux-arm64` |
+| macOS | AMD64 | `godex-darwin-amd64` |
+| macOS | ARM64 | `godex-darwin-arm64` |
+| Windows | AMD64 | `godex-windows-amd64.exe` |
+
+Example:
+```bash
+# Linux
+curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-linux-amd64
+chmod +x godex
+sudo mv godex /usr/local/bin/
+
+# macOS
+curl -L -o godex https://github.com/cheikh-seck/godex/releases/latest/download/godex-darwin-arm64
+chmod +x godex
+sudo mv godex /usr/local/bin/
+```
 
 ### Quick Setup
 
@@ -72,6 +105,8 @@ default_provider: ollama
 | `model` | Model name (e.g., `codeqwen`, `codellama`, `minimax-m2.5:cloud`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
+| `max_tool_rounds` | Max tool call rounds (default: 10) |
+| `tool_timeout` | Tool execution timeout in seconds (default: 180) |
 | `api_key_env` | Environment variable for API key (Gemini) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |
@@ -84,6 +119,7 @@ GoDex includes built-in MCP servers:
 |--------|-------------|
 | `filesystem` | Read, write, list directories, create/delete files |
 | `bash` | Run shell commands, Python, Node.js |
+| `webscraper` | Fetch URLs with JavaScript rendering, search HTML, extract links |
 
 #### Adding Allowed Paths
 
@@ -98,6 +134,10 @@ mcp_servers:
   - name: bash
     allowed_paths:
       - /home/user/project1
+  - name: webscraper
+    allowed_urls:
+      - https://example.com
+      - https://docs.example.com
 ```
 
 ## Usage
@@ -141,3 +181,5 @@ MCP Servers: 2
 go build -o godex ./cmd/godex
 ./godex
 ```
+
+

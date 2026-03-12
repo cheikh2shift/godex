@@ -107,10 +107,19 @@ func main() {
 	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Escape to cancel")
 	fmt.Println("Type your prompt or /help for more options.")
 
-	// Load previous session summary
-	prevSession := loadPreviousSession(home)
+	// Get working directory for session files
+	wd, _ := os.Getwd()
+
+	// Load previous session summary from ./.godex
+	prevSession := loadPreviousSession(wd)
 	if prevSession != "" {
 		fmt.Println("[Session] Loaded previous session context")
+	}
+
+	// Load AGENTS.md if present
+	agentsContext := loadAgentsFile(wd)
+	if agentsContext != "" {
+		fmt.Println("[Agents] Loaded AGENTS.md")
 	}
 
 	rl := NewLiner()
@@ -142,6 +151,10 @@ func main() {
 		if input == "/exit" || input == "/quit" {
 			break
 		}
+		if input == "/save" || input == "/save-exit" {
+			saveSessionSync(wd, sessionEntries, provider)
+			break
+		}
 		if input == "/help" {
 			printHelp()
 			continue
@@ -160,11 +173,13 @@ func main() {
 		}
 
 		toolsDesc := getToolsDescription(servers)
-		wd, _ := os.Getwd()
 
 		sessionContext := ""
 		if prevSession != "" {
 			sessionContext = fmt.Sprintf("\n\nPrevious session summary:\n%s\n", prevSession)
+		}
+		if agentsContext != "" {
+			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
 		}
 
 		fullPrompt := fmt.Sprintf(`You have access to these tools:
@@ -185,12 +200,42 @@ FINAL_ANSWER:
 
 User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 
-		maxToolRounds := 5
+		maxToolRounds := 10
+		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+			maxToolRounds = *provider.MaxToolRounds
+		}
+		toolTimeout := 180 // default 3 minutes
+		if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+			toolTimeout = *provider.ToolTimeout
+		}
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
+
+			// Show loading indicator with timer
+			stopSpinner := make(chan bool)
+			go func() {
+				elapsed := 0
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						elapsed++
+						fmt.Printf("\r\033[90m[%ds]...\033[0m", elapsed)
+					case <-stopSpinner:
+						return
+					}
+				}
+			}()
+
 			resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
 				streamed.WriteString(think)
 			})
+
+			// Stop spinner and clear line
+			stopSpinner <- true
+			fmt.Print("\r               \r")
+
 			if err != nil {
 				fmt.Printf("\nError: %v\n", err)
 				break
@@ -207,6 +252,8 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			// If there's substantial explanatory text, don't treat as tool call
 			toolCalls, isToolCallResponse := shouldExecuteToolCall(resp)
 
+			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No tool calls - print final response and stop
 				if strings.TrimSpace(resp) != "" {
@@ -214,7 +261,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 					finalResp := resp
 					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
 						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
-						fmt.Printf("\n\n%s\n", finalResp)
+						fmt.Printf("\n\n========================================\n%s\n", finalResp)
 					} else {
 						fmt.Printf("%s\n", resp)
 					}
@@ -229,11 +276,13 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 
 			// Execute all tool calls
 			fmt.Printf("\n")
-			fmt.Print("\033[90m")
-			fmt.Printf("> %s\n", input)
-			fmt.Printf("%s\n", resp)
-			fmt.Print("\033[0m")
-			fmt.Printf("[Executing %d tool(s)]\n", len(toolCalls))
+			if round == 0 {
+				fmt.Print("\033[90m")
+				fmt.Printf("> %s\n", input)
+				fmt.Printf("%s\n", resp)
+				fmt.Print("\033[0m")
+			}
+			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 			var toolResults []string
 			hasError := false
 			for _, tc := range toolCalls {
@@ -248,7 +297,7 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
-				result, err := callTool(servers, toolName, args)
+				result, err := callTool(servers, toolName, args, toolTimeout)
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
 					fmt.Printf("  Error: %v\n", err)
@@ -265,12 +314,17 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			}
 
 			// Ask for final answer with all tool results (including errors)
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nIf any tools failed, either retry with corrected arguments or explain the error. Provide the final answer now.", input, strings.Join(toolResults, "\n---\n"))
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:'", input, strings.Join(toolResults, "\n---\n"))
+		}
+
+		// Save session entry for max rounds case
+		if len(sessionEntries) == 0 || sessionEntries[len(sessionEntries)-1].Prompt != input {
+			sessionEntries = append(sessionEntries, sessionEntry{
+				Prompt:   input,
+				Response: "Max tool rounds reached",
+			})
 		}
 	}
-
-	// Save session summary on exit (async)
-	saveSessionAsync(home, sessionEntries, provider)
 
 	cleanup(servers)
 	fmt.Println("Goodbye!")
@@ -334,6 +388,11 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 			fmt.Printf("[MCP]   Type: inline (Go - command execution)\n")
 			fmt.Printf("[MCP]   Allowed paths: %v\n", paths)
 			server = mcp.NewBashServer(paths)
+		} else if serverConfig.Name == "webscraper" || serverConfig.Name == "web" || serverConfig.Name == "browser" {
+			paths = uniqueStrings(paths)
+			fmt.Printf("[MCP]   Type: inline (Go - web scraper with JS rendering)\n")
+			fmt.Printf("[MCP]   Allowed URLs: %v\n", paths)
+			server = mcp.NewWebScraperServer(paths)
 		} else {
 			fmt.Printf("[MCP]   Type: external\n")
 			fmt.Printf("[MCP]   Command: %s %v\n", serverConfig.Command, serverConfig.Args)
@@ -403,7 +462,7 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 			return
 		}
 		fmt.Printf("Added path '%s' to %s\n", path, server.Tools()[0].Name)
-		return
+		//return
 	}
 }
 
@@ -437,8 +496,9 @@ Commands:
   /add-path <path>  - Add allowed path to MCP filesystem server
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
-  /exit, /quit     - Exit the program
-  /help            - Show this help
+  /save, /save-exit - Save session and exit
+  /exit, /quit      - Exit the program
+  /help             - Show this help
 
 Available MCP tools:
   filesystem:
@@ -453,10 +513,16 @@ Available MCP tools:
   bash:
     run_command(command)  - Run a shell command
 
+  webscraper:
+    fetch_url(url)       - Fetch URL with JavaScript rendering
+    search_html(html, selector, text) - Search HTML content
+    get_links(html)      - Extract all links from HTML
+
 Examples:
   > read_file /home/user/project/main.go
   > write_file /home/user/project/test.txt "Hello World"
-  > run_command "ls -la"`)
+  > run_command "ls -la"
+  > fetch_url "https://example.com"`)
 }
 
 func uniqueStrings(input []string) []string {
@@ -486,7 +552,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/help"}
 
 func NewLiner() *liner.State {
 	l := liner.NewLiner()
@@ -586,11 +652,13 @@ func parseArgs(argsStr string) map[string]interface{} {
 	return args
 }
 
-func callTool(servers []MCPServer, name string, args map[string]interface{}) (string, error) {
+func callTool(servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
 			if tool.Name == name {
-				return server.CallTool(context.Background(), name, args)
+				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
+				defer cancel()
+				return server.CallTool(ctx, name, args)
 			}
 		}
 	}
@@ -695,8 +763,8 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 	return toolCalls, true
 }
 
-func loadPreviousSession(home string) string {
-	sessionPath := filepath.Join(home, ".godex", sessionFileName)
+func loadPreviousSession(cwd string) string {
+	sessionPath := filepath.Join(cwd, ".godex", sessionFileName)
 	data, err := os.ReadFile(sessionPath)
 	if err != nil {
 		return ""
@@ -704,32 +772,55 @@ func loadPreviousSession(home string) string {
 	return strings.TrimSpace(string(data))
 }
 
-func saveSessionAsync(home string, entries []sessionEntry, provider *config.Provider) {
+func loadAgentsFile(cwd string) string {
+	agentsPath := filepath.Join(cwd, "AGENTS.md")
+	data, err := os.ReadFile(agentsPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provider) {
 	if len(entries) == 0 {
+		fmt.Println("[Session] No entries to save")
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	fmt.Printf("[Session] Saving %d entries...\n", len(entries))
 
-		var promptBuilder strings.Builder
-		promptBuilder.WriteString("Create the shortest possible summary (1-2 sentences max) of what was accomplished in this session:\n\n")
-		for _, e := range entries {
-			promptBuilder.WriteString(fmt.Sprintf("Q: %s\nA: %s\n\n", e.Prompt, truncate(e.Response, 150)))
-		}
-		promptBuilder.WriteString("\nRespond with ONLY the summary sentence(s), no preamble.")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-		summary, err := agent.SendPrompt(ctx, provider, promptBuilder.String())
-		if err != nil {
-			fmt.Printf("[Session] Failed to get summary: %v\n", err)
-			return
-		}
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("Create a comprehensive summary of this session. Include:\n")
+	promptBuilder.WriteString("1. What the user asked for\n")
+	promptBuilder.WriteString("2. What tools were used and what they revealed\n")
+	promptBuilder.WriteString("3. Key findings, decisions, or code that was written\n")
+	promptBuilder.WriteString("4. Any errors encountered and how they were resolved\n\n")
+	promptBuilder.WriteString("Be thorough - this will be used as context for future sessions.\n\n")
+	promptBuilder.WriteString("Session transcript:\n\n")
+	for _, e := range entries {
+		promptBuilder.WriteString(fmt.Sprintf("User: %s\n", e.Prompt))
+		promptBuilder.WriteString(fmt.Sprintf("Response: %s\n\n", e.Response))
+	}
+	promptBuilder.WriteString("\nProvide a detailed summary covering all the above points.")
 
-		sessionPath := filepath.Join(home, ".godex", sessionFileName)
-		err = os.WriteFile(sessionPath, []byte(summary), 0644)
-		if err != nil {
-			fmt.Printf("[Session] Failed to save session: %v\n", err)
-		}
-	}()
+	summary, err := agent.SendPrompt(ctx, provider, promptBuilder.String())
+	if err != nil {
+		fmt.Printf("[Session] Failed to get summary: %v\n", err)
+		return
+	}
+
+	sessionPath := filepath.Join(cwd, ".godex", sessionFileName)
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0755); err != nil {
+		fmt.Printf("[Session] Failed to create directory: %v\n", err)
+		return
+	}
+	err = os.WriteFile(sessionPath, []byte(summary), 0644)
+	if err != nil {
+		fmt.Printf("[Session] Failed to save session: %v\n", err)
+	} else {
+		fmt.Printf("[Session] Saved to %s\n", sessionPath)
+	}
 }
