@@ -9,20 +9,25 @@ import (
 
 const (
 	toolIntroFmt = `You have access to MCP tools. Use them to accomplish tasks.
+You can call multiple tools in a single response to be more efficient.
+To call tools, you MUST respond with one or more JSON objects, each in its own markdown code block.
 
-When you need to read files, use the read tool.
-When you need to search code, use the grep tool.
-When you need to run shell commands, use the bash tool.
-When you need to create or edit files, use the write tool.
-
-After writing code, use appropriate tooling to run/lint the source code you generate (e.g., "go build ./...", "go vet ./...", "golangci-lint run", etc.).
+Example:
+` + "```" + `json
+{
+  "name": "read_file",
+  "arguments": {
+    "path": "/absolute/path/to/file"
+  }
+}
+` + "```" + `
 
 Project tree:
 %s
 
 User prompt:
 %s`
-	toolFollowupFmt = "Here are the tool results:\n%s\n\nProvide the final answer."
+	toolFollowupFmt = "Tool results:\n%s\n\nPlease proceed or provide the FINAL_ANSWER if complete."
 )
 
 type ToolRequest struct {
