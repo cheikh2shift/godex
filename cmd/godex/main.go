@@ -178,6 +178,10 @@ func main() {
 			handleListBg(servers)
 			continue
 		}
+		if input == "/clear" {
+			fmt.Print("\033[2J\033[H")
+			continue
+		}
 		if input == "/help" {
 			printHelp()
 			continue
@@ -219,7 +223,9 @@ BASH TOOL LIMITATIONS:
 - Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
 - Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
 - Shell aliases are NOT expanded - use full command names
-- Use background: true to run long-running processes (returns PID immediately)
+- NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
+- ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
+- After starting a background process, use sleep before making requests to it
 - Use kill_command with the PID to stop background processes when done
 
 To call a tool, respond with ONLY a JSON object like:
@@ -358,6 +364,14 @@ User request: %s`, toolsDesc, sessionContext, wd, input, wd, input)
 			for _, tc := range toolCalls {
 				toolName := tc["name"].(string)
 				args := tc["arguments"].(map[string]interface{})
+
+				// Get tool description
+				toolDesc := getToolDescription(servers, toolName)
+				if toolDesc != "" {
+					fmt.Print("\033[90m")
+					fmt.Printf("  %s\n", toolDesc)
+					fmt.Print("\033[0m")
+				}
 
 				var argsStr string
 				for k, v := range args {
@@ -576,6 +590,17 @@ func handleKillBg(servers []MCPServer) {
 	fmt.Println("No bash server found")
 }
 
+func getToolDescription(servers []MCPServer, toolName string) string {
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			if tool.Name == toolName {
+				return tool.Description
+			}
+		}
+	}
+	return ""
+}
+
 func handleListBg(servers []MCPServer) {
 	for _, server := range servers {
 		if bs, ok := server.(*mcp.BashServer); ok {
@@ -609,6 +634,7 @@ Commands:
   /save, /save-exit - Save session and exit
   /killbg           - Kill all background processes
   /bg               - List background processes
+  /clear            - Clear the terminal
   /exit, /quit     - Exit the program
   /help            - Show this help
 
@@ -664,7 +690,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
 
 func NewLiner() *liner.State {
 	l := liner.NewLiner()
