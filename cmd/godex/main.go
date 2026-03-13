@@ -1071,7 +1071,7 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 		nonToolLines++
 	}
 
-	if nonToolLines > 5 {
+	if nonToolLines > 15 {
 		return toolCalls, false
 	}
 
