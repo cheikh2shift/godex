@@ -26,9 +26,9 @@ GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) throug
    ollama serve
    ```
 
-3. **Pull a model** (recommended: codeqwen or minimax-m2.5:cloud):
+3. **Pull a model** (recommended: nemotron-3-super:cloud or minimax-m2.5:cloud):
    ```bash
-   ollama pull codeqwen
+   ollama pull nemotron-3-super:cloud
    # or
    ollama pull minimax-m2.5:cloud
    ```
@@ -127,7 +127,7 @@ default_provider: ollama
 | `name` | Provider identifier |
 | `type` | Provider type: `ollama` or `gemini` |
 | `endpoint` | Ollama URL (e.g., `http://localhost:11434`) |
-| `model` | Model name (e.g., `codeqwen`, `codellama`, `minimax-m2.5:cloud`) |
+| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |
