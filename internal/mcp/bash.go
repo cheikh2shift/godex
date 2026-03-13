@@ -106,6 +106,13 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		background = b
 	}
 
+	// Detect manual background operator (& at end of command)
+	trimmed := strings.TrimSpace(command)
+	if strings.HasSuffix(trimmed, "&") {
+		background = true
+		command = strings.TrimSuffix(trimmed, "&")
+	}
+
 	// Run in background with nohup
 	if background {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
