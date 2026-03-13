@@ -35,6 +35,7 @@ type MCPServer interface {
 	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
 	AllowedPaths() []string
 	AddPath(ctx context.Context, path string) error
+	AddURL(ctx context.Context, url string) error
 	Close() error
 }
 
@@ -550,26 +551,52 @@ func cleanup(servers []MCPServer) {
 }
 
 func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
-	parts := strings.SplitN(input, " ", 2)
-	path := ""
-	if len(parts) > 1 {
-		path = strings.TrimSpace(parts[1])
+	parts := strings.Fields(input)
+	if len(parts) < 3 {
+		fmt.Println("Usage: /add-path <filesys|url> <value>")
+		fmt.Println("  filesys <path> - Add allowed path to filesystem/bash server")
+		fmt.Println("  url <url>      - Add allowed URL to web scraper server")
+		return
 	}
-	if path == "" {
-		fmt.Println("Usage: /add-path <path>")
+	pathType := strings.ToLower(parts[1])
+	value := strings.TrimSpace(strings.Join(parts[2:], " "))
+	if value == "" {
+		fmt.Println("Usage: /add-path <filesys|url> <value>")
 		return
 	}
 	if len(servers) == 0 {
 		fmt.Println("No MCP servers configured")
 		return
 	}
+
+	isURL := pathType == "url"
+	added := false
+
 	for _, server := range servers {
-		if err := server.AddPath(ctx, path); err != nil {
-			fmt.Printf("Error adding path: %v\n", err)
-			return
+		if isURL {
+			if strings.Contains(server.Tools()[0].Name, "web") || strings.Contains(server.Tools()[0].Name, "scraper") || strings.Contains(server.Tools()[0].Name, "fetch") {
+				if err := server.AddURL(ctx, value); err != nil {
+					fmt.Printf("Error adding URL: %v\n", err)
+					return
+				}
+				fmt.Printf("Added URL '%s' to %s\n", value, server.Tools()[0].Name)
+				added = true
+			}
+		} else {
+			if strings.Contains(server.Tools()[0].Name, "file") || strings.Contains(server.Tools()[0].Name, "bash") || strings.Contains(server.Tools()[0].Name, "command") {
+				if err := server.AddPath(ctx, value); err != nil {
+					fmt.Printf("Error adding path: %v\n", err)
+					return
+				}
+				fmt.Printf("Added path '%s' to %s\n", value, server.Tools()[0].Name)
+				added = true
+			}
 		}
-		fmt.Printf("Added path '%s' to %s\n", path, server.Tools()[0].Name)
-		//return
+	}
+	if isURL && !added {
+		fmt.Println("No web scraper server found")
+	} else if !isURL && !added {
+		fmt.Println("No filesystem server found")
 	}
 }
 
@@ -580,7 +607,13 @@ func handlePaths(servers []MCPServer) {
 	}
 	for _, server := range servers {
 		paths := server.AllowedPaths()
-		fmt.Printf("%s: %s\n", "filesystem", strings.Join(paths, ", "))
+		serverType := "filesys"
+		if len(server.Tools()) > 0 {
+			if strings.Contains(server.Tools()[0].Name, "web") || strings.Contains(server.Tools()[0].Name, "fetch") {
+				serverType = "url"
+			}
+		}
+		fmt.Printf("%s: %s\n", serverType, strings.Join(paths, ", "))
 	}
 }
 
@@ -650,7 +683,9 @@ func getBgCount(servers []MCPServer) int {
 func printHelp() {
 	fmt.Println(`
 Commands:
-  /add-path <path>  - Add allowed path to MCP filesystem server
+  /add-path <filesys|url> <value> - Add allowed path/URL to MCP server
+                                    filesys <path> - Add to filesystem/bash
+                                    url <url>      - Add to web scraper
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
   /save, /save-exit - Save session and exit
@@ -798,7 +833,6 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 
 	return nil
 }
-
 
 var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
 

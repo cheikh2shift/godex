@@ -330,12 +330,16 @@ func (s *WebScraperServer) clickElement(ctx context.Context, args map[string]int
 }
 
 func (s *WebScraperServer) AddPath(ctx context.Context, path string) error {
-	for _, p := range s.allowedURLs {
-		if p == path {
+	return s.AddURL(ctx, path)
+}
+
+func (s *WebScraperServer) AddURL(ctx context.Context, url string) error {
+	for _, u := range s.allowedURLs {
+		if u == url {
 			return nil
 		}
 	}
-	s.allowedURLs = append(s.allowedURLs, path)
+	s.allowedURLs = append(s.allowedURLs, url)
 	return nil
 }
 

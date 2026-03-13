@@ -293,6 +293,10 @@ func (s *FileSystemServer) AddPath(ctx context.Context, path string) error {
 	return nil
 }
 
+func (s *FileSystemServer) AddURL(ctx context.Context, url string) error {
+	return fmt.Errorf("filesystem server does not support URLs")
+}
+
 func (s *FileSystemServer) AllowedPaths() []string {
 	return s.allowedPaths
 }

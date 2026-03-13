@@ -117,7 +117,7 @@ func (a *App) setupLayout() {
 				return err
 			}
 			v.Title = "Status"
-			fmt.Fprintf(v, "Status: %s | MCP: %d servers | /confirm /cancel /add-path /paths | Ctrl+C quit", a.status, len(a.mcpExecutors))
+			fmt.Fprintf(v, "Status: %s | MCP: %d servers | /confirm /cancel /add-path <filesys|url> /paths | Ctrl+C quit", a.status, len(a.mcpExecutors))
 		}
 
 		return nil
@@ -161,16 +161,18 @@ func (a *App) handleInput(input string) {
 	}
 
 	if strings.HasPrefix(strings.ToLower(input), "/add-path") {
-		parts := strings.SplitN(input, " ", 2)
-		path := ""
-		if len(parts) > 1 {
-			path = strings.TrimSpace(parts[1])
-		}
-		if path == "" {
-			a.addMessage(fmt.Sprintf("[System] Usage: /add-path <path>"))
+		parts := strings.Fields(input)
+		if len(parts) < 3 {
+			a.addMessage(fmt.Sprintf("[System] Usage: /add-path <filesys|url> <value>"))
 			return
 		}
-		a.addMCPPath(path)
+		pathType := strings.ToLower(parts[1])
+		value := strings.TrimSpace(strings.Join(parts[2:], " "))
+		if value == "" {
+			a.addMessage(fmt.Sprintf("[System] Usage: /add-path <filesys|url> <value>"))
+			return
+		}
+		a.addMCPPath(pathType, value)
 		return
 	}
 
@@ -270,23 +272,41 @@ func (a *App) executeMCPTool(toolName string, args map[string]interface{}) {
 	}()
 }
 
-func (a *App) addMCPPath(path string) {
+func (a *App) addMCPPath(pathType, value string) {
 	if len(a.mcpExecutors) == 0 {
 		a.addMessage(fmt.Sprintf("[System] No MCP servers configured"))
 		return
 	}
 
+	isURL := pathType == "url"
+	added := false
+
 	for _, executor := range a.mcpExecutors {
-		if executor.Name == "filesystem" || strings.Contains(executor.Name, "file") {
-			if err := executor.AddPath(a.baseCtx, path); err != nil {
-				a.addMessage(fmt.Sprintf("[System] Failed to add path: %v", err))
-				return
+		if isURL {
+			if strings.Contains(executor.Name, "web") || strings.Contains(executor.Name, "scraper") || strings.Contains(executor.Name, "fetch") {
+				if err := executor.AddURL(a.baseCtx, value); err != nil {
+					a.addMessage(fmt.Sprintf("[System] Failed to add URL: %v", err))
+					return
+				}
+				a.addMessage(fmt.Sprintf("[System] Added URL '%s' to %s", value, executor.Name))
+				added = true
 			}
-			a.addMessage(fmt.Sprintf("[System] Added path '%s' to MCP server", path))
-			return
+		} else {
+			if executor.Name == "filesystem" || strings.Contains(executor.Name, "file") || strings.Contains(executor.Name, "bash") || strings.Contains(executor.Name, "command") {
+				if err := executor.AddPath(a.baseCtx, value); err != nil {
+					a.addMessage(fmt.Sprintf("[System] Failed to add path: %v", err))
+					return
+				}
+				a.addMessage(fmt.Sprintf("[System] Added path '%s' to %s", value, executor.Name))
+				added = true
+			}
 		}
 	}
-	a.addMessage(fmt.Sprintf("[System] No filesystem MCP server found"))
+	if isURL && !added {
+		a.addMessage(fmt.Sprintf("[System] No web scraper MCP server found"))
+	} else if !isURL && !added {
+		a.addMessage(fmt.Sprintf("[System] No filesystem MCP server found"))
+	}
 }
 
 func (a *App) initMCPServers() {
@@ -415,7 +435,7 @@ func (a *App) updateStatus(status string) {
 				return err
 			}
 			v.Clear()
-			fmt.Fprintf(v, "Status: %s | MCP: %d servers | /confirm /cancel /add-path /paths | Ctrl+C quit", status, len(a.mcpExecutors))
+			fmt.Fprintf(v, "Status: %s | MCP: %d servers | /confirm /cancel /add-path <filesys|url> /paths | Ctrl+C quit", status, len(a.mcpExecutors))
 			return nil
 		})
 	}

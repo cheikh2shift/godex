@@ -149,6 +149,10 @@ func (m *MCPToolExecutor) AddPath(ctx context.Context, path string) error {
 	return nil
 }
 
+func (m *MCPToolExecutor) AddURL(ctx context.Context, url string) error {
+	return m.AddPath(ctx, url)
+}
+
 func (m *MCPToolExecutor) AllowedPaths() []string {
 	paths := m.server.AllowedPaths
 	if len(paths) == 0 {

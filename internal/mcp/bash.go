@@ -260,6 +260,10 @@ func (s *BashServer) AddPath(ctx context.Context, path string) error {
 	return nil
 }
 
+func (s *BashServer) AddURL(ctx context.Context, url string) error {
+	return fmt.Errorf("bash server does not support URLs")
+}
+
 func (s *BashServer) AllowedPaths() []string {
 	return s.allowedPaths
 }
