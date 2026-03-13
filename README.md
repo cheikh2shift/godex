@@ -1,8 +1,8 @@
-[!WARNING]
-Please help me identify any security issues with this program.
+> [!WARNING]
+> Please help me identify any security issues with this program.
 
-[!WARNING]
-I love adding features, please add any requests to the issue tab.
+> [!WARNING]
+> I love adding features, please add any requests to the issue tab.
 
 # GoDex - AI-Powered CLI Agent
 
