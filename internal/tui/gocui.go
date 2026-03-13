@@ -356,7 +356,12 @@ func (a *App) runShellCommand(command string) {
 }
 
 func (a *App) addMessage(msg string) {
-	a.messages = append(a.messages, msg)
+	const maxMessages = 150
+	if len(a.messages) >= maxMessages {
+		a.messages = append(a.messages[1:], msg)
+	} else {
+		a.messages = append(a.messages, msg)
+	}
 	if a.g != nil {
 		a.g.Execute(func(g *gocui.Gui) error {
 			v, err := g.View("messages")

@@ -124,6 +124,8 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
+
 	output, err := cmd.CombinedOutput()
 
 	// Cancel after command completes (either success or error)
