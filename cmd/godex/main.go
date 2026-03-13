@@ -250,6 +250,7 @@ BASH TOOL LIMITATIONS:
 - Shell aliases are NOT expanded - use full command names
 - NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
 - ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
+- ALWAYS use background: true when starting a webserver or a long-running background task
 - After starting a background process, use sleep before making requests to it
 - Use kill_command with the PID to stop background processes when done
 
