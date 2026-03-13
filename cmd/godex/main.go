@@ -267,8 +267,7 @@ Example:
 }
 `+"```"+`
 
-When you have completed the task and want to provide the final answer, start your response with:
-FINAL_ANSWER:
+IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
 User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 

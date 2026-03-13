@@ -22,6 +22,8 @@ Example:
 }
 ` + "```" + `
 
+IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+
 Project tree:
 %s
 
