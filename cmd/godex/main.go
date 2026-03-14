@@ -16,6 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
+
 	"github.com/cheikh-seck/godex/internal/agent"
 	"github.com/cheikh-seck/godex/internal/config"
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
@@ -38,6 +41,13 @@ type MCPServer interface {
 }
 
 var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
+
+var thinkingStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("239")).
+	Foreground(lipgloss.Color("245")).
+	Background(lipgloss.Color("235")).
+	Padding(0, 1)
 
 type sessionEntry struct {
 	Prompt    string
@@ -146,7 +156,7 @@ func main() {
 			prompt = fmt.Sprintf("[%d bg] >", bgCount)
 		}
 
-		input, err := readPrompt(prompt, history)
+		input, err := readPrompt(prompt, history, provider.Model)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
@@ -260,6 +270,7 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
+			printedStreamed := false
 
 			// Create a cancellable context for this round
 			roundCtx, roundCancel := context.WithCancel(ctx)
@@ -313,9 +324,8 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 
 			// Print thinking only once at the start
 			if round == 0 && streamed.Len() > 0 {
-				fmt.Print("\033[90m")
-				fmt.Print(streamed.String())
-				fmt.Print("\033[0m\n")
+				fmt.Println(renderThinking(streamed.String()))
+				printedStreamed = true
 			}
 
 			// Only execute tool calls if response is primarily tool calls (JSON format)
@@ -326,11 +336,11 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No valid tool calls - print thinking text and final response, then stop
-				thinkingText := extractThinkingText(resp)
-				if thinkingText != "" {
-					fmt.Print("\033[90m")
-					fmt.Printf("%s\n", thinkingText)
-					fmt.Print("\033[0m")
+				if !printedStreamed {
+					thinkingText := extractThinkingText(resp)
+					if thinkingText != "" {
+						fmt.Println(renderThinking(thinkingText))
+					}
 				}
 				if strings.TrimSpace(resp) != "" {
 					// Check for FINAL_ANSWER marker
@@ -352,11 +362,11 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			}
 
 			// Extract and print thinking text (non-JSON parts) in muted color
-			thinkingText := extractThinkingText(resp)
-			if thinkingText != "" {
-				fmt.Print("\033[90m")
-				fmt.Printf("%s\n", thinkingText)
-				fmt.Print("\033[0m")
+			if !printedStreamed {
+				thinkingText := extractThinkingText(resp)
+				if thinkingText != "" {
+					fmt.Println(renderThinking(thinkingText))
+				}
 			}
 
 			// Execute all tool calls
@@ -842,6 +852,33 @@ func getToolsDescription(servers []MCPServer) string {
 		}
 	}
 	return desc.String()
+}
+
+func renderThinking(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	width := guessTerminalWidth()
+	style := thinkingStyle
+	if width > 0 {
+		style = style.Width(max(0, width-4))
+	}
+	return style.Render(text)
+}
+
+func guessTerminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+		return w
+	}
+	return 0
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func parseToolCall(text string) (string, string, map[string]interface{}, bool) {

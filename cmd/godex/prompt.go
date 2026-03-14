@@ -7,29 +7,55 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
 
-type promptModel struct {
-	basePrompt   string
-	contPrompt   string
-	input        textinput.Model
-	lines        []string
-	multiline    bool
-	history      []string
-	historyIndex int
-	historyDraft string
-	submitted    bool
-	aborted      bool
-	completions  []string
-	completeSeed string
-	completeIdx  int
+var inputBoxStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("240")).
+	Background(lipgloss.Color("236")).
+	Padding(0, 1)
+
+var commandTips = map[string]string{
+	"/add-path":  "Add allowed MCP path: /add-path <filesys|url> <value>",
+	"/paths":     "List allowed MCP paths",
+	"/tools":     "List available MCP tools",
+	"/exit":      "Exit without saving",
+	"/quit":      "Exit without saving",
+	"/save":      "Save session and exit",
+	"/save-exit": "Save session and exit",
+	"/killbg":    "Kill all background processes",
+	"/bg":        "List background processes",
+	"/clear":     "Clear the screen",
+	"/help":      "Show help for commands",
 }
 
-func newPromptModel(prompt string, history []string) promptModel {
+type promptModel struct {
+	basePrompt      string
+	contPrompt      string
+	input           textinput.Model
+	lines           []string
+	multiline       bool
+	history         []string
+	historyIndex    int
+	historyDraft    string
+	submitted       bool
+	aborted         bool
+	completions     []string
+	completeSeed    string
+	completeIdx     int
+	showCompletions bool
+	width           int
+	modelName       string
+}
+
+func newPromptModel(prompt string, history []string, modelName string) promptModel {
 	ti := textinput.New()
 	ti.Prompt = prompt
+	ti.Placeholder = "Enter prompt and press enter to submit"
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	ti.Focus()
 	ti.CharLimit = 0
 
@@ -39,11 +65,12 @@ func newPromptModel(prompt string, history []string) promptModel {
 		input:        ti,
 		history:      history,
 		historyIndex: len(history),
+		modelName:    modelName,
 	}
 }
 
-func readPrompt(prompt string, history []string) (string, error) {
-	m := newPromptModel(prompt, history)
+func readPrompt(prompt string, history []string, modelName string) (string, error) {
+	m := newPromptModel(prompt, history, modelName)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -71,9 +98,8 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.Type == tea.KeyTab {
-			if m.applyCompletion() {
-				return m, nil
-			}
+			m.handleTab()
+			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
 			if !m.multiline && len(m.lines) == 0 {
@@ -106,13 +132,18 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyUp:
 				m.historyUp()
 				m.updatePrompt()
+				m.resetCompletion()
 				return m, nil
 			case tea.KeyDown:
 				m.historyDown()
 				m.updatePrompt()
+				m.resetCompletion()
 				return m, nil
 			}
 		}
+	}
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = size.Width
 	}
 
 	var cmd tea.Cmd
@@ -133,7 +164,28 @@ func (m promptModel) View() string {
 			b.WriteByte('\n')
 		}
 	}
-	b.WriteString(m.input.View())
+	boxStyle := inputBoxStyle
+	if m.width > 0 {
+		boxStyle = boxStyle.Width(max(0, m.width-4))
+	}
+	b.WriteString(boxStyle.Render(m.input.View()))
+	if m.modelName != "" {
+		b.WriteByte('\n')
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render("Model: " + m.modelName))
+	}
+	if m.showCompletions && len(m.completions) > 0 {
+		var display []string
+		for _, cmd := range m.completions {
+			name := strings.TrimSpace(cmd)
+			if tip := commandTips[name]; tip != "" {
+				display = append(display, name+" - "+tip)
+			} else {
+				display = append(display, name)
+			}
+		}
+		b.WriteByte('\n')
+		b.WriteString(strings.Join(display, "\n"))
+	}
 	return b.String()
 }
 
@@ -160,6 +212,7 @@ func (m *promptModel) resetCompletion() {
 	m.completions = nil
 	m.completeSeed = ""
 	m.completeIdx = 0
+	m.showCompletions = false
 }
 
 func (m *promptModel) handlePaste(paste string) {
@@ -242,35 +295,34 @@ func (m *promptModel) historyDown() {
 	}
 }
 
-func (m *promptModel) applyCompletion() bool {
+func (m *promptModel) handleTab() {
 	value := m.input.Value()
-	if !strings.HasPrefix(value, "/") {
-		return false
+	if value != "" && !strings.HasPrefix(value, "/") {
+		return
 	}
 	if strings.Contains(value, " ") {
-		return false
+		return
 	}
-	if value != m.completeSeed || len(m.completions) == 0 {
+	if value != m.completeSeed {
 		m.completeSeed = value
 		m.completions = nil
 		for _, cmd := range slashCommands {
-			if strings.HasPrefix(cmd, value) {
+			if value == "" || strings.HasPrefix(cmd, value) {
 				m.completions = append(m.completions, cmd)
 			}
 		}
-		m.completeIdx = 0
 	}
 	if len(m.completions) == 0 {
-		return false
+		m.showCompletions = false
+		return
 	}
-	if m.completeIdx >= len(m.completions) {
-		m.completeIdx = 0
+	if len(m.completions) == 1 && value != "" && value != m.completions[0] {
+		m.input.SetValue(m.completions[0])
+		m.input.SetCursor(len([]rune(m.completions[0])))
+		m.resetCompletion()
+		return
 	}
-	next := m.completions[m.completeIdx]
-	m.completeIdx++
-	m.input.SetValue(next)
-	m.input.SetCursor(len([]rune(next)))
-	return true
+	m.showCompletions = true
 }
 
 func appendHistory(history []string, item string) []string {
