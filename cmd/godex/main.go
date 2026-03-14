@@ -350,7 +350,13 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
 			if !isToolCallResponse || len(toolCalls) == 0 {
-				// No tool calls - print final response and stop
+				// No valid tool calls - print thinking text and final response, then stop
+				thinkingText := extractThinkingText(resp)
+				if thinkingText != "" {
+					fmt.Print("\033[90m")
+					fmt.Printf("%s\n", thinkingText)
+					fmt.Print("\033[0m")
+				}
 				if strings.TrimSpace(resp) != "" {
 					// Check for FINAL_ANSWER marker
 					finalResp := resp
@@ -368,6 +374,14 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 					Response: resp,
 				})
 				break
+			}
+
+			// Extract and print thinking text (non-JSON parts) in muted color
+			thinkingText := extractThinkingText(resp)
+			if thinkingText != "" {
+				fmt.Print("\033[90m")
+				fmt.Printf("%s\n", thinkingText)
+				fmt.Print("\033[0m")
 			}
 
 			// Execute all tool calls
@@ -1028,6 +1042,13 @@ func extractJsonObjects(text string) []map[string]interface{} {
 	return results
 }
 
+func extractThinkingText(text string) string {
+	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\n.*?\\n```")
+	thinking := codeBlockRe.ReplaceAllString(text, "")
+	thinking = strings.TrimSpace(thinking)
+	return thinking
+}
+
 func processToolData(data map[string]interface{}) map[string]interface{} {
 	name, _ := data["name"].(string)
 	args := make(map[string]interface{})
@@ -1054,26 +1075,6 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
-
-	trimmed := strings.TrimSpace(text)
-	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "```json") || strings.HasPrefix(trimmed, "```\n{") {
-		return toolCalls, true
-	}
-
-	lines := strings.Split(text, "\n")
-	nonToolLines := 0
-	for _, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "```") || strings.HasPrefix(trimmedLine, "}") || strings.HasPrefix(trimmedLine, "{") || strings.Contains(trimmedLine, "\"name\":") {
-			continue
-		}
-		nonToolLines++
-	}
-
-	if nonToolLines > 15 {
-		return toolCalls, false
-	}
-
 	return toolCalls, true
 }
 
