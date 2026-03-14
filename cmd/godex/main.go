@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
@@ -47,6 +48,13 @@ var thinkingStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("239")).
 	Foreground(lipgloss.Color("245")).
 	Background(lipgloss.Color("235")).
+	Padding(0, 1)
+
+var successBarStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("34")).
+	Background(lipgloss.Color("34")).
+	Foreground(lipgloss.Color("34")).
 	Padding(0, 1)
 
 type sessionEntry struct {
@@ -348,9 +356,9 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
 						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
 						go playSound()
-						fmt.Printf("\n\n========================================\n%s\n", finalResp)
+						fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
 					} else {
-						fmt.Printf("%s\n", resp)
+						fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(resp))
 					}
 				}
 				// Save to session
@@ -773,9 +781,9 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 				// Check for FINAL_ANSWER marker
 				if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
 					finalResp := strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
-					fmt.Printf("\n\n========================================\n%s\n", finalResp)
+					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
 				} else {
-					fmt.Printf("%s\n", resp)
+					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(resp))
 				}
 			}
 			break
@@ -865,6 +873,36 @@ func renderThinking(text string) string {
 		style = style.Width(max(0, width-4))
 	}
 	return style.Render(text)
+}
+
+func renderSuccessBar() string {
+	width := guessTerminalWidth()
+	style := successBarStyle
+	if width > 0 {
+		target := int(float64(width) * 0.35)
+		style = style.Width(max(10, target))
+	}
+	return style.Render(" OK ")
+}
+
+func renderMarkdown(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	width := guessTerminalWidth()
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return text
+	}
+	out, err := renderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimRight(out, "\n")
 }
 
 func guessTerminalWidth() int {
