@@ -4,7 +4,7 @@
 > [!WARNING]
 > I love adding features, please add any requests to the issue tab.
 
-# GoDex - AI-Powered CLI Agent
+# GoDex - AI CLI Agent
 
 ![GoDex Screenshot](screen.png)
 
