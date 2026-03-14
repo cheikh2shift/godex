@@ -336,42 +336,41 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 				printedStreamed = true
 			}
 
+			preResp, finalResp, hasFinal := splitFinalAnswer(resp)
+
 			// Only execute tool calls if response is primarily tool calls (JSON format)
 			// If there's substantial explanatory text, don't treat as tool call
-			toolCalls, isToolCallResponse := shouldExecuteToolCall(resp)
+			toolCalls, isToolCallResponse := shouldExecuteToolCall(preResp)
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No valid tool calls - print thinking text and final response, then stop
 				if !printedStreamed {
-					thinkingText := extractThinkingText(resp)
+					thinkingText := extractThinkingText(preResp)
 					if thinkingText != "" {
 						fmt.Println(renderThinking(thinkingText))
 					}
 				}
-				if strings.TrimSpace(resp) != "" {
-					// Check for FINAL_ANSWER marker
-					finalResp := resp
-					if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
-						finalResp = strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
-						go playSound()
-						fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
-					} else {
-						fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(resp))
-					}
+				output := resp
+				if hasFinal {
+					output = finalResp
+				}
+				if strings.TrimSpace(output) != "" {
+					go playSound()
+					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
 				}
 				// Save to session
 				sessionEntries = append(sessionEntries, sessionEntry{
 					Prompt:   input,
-					Response: resp,
+					Response: output,
 				})
 				break
 			}
 
 			// Extract and print thinking text (non-JSON parts) in muted color
 			if !printedStreamed {
-				thinkingText := extractThinkingText(resp)
+				thinkingText := extractThinkingText(preResp)
 				if thinkingText != "" {
 					fmt.Println(renderThinking(thinkingText))
 				}
@@ -417,6 +416,18 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 				} else {
 					toolResults = append(toolResults, truncate(result, 500))
 				}
+			}
+
+			if hasFinal {
+				if strings.TrimSpace(finalResp) != "" {
+					go playSound()
+					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
+				}
+				sessionEntries = append(sessionEntries, sessionEntry{
+					Prompt:   input,
+					Response: finalResp,
+				})
+				break
 			}
 
 			// Continue even if there were errors - send results to LLM
@@ -787,21 +798,21 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 			return err
 		}
 
+		preResp, finalResp, hasFinal := splitFinalAnswer(resp)
+
 		// Only execute tool calls if response is primarily tool calls (JSON format)
-		toolCalls, isToolCallResponse := shouldExecuteToolCall(resp)
+		toolCalls, isToolCallResponse := shouldExecuteToolCall(preResp)
 
 		fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			// No tool calls - print final response and stop
-			if strings.TrimSpace(resp) != "" {
-				// Check for FINAL_ANSWER marker
-				if idx := strings.Index(resp, "FINAL_ANSWER:"); idx >= 0 {
-					finalResp := strings.TrimSpace(resp[idx+len("FINAL_ANSWER:"):])
-					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
-				} else {
-					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(resp))
-				}
+			output := resp
+			if hasFinal {
+				output = finalResp
+			}
+			if strings.TrimSpace(output) != "" {
+				fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
 			}
 			break
 		}
@@ -846,6 +857,13 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 			} else {
 				toolResults = append(toolResults, truncate(result, 500))
 			}
+		}
+
+		if hasFinal {
+			if strings.TrimSpace(finalResp) != "" {
+				fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
+			}
+			break
 		}
 
 		// Continue even if there were errors - send results to LLM
@@ -1155,6 +1173,16 @@ func extractThinkingText(text string) string {
 	thinking := codeBlockRe.ReplaceAllString(text, "")
 	thinking = strings.TrimSpace(thinking)
 	return thinking
+}
+
+func splitFinalAnswer(text string) (string, string, bool) {
+	idx := strings.Index(text, "FINAL_ANSWER:")
+	if idx < 0 {
+		return text, "", false
+	}
+	pre := strings.TrimSpace(text[:idx])
+	final := strings.TrimSpace(text[idx+len("FINAL_ANSWER:"):])
+	return pre, final, true
 }
 
 func processToolData(data map[string]interface{}) map[string]interface{} {
