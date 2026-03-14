@@ -54,7 +54,7 @@ type promptModel struct {
 func newPromptModel(prompt string, history []string, modelName string) promptModel {
 	ti := textinput.New()
 	ti.Prompt = prompt
-	ti.Placeholder = "Enter prompt and press enter to submit"
+	ti.Placeholder = "Press ↵ Enter to submit"
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	ti.Focus()
 	ti.CharLimit = 0
