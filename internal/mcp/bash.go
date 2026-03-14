@@ -17,7 +17,12 @@ func GetWorkingDir() (string, error) {
 type BashServer struct {
 	allowedPaths   []string
 	tools          []Tool
-	backgroundPIDs []int
+	backgroundPIDs []bgProcess
+}
+
+type bgProcess struct {
+	PID     int
+	Command string
 }
 
 func NewBashServer(allowedPaths []string) *BashServer {
@@ -124,7 +129,10 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to start background command: %v", err)
 		}
-		s.backgroundPIDs = append(s.backgroundPIDs, cmd.Process.Pid)
+		s.backgroundPIDs = append(s.backgroundPIDs, bgProcess{
+			PID:     cmd.Process.Pid,
+			Command: strings.TrimSpace(command),
+		})
 		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", cmd.Process.Pid), nil
 	}
 
@@ -167,7 +175,7 @@ func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
 
 	// Remove from tracking
 	for i, p := range s.backgroundPIDs {
-		if p == int(pid) {
+		if p.PID == int(pid) {
 			s.backgroundPIDs = append(s.backgroundPIDs[:i], s.backgroundPIDs[i+1:]...)
 			break
 		}
@@ -183,16 +191,16 @@ func (s *BashServer) killAllBackground(args map[string]interface{}) (string, err
 
 	var killed []int
 	var failed []int
-	for _, pid := range s.backgroundPIDs {
-		proc, err := os.FindProcess(pid)
+	for _, procInfo := range s.backgroundPIDs {
+		proc, err := os.FindProcess(procInfo.PID)
 		if err == nil {
 			if err := proc.Kill(); err == nil {
-				killed = append(killed, pid)
+				killed = append(killed, procInfo.PID)
 			} else {
-				failed = append(failed, pid)
+				failed = append(failed, procInfo.PID)
 			}
 		} else {
-			failed = append(failed, pid)
+			failed = append(failed, procInfo.PID)
 		}
 	}
 
@@ -285,12 +293,16 @@ func (s *BashServer) ListBackground() (string, error) {
 		return "No background processes", nil
 	}
 	var pids []string
-	for _, pid := range s.backgroundPIDs {
-		proc, err := os.FindProcess(pid)
+	for _, procInfo := range s.backgroundPIDs {
+		proc, err := os.FindProcess(procInfo.PID)
 		if err == nil {
 			err = proc.Signal(nil) // Check if process is alive
 			if err == nil {
-				pids = append(pids, fmt.Sprintf("PID %d (running)", pid))
+				if procInfo.Command != "" {
+					pids = append(pids, fmt.Sprintf("PID %d (running) - %s", procInfo.PID, procInfo.Command))
+				} else {
+					pids = append(pids, fmt.Sprintf("PID %d (running)", procInfo.PID))
+				}
 			}
 		}
 	}
@@ -306,13 +318,13 @@ func (s *BashServer) BackgroundCount() int {
 }
 
 func (s *BashServer) cleanupDeadProcesses() {
-	var alive []int
-	for _, pid := range s.backgroundPIDs {
-		proc, err := os.FindProcess(pid)
+	var alive []bgProcess
+	for _, procInfo := range s.backgroundPIDs {
+		proc, err := os.FindProcess(procInfo.PID)
 		if err == nil {
 			err = proc.Signal(nil) // Signal 0 checks if process exists
 			if err == nil {
-				alive = append(alive, pid)
+				alive = append(alive, procInfo)
 			}
 		}
 	}

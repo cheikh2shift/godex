@@ -27,8 +27,10 @@ type ollamaProvider struct {
 	client      *http.Client
 	messages    []map[string]string
 	mu          sync.Mutex
+	sendMu      sync.Mutex
 	OnThink     func(string)
 	cancelFunc  context.CancelFunc
+	cancelGen   uint64
 }
 
 func init() {
@@ -60,15 +62,28 @@ func newOllamaProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.sendMu.Lock()
+	defer o.sendMu.Unlock()
 
+	o.mu.Lock()
 	o.messages = append(o.messages, map[string]string{
 		"role":    "user",
 		"content": prompt,
 	})
 
-	ctx, o.cancelFunc = context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
+	o.cancelGen++
+	gen := o.cancelGen
+	o.cancelFunc = cancel
+	o.mu.Unlock()
+
+	defer func() {
+		o.mu.Lock()
+		if o.cancelGen == gen {
+			o.cancelFunc = nil
+		}
+		o.mu.Unlock()
+	}()
 
 	endpoint := o.baseURL + "/api/chat"
 	reqBody := map[string]any{
@@ -137,17 +152,19 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		return "", fmt.Errorf("ollama returned empty response")
 	}
 
+	o.mu.Lock()
 	o.messages = append(o.messages, map[string]string{
 		"role":    "assistant",
 		"content": response,
 	})
+	o.mu.Unlock()
 
 	return response, nil
 }
 
 func (o *ollamaProvider) Close() error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.sendMu.Lock()
+	defer o.sendMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -174,7 +191,9 @@ func (o *ollamaProvider) Close() error {
 	}
 	defer resp.Body.Close()
 
+	o.mu.Lock()
 	o.messages = nil
+	o.mu.Unlock()
 	return nil
 }
 

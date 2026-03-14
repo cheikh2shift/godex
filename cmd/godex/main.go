@@ -21,8 +21,6 @@ import (
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
 	"github.com/cheikh-seck/godex/internal/mcp"
 	"github.com/cheikh-seck/godex/internal/wizard"
-
-	"github.com/peterh/liner"
 )
 
 const (
@@ -38,6 +36,8 @@ type MCPServer interface {
 	AddURL(ctx context.Context, url string) error
 	Close() error
 }
+
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
 
 type sessionEntry struct {
 	Prompt    string
@@ -117,7 +117,7 @@ func main() {
 	fmt.Printf("MCP Servers: %d\n", len(servers))
 	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Ctrl+C to cancel")
 	fmt.Println("Type your prompt or /help for more options.")
-	fmt.Println("Multiline: Enter to add new line, Enter again on empty line to submit")
+	fmt.Println("Multiline: paste with newlines to enter multiline, Enter on empty line to submit")
 
 	// Get working directory for session files
 	wd, _ := os.Getwd()
@@ -134,11 +134,9 @@ func main() {
 		fmt.Println("[Agents] Loaded AGENTS.md")
 	}
 
-	rl := NewLiner()
-	defer rl.Close()
-
 	// Track session for summary
 	var sessionEntries []sessionEntry
+	var history []string
 
 	for {
 		// Show prompt with background process count
@@ -148,46 +146,22 @@ func main() {
 			prompt = fmt.Sprintf("[%d bg] >", bgCount)
 		}
 
-		input, err := rl.Prompt(prompt)
+		input, err := readPrompt(prompt, history)
 		if err != nil {
-			if err == liner.ErrPromptAborted {
-				fmt.Println("\n[Cancelled]")
+			if err == ErrPromptAborted {
+				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
 				agent.CancelPrompt(provider)
 				continue
 			}
 			break
 		}
 
-		// Handle multiline paste: check if input already contains newlines (paste captured full text)
-		// If not a command (doesn't start with /), wait for more input until user submits empty line
-		accumulated := input
-
-		// If input already has newlines, it's a multiline paste - use as-is
-		if !strings.Contains(input, "\n") && !strings.HasPrefix(input, "/") {
-			// Keep prompting for more input until user submits empty line
-			for {
-				moreInput, err := rl.Prompt("... ")
-				if err != nil {
-					if err == liner.ErrPromptAborted {
-						accumulated = "" // Discard on cancellation
-					}
-					break
-				}
-				if moreInput == "" {
-					break
-				}
-				accumulated = accumulated + "\n" + moreInput
-			}
-		}
-
-		input = accumulated
-
 		input = strings.TrimSpace(input)
 		if input == "" {
 			continue
 		}
 
-		rl.AppendHistory(input)
+		history = appendHistory(history, input)
 
 		if input == "/exit" || input == "/quit" {
 			break
@@ -311,6 +285,7 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			go func() {
 				select {
 				case <-stopSignal:
+					agent.CancelPrompt(provider)
 					roundCancel()
 				case <-roundCtx.Done():
 				}
@@ -848,26 +823,6 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	}
 
 	return nil
-}
-
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
-
-func NewLiner() *liner.State {
-	l := liner.NewLiner()
-	l.SetCtrlCAborts(true)
-	l.SetCompleter(func(line string) []string {
-		if !strings.HasPrefix(line, "/") {
-			return nil
-		}
-		var matches []string
-		for _, cmd := range slashCommands {
-			if strings.HasPrefix(cmd, line) {
-				matches = append(matches, cmd)
-			}
-		}
-		return matches
-	})
-	return l
 }
 
 func getToolsDescription(servers []MCPServer) string {

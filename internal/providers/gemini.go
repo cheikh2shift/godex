@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"google.golang.org/genai"
 
@@ -17,6 +18,9 @@ type geminiProvider struct {
 	client      *genai.Client
 	model       string
 	temperature *float64
+	cancelMu    sync.Mutex
+	cancelFunc  context.CancelFunc
+	cancelGen   uint64
 }
 
 func init() {
@@ -72,6 +76,21 @@ func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error
 		}
 	}
 
+	g.cancelMu.Lock()
+	ctx, cancel := context.WithCancel(ctx)
+	g.cancelGen++
+	gen := g.cancelGen
+	g.cancelFunc = cancel
+	g.cancelMu.Unlock()
+
+	defer func() {
+		g.cancelMu.Lock()
+		if g.cancelGen == gen {
+			g.cancelFunc = nil
+		}
+		g.cancelMu.Unlock()
+	}()
+
 	resp, err := g.client.Models.GenerateContent(ctx, g.model, genai.Text(prompt), config)
 	if err != nil {
 		return "", err
@@ -91,6 +110,11 @@ func (g *geminiProvider) SetThinkCallback(fn func(string)) {
 }
 
 func (g *geminiProvider) Cancel() {
+	g.cancelMu.Lock()
+	defer g.cancelMu.Unlock()
+	if g.cancelFunc != nil {
+		g.cancelFunc()
+	}
 }
 
 func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
