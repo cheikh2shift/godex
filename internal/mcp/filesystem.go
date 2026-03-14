@@ -16,10 +16,8 @@ type FileSystemServer struct {
 }
 
 func NewFileSystemServer(allowedPaths []string) *FileSystemServer {
-	if len(allowedPaths) == 0 {
-		wd, _ := os.Getwd()
-		allowedPaths = []string{wd}
-	}
+	allowedPaths = sanitizeAllowedPaths(allowedPaths)
+	allowedPaths = withDefaultCwd(allowedPaths)
 
 	server := &FileSystemServer{
 		allowedPaths: allowedPaths,
@@ -157,6 +155,12 @@ func (s *FileSystemServer) listDirectory(args map[string]interface{}) (string, e
 	if !ok {
 		return "", fmt.Errorf("path is required")
 	}
+	path = strings.TrimSpace(path)
+	if path == "." || path == "./" || path == ".\\" {
+		if wd, err := os.Getwd(); err == nil {
+			path = wd
+		}
+	}
 
 	if !s.isAllowed(path) {
 		return "", fmt.Errorf("path not allowed: %s", path)
@@ -284,6 +288,10 @@ func (s *FileSystemServer) getFileInfo(args map[string]interface{}) (string, err
 }
 
 func (s *FileSystemServer) AddPath(ctx context.Context, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
 	for _, p := range s.allowedPaths {
 		if p == path {
 			return nil

@@ -586,6 +586,14 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 	}
 
 	isURL := pathType == "url"
+	if !isURL {
+		abs, err := resolveUserPath(value)
+		if err != nil {
+			fmt.Printf("Error resolving path: %v\n", err)
+			return
+		}
+		value = abs
+	}
 	added := false
 
 	for _, server := range servers {
@@ -991,6 +999,7 @@ func parseArgs(argsStr string) map[string]interface{} {
 }
 
 func callTool(servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+	normalizeToolPathArgs(name, args)
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
 			if tool.Name == name {
@@ -1001,6 +1010,64 @@ func callTool(servers []MCPServer, name string, args map[string]interface{}, tim
 		}
 	}
 	return "", fmt.Errorf("tool %s not found", name)
+}
+
+
+func normalizeToolPathArgs(toolName string, args map[string]interface{}) {
+	if !isFilesystemTool(toolName) {
+		return
+	}
+	raw, ok := args["path"].(string)
+	if !ok {
+		return
+	}
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return
+	}
+	resolved, err := resolveUserPath(path)
+	if err == nil {
+		args["path"] = resolved
+		return
+	}
+}
+
+func isFilesystemTool(toolName string) bool {
+	switch toolName {
+	case "read_file", "write_file", "list_directory", "create_directory", "delete_file", "search_files", "get_file_info":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveUserPath(input string) (string, error) {
+	path := strings.TrimSpace(input)
+	if path == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	path = os.ExpandEnv(path)
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
+		home, err := os.UserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return "", fmt.Errorf("unable to resolve home directory")
+		}
+		if path == "~" {
+			path = home
+		} else {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		return filepath.Clean(filepath.Join(wd, path)), nil
+	}
+	if pwd := strings.TrimSpace(os.Getenv("PWD")); pwd != "" {
+		return filepath.Clean(filepath.Join(pwd, path)), nil
+	}
+	return "", fmt.Errorf("unable to resolve relative path: %s", input)
 }
 
 func truncate(s string, maxLen int) string {

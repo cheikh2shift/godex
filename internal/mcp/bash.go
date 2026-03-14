@@ -26,10 +26,8 @@ type bgProcess struct {
 }
 
 func NewBashServer(allowedPaths []string) *BashServer {
-	if len(allowedPaths) == 0 {
-		wd, _ := GetWorkingDir()
-		allowedPaths = []string{wd}
-	}
+	allowedPaths = sanitizeAllowedPaths(allowedPaths)
+	allowedPaths = withDefaultCwd(allowedPaths)
 
 	return &BashServer{
 		allowedPaths: allowedPaths,
@@ -266,6 +264,10 @@ func (s *BashServer) runNode(args map[string]interface{}) (string, error) {
 }
 
 func (s *BashServer) AddPath(ctx context.Context, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
 	for _, p := range s.allowedPaths {
 		if p == path {
 			return nil
