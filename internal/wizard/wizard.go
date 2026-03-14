@@ -16,15 +16,25 @@ func RunWizard(destination string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Try to load existing config for defaults
+	var existingCfg *config.Config
 	var existingProvider *config.Provider
-	if existingCfg, err := config.Load(destination); err == nil && len(existingCfg.Providers) > 0 {
-		existingProvider = &existingCfg.Providers[0]
+	if cfg, err := config.Load(destination); err == nil {
+		existingCfg = cfg
+		if len(cfg.Providers) > 0 {
+			existingProvider = &cfg.Providers[0]
+		}
 	}
 
 	fmt.Println("*** Provider configuration wizard ***")
 	fmt.Println("This will create or overwrite:", destination)
-	if existingProvider != nil {
+	appendProvider := false
+	setAsDefault := false
+	if existingCfg != nil && len(existingCfg.Providers) > 0 {
 		fmt.Println("Loaded defaults from existing config")
+		appendProvider = promptYesNo(reader, "Append to existing providers? (y/N)", false)
+		if appendProvider {
+			setAsDefault = promptYesNo(reader, "Set as default provider? (y/N)", false)
+		}
 	}
 
 	provider := config.Provider{}
@@ -67,22 +77,34 @@ func RunWizard(destination string) error {
 	}
 
 	provider.Name = prompt(reader, "Provider name", getDefault("name", "ollama"))
-	provider.Type = prompt(reader, "Provider type (gemini or ollama)", getDefault("type", "ollama"))
+	provider.Type = prompt(reader, "Provider type (gemini, ollama, or huggingface)", getDefault("type", "ollama"))
 
 	modelDefault := providers.DefaultGeminiModel
 	if provider.Type == "ollama" {
 		modelDefault = providers.DefaultOllamaModel
+	} else if provider.Type == "huggingface" {
+		modelDefault = "deepseek-ai/DeepSeek-R1:fastest"
 	}
 	provider.Model = prompt(reader, "Model", getDefault("model", modelDefault))
 	provider.Description = prompt(reader, "Description", getDefault("description", "Ollama model"))
-	backend := prompt(reader, "Backend (gemini, vertex, or ollama)", getDefault("backend", "ollama"))
+	backend := ""
+	if provider.Type == "gemini" {
+		backend = prompt(reader, "Backend (gemini or vertex)", getDefault("backend", "gemini"))
+	} else if provider.Type == "huggingface" {
+		backend = "huggingface"
+	} else {
+		backend = "ollama"
+	}
 
 	if provider.Params == nil {
 		provider.Params = map[string]string{}
 	}
 	provider.Params["backend"] = backend
 
-	if backend == "ollama" || provider.Type == "ollama" {
+	if provider.Type == "huggingface" {
+		provider.Endpoint = prompt(reader, "Hugging Face base URL", getDefault("endpoint", "https://router.huggingface.co/v1"))
+		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "HF_TOKEN"))
+	} else if backend == "ollama" || provider.Type == "ollama" {
 		provider.Endpoint = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
 	} else if backend == "vertex" || backend == "vertexai" {
 		provider.Params["project"] = prompt(reader, "Vertex project", getDefault("project", ""))
@@ -131,9 +153,18 @@ func RunWizard(destination string) error {
 		provider.MCPServers = mcpServers
 	}
 
-	cfg := &config.Config{
-		Providers:       []config.Provider{provider},
-		DefaultProvider: provider.Name,
+	var cfg *config.Config
+	if appendProvider && existingCfg != nil {
+		existingCfg.Providers = append(existingCfg.Providers, provider)
+		if existingCfg.DefaultProvider == "" || setAsDefault {
+			existingCfg.DefaultProvider = provider.Name
+		}
+		cfg = existingCfg
+	} else {
+		cfg = &config.Config{
+			Providers:       []config.Provider{provider},
+			DefaultProvider: provider.Name,
+		}
 	}
 
 	// Ensure directory exists
@@ -146,7 +177,11 @@ func RunWizard(destination string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Created providers file at", destination)
+	if appendProvider {
+		fmt.Println("Updated providers file at", destination)
+	} else {
+		fmt.Println("Created providers file at", destination)
+	}
 	fmt.Println("You can add more providers by editing the YAML and adding entries to the providers list.")
 	fmt.Println("Launch the CLI without --wizard to start the agent.")
 
@@ -165,4 +200,18 @@ func prompt(reader *bufio.Reader, question, def string) string {
 		return def
 	}
 	return input
+}
+
+func promptYesNo(reader *bufio.Reader, question string, def bool) bool {
+	defLabel := "y/N"
+	if def {
+		defLabel = "Y/n"
+	}
+	fmt.Printf("%s [%s]: ", question, defLabel)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input == "" {
+		return def
+	}
+	return input == "y" || input == "yes"
 }

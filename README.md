@@ -8,12 +8,12 @@
 
 ![GoDex Screenshot](screen.png)
 
-GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
+GoDex is a CLI tool that interfaces with Ollama, Gemini, Hugging Face (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
 
 ## Requirements
 
 - **Go 1.25.7+** - Build from source
-- **Ollama** - For the default LLM backend (or use Gemini)
+- **Ollama** - For the default LLM backend (or use Gemini or Hugging Face)
 
 ### Ollama Setup
 
@@ -123,14 +123,14 @@ default_provider: ollama
 | Field | Description |
 |-------|-------------|
 | `name` | Provider identifier |
-| `type` | Provider type: `ollama` or `gemini` |
-| `endpoint` | Ollama URL (e.g., `http://localhost:11434`) |
+| `type` | Provider type: `ollama`, `gemini`, or `huggingface` |
+| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`) |
 | `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |
 | `tool_timeout` | Tool execution timeout in seconds (default: 180) |
-| `api_key_env` | Environment variable for API key (Gemini) |
+| `api_key_env` | Environment variable for API key (Gemini/Hugging Face) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |
 
@@ -260,5 +260,4 @@ If GoDex can't connect to Ollama, check that the Ollama API is accessible at `ht
 ---
 
 For developers: [DEV.md](DEV.md) - Guide to adding new MCP servers and providers
-
 

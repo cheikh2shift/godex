@@ -5,7 +5,7 @@
 - Build or run directly: `go run ./cmd/godex`.
 - The CLI expects a provider configuration YAML at `~/.godex/providers.yaml` by default; override with `--config /path/to/providers.yaml`.
 - Launch `go run ./cmd/godex --wizard` to answer prompts and generate the YAML (or recreate it if you already have one).
-- After configuration, the CLI drops into a styled TUI where you can type prompts, hit `Enter`, and view Gemini's replies. Use `Ctrl+C` or `q` to exit.
+- After configuration, the CLI drops into a styled TUI where you can type prompts, hit `Enter`, and view the provider's replies. Use  command `/quit` to exit.
 
 ## Provider configuration
 
@@ -27,6 +27,7 @@ default_provider: gemini
 - `api_key_env` is the safest way to provide credentials; it reads whichever environment variable you configure. `api_key` writes a key directly into the YAML but is discouraged.
 - `params.backend` controls the Gemini backend (`gemini` for the public Gemini API, or `vertex`/`vertexai` for Vertex AI). For Vertex add `params.project` and `params.location`.
 - `ollama` providers use `endpoint` (or `params.base_url`) pointing to your local Ollama server and a `model` like `codeqwen:chat`.
+- `huggingface` providers use `endpoint` (default `https://router.huggingface.co/v1`), a `model` like `deepseek-ai/DeepSeek-R1:fastest`, and `api_key_env` (default `HF_TOKEN`).
 - Add more providers by copying entries under `providers:`. Each entry can supply a different `type`, `model`, and `params`.
 - Use `--provider <name>` when launching the CLI to select a non-default provider from the YAML.
 
