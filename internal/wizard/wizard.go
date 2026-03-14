@@ -44,6 +44,13 @@ func RunWizard(destination string) error {
 		if existingProvider == nil {
 			return defaultVal
 		}
+		if existingProvider.Type != "" && provider.Type != "" &&
+			strings.ToLower(existingProvider.Type) != strings.ToLower(provider.Type) {
+			switch field {
+			case "model", "description", "endpoint", "api_key_env":
+				return defaultVal
+			}
+		}
 		switch field {
 		case "name":
 			return existingProvider.Name
@@ -85,7 +92,11 @@ func RunWizard(destination string) error {
 	} else if provider.Type == "huggingface" {
 		modelDefault = "deepseek-ai/DeepSeek-R1:fastest"
 	}
-	provider.Model = prompt(reader, "Model", getDefault("model", modelDefault))
+	modelQuestion := "Model"
+	if provider.Type == "huggingface" {
+		modelQuestion = "Model (supports :fastest or :provider)"
+	}
+	provider.Model = prompt(reader, modelQuestion, getDefault("model", modelDefault))
 	provider.Description = prompt(reader, "Description", getDefault("description", "Ollama model"))
 	backend := ""
 	if provider.Type == "gemini" {
@@ -183,23 +194,32 @@ func RunWizard(destination string) error {
 		fmt.Println("Created providers file at", destination)
 	}
 	fmt.Println("You can add more providers by editing the YAML and adding entries to the providers list.")
+	fmt.Println("Launch with this provider:")
+	fmt.Printf("  godex --provider %s\n", provider.Name)
 	fmt.Println("Launch the CLI without --wizard to start the agent.")
 
 	return nil
 }
 
 func prompt(reader *bufio.Reader, question, def string) string {
-	if def != "" {
-		fmt.Printf("%s [%s]: ", question, def)
-	} else {
-		fmt.Printf("%s: ", question)
+	for attempts := 0; attempts < 3; attempts++ {
+		if def != "" {
+			fmt.Printf("%s [%s]: ", question, def)
+		} else {
+			fmt.Printf("%s: ", question)
+		}
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return def
+		}
+		if looksLikePromptEcho(input) {
+			fmt.Println("Input looked like a prompt echo. Please enter a value.")
+			continue
+		}
+		return input
 	}
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return def
-	}
-	return input
+	return def
 }
 
 func promptYesNo(reader *bufio.Reader, question string, def bool) bool {
@@ -207,11 +227,50 @@ func promptYesNo(reader *bufio.Reader, question string, def bool) bool {
 	if def {
 		defLabel = "Y/n"
 	}
-	fmt.Printf("%s [%s]: ", question, defLabel)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
-	if input == "" {
-		return def
+	for attempts := 0; attempts < 3; attempts++ {
+		fmt.Printf("%s [%s]: ", question, defLabel)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input == "" {
+			return def
+		}
+		if looksLikePromptEcho(input) {
+			fmt.Println("Input looked like a prompt echo. Please answer y/n.")
+			continue
+		}
+		return input == "y" || input == "yes"
 	}
-	return input == "y" || input == "yes"
+	return def
+}
+
+func looksLikePromptEcho(input string) bool {
+	lower := strings.ToLower(input)
+	if strings.Contains(lower, "providers.yaml") {
+		return true
+	}
+	promptMarkers := []string{
+		"append to existing providers",
+		"set as default provider",
+		"provider name",
+		"provider type",
+		"model",
+		"description",
+		"base url",
+		"api key environment variable",
+		"temperature",
+		"max tool rounds",
+		"tool timeout",
+		"vertex project",
+		"vertex location",
+		"mcp servers",
+	}
+	for _, marker := range promptMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	if strings.Contains(input, "]:") {
+		return true
+	}
+	return false
 }

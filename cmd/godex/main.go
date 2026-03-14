@@ -459,6 +459,10 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 	var servers []MCPServer
 
 	for i, serverConfig := range provider.MCPServers {
+		if strings.TrimSpace(serverConfig.Name) == "" {
+			fmt.Printf("[MCP] [!] Skipping unnamed MCP server entry\n")
+			continue
+		}
 		fmt.Printf("[MCP] [%d/%d] Connecting to server: %s\n", i+1, len(provider.MCPServers), serverConfig.Name)
 
 		var server MCPServer
@@ -512,6 +516,11 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 			fmt.Printf("[MCP]   Type: external\n")
 			fmt.Printf("[MCP]   Command: %s %v\n", serverConfig.Command, serverConfig.Args)
 			fmt.Printf("[MCP]   Allowed paths: %v\n", serverConfig.AllowedPaths)
+
+			if strings.TrimSpace(serverConfig.Command) == "" {
+				fmt.Printf("[MCP] [!] Skipping external MCP server %q: missing command\n", serverConfig.Name)
+				continue
+			}
 
 			executor, err := mcp.NewMCPServer(ctx, mcp.MCPServer{
 				Name:         serverConfig.Name,

@@ -27,7 +27,7 @@ default_provider: gemini
 - `api_key_env` is the safest way to provide credentials; it reads whichever environment variable you configure. `api_key` writes a key directly into the YAML but is discouraged.
 - `params.backend` controls the Gemini backend (`gemini` for the public Gemini API, or `vertex`/`vertexai` for Vertex AI). For Vertex add `params.project` and `params.location`.
 - `ollama` providers use `endpoint` (or `params.base_url`) pointing to your local Ollama server and a `model` like `codeqwen:chat`.
-- `huggingface` providers use `endpoint` (default `https://router.huggingface.co/v1`), a `model` like `deepseek-ai/DeepSeek-R1:fastest`, and `api_key_env` (default `HF_TOKEN`).
+- `huggingface` providers use `endpoint` (default `https://router.huggingface.co/v1`), a `model` (optionally with `:fastest` or `:provider` routing suffix), and `api_key_env` (default `HF_TOKEN`).
 - Add more providers by copying entries under `providers:`. Each entry can supply a different `type`, `model`, and `params`.
 - Use `--provider <name>` when launching the CLI to select a non-default provider from the YAML.
 

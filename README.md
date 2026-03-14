@@ -125,7 +125,7 @@ default_provider: ollama
 | `name` | Provider identifier |
 | `type` | Provider type: `ollama`, `gemini`, or `huggingface` |
 | `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`) |
-| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`) |
+| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |

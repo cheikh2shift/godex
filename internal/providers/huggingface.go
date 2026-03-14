@@ -104,7 +104,14 @@ func (h *huggingfaceProvider) Send(ctx context.Context, prompt string) (string, 
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("huggingface responded with %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		bodyText := strings.TrimSpace(string(body))
+		if resp.StatusCode == http.StatusGone && strings.Contains(strings.ToLower(h.baseURL), "api-inference.huggingface.co") {
+			return "", fmt.Errorf("huggingface endpoint %s is deprecated; use https://router.huggingface.co/v1", h.baseURL)
+		}
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(bodyText, "model_not_supported") {
+			return "", fmt.Errorf("huggingface model not supported by enabled providers; pick a model with Inference Providers or append :fastest/:provider and ensure providers are enabled in your HF account")
+		}
+		return "", fmt.Errorf("huggingface responded with %d: %s", resp.StatusCode, bodyText)
 	}
 
 	if text := parseHFChatResponse(body); text != "" {
