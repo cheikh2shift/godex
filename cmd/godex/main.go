@@ -696,6 +696,8 @@ func getBgCount(servers []MCPServer) int {
 
 func printHelp() {
 	fmt.Println(`
+Multiline: Enter to add new line, Enter again on empty line to submit
+
 Commands:
   /add-path <filesys|url> <value> - Add allowed path/URL to MCP server
                                     filesys <path> - Add to filesystem/bash
