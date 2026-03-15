@@ -287,13 +287,19 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			stopSpinner := make(chan bool)
 			go func() {
 				elapsed := 0
+				pulse := false
 				ticker := time.NewTicker(1 * time.Second)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ticker.C:
 						elapsed++
-						fmt.Printf("\r\033[90m[%ds]...\033[0m", elapsed)
+						pulse = !pulse
+						icon := "o"
+						if pulse {
+							icon = "O"
+						}
+						fmt.Printf("\r\033[33m%s\033[0m - Thinking - %s", icon, formatElapsed(elapsed))
 					case <-stopSpinner:
 						return
 					}
@@ -952,6 +958,15 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func formatElapsed(totalSeconds int) string {
+	if totalSeconds >= 60 {
+		minutes := totalSeconds / 60
+		seconds := totalSeconds % 60
+		return fmt.Sprintf("%dm%02d", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", totalSeconds)
 }
 
 func parseToolCall(text string) (string, string, map[string]interface{}, bool) {
