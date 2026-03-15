@@ -1,8 +1,7 @@
-//go:build !windows
-
 package mcp
 
 import (
+	"syscall"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
+		"time"
 )
 
 func GetWorkingDir() (string, error) {
@@ -184,37 +182,27 @@ func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
 			}
 		}
 	}
-	killedGroup := false
-	if pgid, err := syscall.Getpgid(targetPID); err == nil && pgid > 0 && pgid != syscall.Getpgrp() {
-		if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil {
-			killedGroup = true
-		} else if errors.Is(err, syscall.ESRCH) {
-			removeTracking()
-			return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
-		}
+	msg, err := killProcessGroup(targetPID, removeTracking)
+	if err == nil {
+		return msg, nil
 	}
-	if !killedGroup {
-		proc, err := os.FindProcess(targetPID)
-		if err != nil {
+	// Fallback to regular process kill if process group kill failed
+	proc, err := os.FindProcess(targetPID)
+	if err != nil {
+		removeTracking()
+		return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
+	}
+
+	err = proc.Kill()
+	if err != nil {
+		if errors.Is(err, syscall.ESRCH) {
 			removeTracking()
 			return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
 		}
-
-		err = proc.Kill()
-		if err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				removeTracking()
-				return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
-			}
-			return "", fmt.Errorf("failed to kill process: %v", err)
-		}
+		return "", fmt.Errorf("failed to kill process: %v", err)
 	}
 
 	removeTracking()
-
-	if killedGroup {
-		return fmt.Sprintf("Killed process group for PID %d", targetPID), nil
-	}
 	return fmt.Sprintf("Killed process %d", targetPID), nil
 }
 
@@ -226,16 +214,10 @@ func (s *BashServer) killAllBackground(args map[string]interface{}) (string, err
 	var killed []int
 	var failed []int
 	for _, procInfo := range s.backgroundPIDs {
-		killedGroup := false
-		if pgid, err := syscall.Getpgid(procInfo.PID); err == nil && pgid > 0 && pgid != syscall.Getpgrp() {
-			if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil {
-				killedGroup = true
-			} else if errors.Is(err, syscall.ESRCH) {
-				killedGroup = true
-			}
-		}
-		if killedGroup {
+		msg, err := killProcessGroup(procInfo.PID, func() {})
+		if err == nil {
 			killed = append(killed, procInfo.PID)
+			_ = msg
 			continue
 		}
 
