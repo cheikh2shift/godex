@@ -64,6 +64,13 @@ type sessionEntry struct {
 	Timestamp string
 }
 
+
+var (
+	version     string
+	buildTime   string
+	printVersion bool
+)
+
 func main() {
 	var (
 		configPath   string
@@ -83,7 +90,17 @@ func main() {
 	flag.BoolVar(&runWizard, "wizard", false, "launch the provider configuration wizard")
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
+	flag.BoolVar(&printVersion, "version", false, "print version information")
 	flag.Parse()
+
+	// Handle version flag
+	if printVersion {
+		fmt.Printf("godex version %s\n", version)
+		if buildTime != "" {
+			fmt.Printf("built at: %s\n", buildTime)
+		}
+		os.Exit(0)
+	}
 
 	if runWizard {
 		if err := wizard.RunWizard(configPath); err != nil {

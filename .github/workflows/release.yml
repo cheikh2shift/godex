@@ -32,35 +32,35 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -ldflags="-s -w" -o godex-linux-amd64 ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-linux-amd64 ./cmd/godex
 
       - name: Build Linux ARM64
         env:
           GOOS: linux
           GOARCH: arm64
         run: |
-          go build -ldflags="-s -w" -o godex-linux-arm64 ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-linux-arm64 ./cmd/godex
 
       - name: Build macOS AMD64
         env:
           GOOS: darwin
           GOARCH: amd64
         run: |
-          go build -ldflags="-s -w" -o godex-darwin-amd64 ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-amd64 ./cmd/godex
 
       - name: Build macOS ARM64
         env:
           GOOS: darwin
           GOARCH: arm64
         run: |
-          go build -ldflags="-s -w" -o godex-darwin-arm64 ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-arm64 ./cmd/godex
 
       - name: Build Windows AMD64
         env:
           GOOS: windows
           GOARCH: amd64
         run: |
-          go build -ldflags="-s -w" -o godex-windows-amd64.exe ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-windows-amd64.exe ./cmd/godex
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
