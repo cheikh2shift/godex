@@ -8,7 +8,7 @@
 
 ![GoDex Screenshot](scrreen.gif)
 
-GoDex is a CLI tool that interfaces with Ollama, Gemini, Hugging Face (and other LLM providers) through a TUI, with built-in MCP support for filesystem and bash commands.
+GoDex is a CLI tool that interfaces with Ollama, Gemini, Hugging Face (and other LLM providers) through a TUI, with built-in MCP support.
 
 ## Requirements
 
