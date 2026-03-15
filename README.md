@@ -6,7 +6,7 @@
 
 # GoDex - AI CLI Agent
 
-![GoDex Screenshot](scrreen.gif)
+![GoDex Screenshot](screen2.gif)
 
 GoDex is a CLI tool that interfaces with Ollama, Gemini, Hugging Face (and other LLM providers) through a TUI, with built-in MCP support.
 
