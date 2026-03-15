@@ -63,7 +63,7 @@ func RunWizard(destination string) error {
 		case "endpoint":
 			return existingProvider.Endpoint
 		case "api_key_env":
-			return existingProvider.APIKeyEnv
+			return defaultVal
 		case "temperature":
 			if existingProvider.Temperature != nil {
 				return fmt.Sprintf("%v", *existingProvider.Temperature)

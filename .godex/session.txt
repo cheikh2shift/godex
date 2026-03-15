@@ -1,56 +1,87 @@
 ## Session Summary
 
 ### 1. What the User Asked For
-The user requested help adding their Go project (GoDex) to the awesome-go repository. They specifically asked to:
-- Check the contribution guide at https://github.com/avelino/awesome-go/blob/main/CONTRIBUTING.md
-- Determine how to add their CLI to the list
+
+The user requested to:
+1. Add a `--version` flag to their GoDex CLI command
+2. Inject the version value during GitHub Actions build from the current git tag
+3. After the initial implementation failed on Windows, the user asked to refactor the code to properly support Windows builds while keeping Unix support
 
 ### 2. Tools Used and What They Revealed
 
 **Tools Used:**
-- `list_directory` - To explore the current project structure at `/home/cheikh-seck/godex`
-- `read_file` - To read the README.md of the godex project
-- `run_command` - Multiple curl commands to fetch and parse the awesome-go CONTRIBUTING.md and README.md files
+- `run_command` - Executed various shell commands to read files, modify code, build the project, and interact with git/GitHub
+- `read_file` / `run_command` with `cat` - Examined source files to understand structure
 
 **What They Revealed:**
+- The GoDex project is a CLI tool in `cmd/godex/main.go`
+- Existing flags were defined using Go's `flag` package
+- The GitHub Actions workflow in `.github/workflows/release.yml` builds for multiple platforms (Linux amd64/arm64, macOS amd64/arm64, Windows)
+- The `internal/mcp/bash.go` file contained Linux-specific syscall calls that don't exist on Windows
 
-**About GoDex (from local README.md):**
-- GoDex is a CLI tool that interfaces with Ollama (and other LLM providers) through a TUI
-- Has built-in MCP support for filesystem and bash commands
-- Requires Go 1.25.7+ and Ollama
-- GitHub repo: `github.com/cheikh2shift/godex`
+### 3. Key Findings, Decisions, and Code Written
 
-**From awesome-go CONTRIBUTING.md (quality standards):**
-- Projects must have at least 5 months of history since first commit
-- Must have an open source license (from allowed list)
-- Must function as documented and expected
-- Must be generally useful to the Go community
-- Must be actively maintained with regular, recent commits
+**A. Version Flag Implementation (`cmd/godex/main.go`)**
 
-**From awesome-go README.md structure:**
-- Found the "Artificial Intelligence" section at line 219
-- Found "Standard CLI" section at line 407
-- Found "Command Line" section at line 362
+Added version variables and flag handling:
+```go
+var (
+    version     string
+    buildTime   string
+    printVersion bool
+)
 
-### 3. Key Findings and Decisions
+// Added flag definition
+flag.BoolVar(&printVersion, "version", false, "print version information")
 
-**Category Decision:**
-GoDex is an AI-powered CLI agent that interfaces with Ollama (LLM provider). The best fit is the **Artificial Intelligence** section, not the "Standard CLI" or "Command Line" sections, because:
-- Its primary functionality is AI-powered (LLM interactions)
-- It's a complete application (CLI tool), not a library for building CLI apps
-
-**Entry Format:**
-```md
-- [godex](https://github.com/cheikh2shift/godex) - AI-powered CLI agent that interfaces with Ollama through a TUI with built-in MCP support.
+// Added version handling after flag.Parse()
+if printVersion {
+    fmt.Printf("godex version %s\n", version)
+    if buildTime != "" {
+        fmt.Printf("built at: %s\n", buildTime)
+    }
+    os.Exit(0)
+}
 ```
 
-**PR Requirements:**
-- Include forge link, pkg.go.dev link, and goreportcard link in PR body
+**B. GitHub Actions Workflow Update (`.github/workflows/release.yml`)**
 
-### 4. Errors Encountered
+Modified each build step to inject version:
+```yaml
+go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-linux-amd64 ./cmd/godex
+```
 
-- **fetch_url tool errors**: The `fetch_url` tool returned "URL not allowed" errors for GitHub URLs. This was resolved by using `curl` via the `run_command` tool instead.
-- **read_file path error**: Attempted to read `/tmp/contributing.md` but got "path not allowed" error. Worked around by using curl directly in commands.
-- **Multiple "Max tool rounds reached" errors**: The session hit tool usage limits, requiring the final answer to be provided without additional tool calls.
+**C. Windows Build Fix - Platform-Specific Code**
 
-FINAL_ANSWER: This session helped the user understand how to add their GoDex CLI to awesome-go by researching the contribution guidelines, identifying the appropriate category (Artificial Intelligence), and providing the exact format and steps needed to create a PR to the awesome-go repository.
+Created two new files:
+- `internal/mcp/bash_unix.go` - Unix-specific process group killing
+- `internal/mcp/bash_windows.go` - Windows-compatible process killing
+
+Updated `bash.go` to call the platform-specific `killProcessGroup()` function instead of using syscalls directly.
+
+### 4. Errors Encountered and How They Were Resolved
+
+**Error 1: Initial sed/python newlines not escaping properly**
+- Multiple attempts to add version handling code resulted in corrupted files with literal `\n` instead of actual newlines
+- **Resolution:** Reverted and used Python with proper string handling and triple-quoted strings
+
+**Error 2: Flag type mismatch (string vs bool)**
+- First tried using `flag.StringVar` but users expected `--version` to work like a standard boolean flag
+- **Resolution:** Changed to use a separate boolean `printVersion` variable for the flag while keeping `version` as string for the ldflags injection
+
+**Error 3: Windows build failure - undefined syscalls**
+```
+Error: internal/mcp/bash.go:186:26: undefined: syscall.Getpgid
+Error: internal/mcp/bash.go:186:88: undefined: syscall.Getpgrp
+Error: internal/mcp/bash.go:187:21: undefined: syscall.Kill
+```
+- **Initial fix:** Added `//go:build !windows` to exclude bash.go from Windows builds, but this broke Linux builds because `BashServer` struct was in the excluded file
+- **Final resolution:** Created platform-specific files (`bash_unix.go` and `bash_windows.go`) with proper build constraints, and refactored `bash.go` to call the platform-specific function
+
+**Error 4: go.sum modified unnecessarily**
+- `go mod tidy` modified go.sum
+- **Resolution:** Reverted go.sum changes before committing
+
+### Summary of Commits Pushed
+1. `v0.14` - Added version flag and CI injection
+2. `v0.15` - Fixed Windows build with platform-specific code
