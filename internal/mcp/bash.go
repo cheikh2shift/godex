@@ -3,10 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -121,17 +124,26 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 		defer cancel()
 
-		// Use nohup to run in background, redirect output to nohup.out
-		cmd := exec.CommandContext(ctx, "sh", "-c", "nohup "+command+" > nohup.out 2>&1 &")
-		err := cmd.Start()
+		// Use nohup to run in background, redirect output to nohup.out, and capture the PID.
+		// Wrap the command in sh -c so shell operators like `cd` work.
+		cmd := exec.CommandContext(ctx, "sh", "-c", "nohup sh -c \"$1\" > nohup.out 2>&1 & echo $!", "sh", command)
+		cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return "", fmt.Errorf("failed to start background command: %v", err)
+			return "", fmt.Errorf("failed to start background command: %v (output: %s)", err, strings.TrimSpace(string(output)))
 		}
+
+		pidStr := strings.TrimSpace(string(output))
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil || pid <= 0 {
+			return "", fmt.Errorf("failed to parse background PID from output: %q", pidStr)
+		}
+
 		s.backgroundPIDs = append(s.backgroundPIDs, bgProcess{
-			PID:     cmd.Process.Pid,
+			PID:     pid,
 			Command: strings.TrimSpace(command),
 		})
-		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", cmd.Process.Pid), nil
+		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", pid), nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
@@ -161,25 +173,47 @@ func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("pid is required")
 	}
 
-	proc, err := os.FindProcess(int(pid))
-	if err != nil {
-		return "", fmt.Errorf("failed to find process: %v", err)
+	targetPID := int(pid)
+	removeTracking := func() {
+		for i, p := range s.backgroundPIDs {
+			if p.PID == targetPID {
+				s.backgroundPIDs = append(s.backgroundPIDs[:i], s.backgroundPIDs[i+1:]...)
+				break
+			}
+		}
 	}
-
-	err = proc.Kill()
-	if err != nil {
-		return "", fmt.Errorf("failed to kill process: %v", err)
+	killedGroup := false
+	if pgid, err := syscall.Getpgid(targetPID); err == nil && pgid > 0 && pgid != syscall.Getpgrp() {
+		if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil {
+			killedGroup = true
+		} else if errors.Is(err, syscall.ESRCH) {
+			removeTracking()
+			return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
+		}
 	}
+	if !killedGroup {
+		proc, err := os.FindProcess(targetPID)
+		if err != nil {
+			removeTracking()
+			return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
+		}
 
-	// Remove from tracking
-	for i, p := range s.backgroundPIDs {
-		if p.PID == int(pid) {
-			s.backgroundPIDs = append(s.backgroundPIDs[:i], s.backgroundPIDs[i+1:]...)
-			break
+		err = proc.Kill()
+		if err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				removeTracking()
+				return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
+			}
+			return "", fmt.Errorf("failed to kill process: %v", err)
 		}
 	}
 
-	return fmt.Sprintf("Killed process %d", int(pid)), nil
+	removeTracking()
+
+	if killedGroup {
+		return fmt.Sprintf("Killed process group for PID %d", targetPID), nil
+	}
+	return fmt.Sprintf("Killed process %d", targetPID), nil
 }
 
 func (s *BashServer) killAllBackground(args map[string]interface{}) (string, error) {
@@ -190,9 +224,24 @@ func (s *BashServer) killAllBackground(args map[string]interface{}) (string, err
 	var killed []int
 	var failed []int
 	for _, procInfo := range s.backgroundPIDs {
+		killedGroup := false
+		if pgid, err := syscall.Getpgid(procInfo.PID); err == nil && pgid > 0 && pgid != syscall.Getpgrp() {
+			if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil {
+				killedGroup = true
+			} else if errors.Is(err, syscall.ESRCH) {
+				killedGroup = true
+			}
+		}
+		if killedGroup {
+			killed = append(killed, procInfo.PID)
+			continue
+		}
+
 		proc, err := os.FindProcess(procInfo.PID)
 		if err == nil {
 			if err := proc.Kill(); err == nil {
+				killed = append(killed, procInfo.PID)
+			} else if errors.Is(err, syscall.ESRCH) {
 				killed = append(killed, procInfo.PID)
 			} else {
 				failed = append(failed, procInfo.PID)
@@ -290,7 +339,6 @@ func (s *BashServer) Close() error {
 }
 
 func (s *BashServer) ListBackground() (string, error) {
-	s.cleanupDeadProcesses()
 	if len(s.backgroundPIDs) == 0 {
 		return "No background processes", nil
 	}
@@ -299,12 +347,20 @@ func (s *BashServer) ListBackground() (string, error) {
 		proc, err := os.FindProcess(procInfo.PID)
 		if err == nil {
 			err = proc.Signal(nil) // Check if process is alive
-			if err == nil {
-				if procInfo.Command != "" {
-					pids = append(pids, fmt.Sprintf("PID %d (running) - %s", procInfo.PID, procInfo.Command))
-				} else {
-					pids = append(pids, fmt.Sprintf("PID %d (running)", procInfo.PID))
-				}
+			status := "running"
+			if err != nil {
+				status = "not running"
+			}
+			if procInfo.Command != "" {
+				pids = append(pids, fmt.Sprintf("PID %d (%s) - %s", procInfo.PID, status, procInfo.Command))
+			} else {
+				pids = append(pids, fmt.Sprintf("PID %d (%s)", procInfo.PID, status))
+			}
+		} else {
+			if procInfo.Command != "" {
+				pids = append(pids, fmt.Sprintf("PID %d - %s", procInfo.PID, procInfo.Command))
+			} else {
+				pids = append(pids, fmt.Sprintf("PID %d", procInfo.PID))
 			}
 		}
 	}
@@ -315,20 +371,26 @@ func (s *BashServer) ListBackground() (string, error) {
 }
 
 func (s *BashServer) BackgroundCount() int {
-	s.cleanupDeadProcesses()
 	return len(s.backgroundPIDs)
 }
 
-func (s *BashServer) cleanupDeadProcesses() {
+func (s *BashServer) PruneBackground() ([]int, error) {
 	var alive []bgProcess
+	var removed []int
 	for _, procInfo := range s.backgroundPIDs {
 		proc, err := os.FindProcess(procInfo.PID)
-		if err == nil {
-			err = proc.Signal(nil) // Signal 0 checks if process exists
-			if err == nil {
-				alive = append(alive, procInfo)
+		if err != nil {
+			removed = append(removed, procInfo.PID)
+			continue
+		}
+		if err := proc.Signal(nil); err != nil {
+			if errors.Is(err, syscall.ESRCH) || errors.Is(err, os.ErrProcessDone) {
+				removed = append(removed, procInfo.PID)
+				continue
 			}
 		}
+		alive = append(alive, procInfo)
 	}
 	s.backgroundPIDs = alive
+	return removed, nil
 }

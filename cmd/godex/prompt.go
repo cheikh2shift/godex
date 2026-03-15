@@ -26,6 +26,7 @@ var commandTips = map[string]string{
 	"/quit":      "Exit without saving",
 	"/save":      "Save session and exit",
 	"/save-exit": "Save session and exit",
+	"/kill":      "Kill a background process by PID or prune dead entries: /kill <pid> | /kill --prune",
 	"/killbg":    "Kill all background processes",
 	"/bg":        "List background processes",
 	"/clear":     "Clear the screen",

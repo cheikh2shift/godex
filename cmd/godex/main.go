@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +42,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var thinkingStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
@@ -190,6 +191,10 @@ func main() {
 		}
 		if input == "/killbg" {
 			handleKillBg(servers)
+			continue
+		}
+		if strings.HasPrefix(input, "/kill ") || input == "/kill" {
+			handleKill(servers, input)
 			continue
 		}
 		if input == "/bg" {
@@ -686,6 +691,51 @@ func handleKillBg(servers []MCPServer) {
 	fmt.Println("No bash server found")
 }
 
+func handleKill(servers []MCPServer, input string) {
+	fields := strings.Fields(input)
+	if len(fields) != 2 {
+		fmt.Println("Usage: /kill <pid> | /kill --prune")
+		return
+	}
+	if fields[1] == "--prune" {
+		for _, server := range servers {
+			if bs, ok := server.(*mcp.BashServer); ok {
+				removed, err := bs.PruneBackground()
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else if len(removed) == 0 {
+					fmt.Println("No dead background entries to prune")
+				} else {
+					fmt.Printf("Removed dead background entries: %v\n", removed)
+				}
+				return
+			}
+		}
+		fmt.Println("No bash server found")
+		return
+	}
+	pid, err := strconv.Atoi(fields[1])
+	if err != nil || pid <= 0 {
+		fmt.Println("Usage: /kill <pid> | /kill --prune")
+		return
+	}
+
+	for _, server := range servers {
+		if bs, ok := server.(*mcp.BashServer); ok {
+			result, err := bs.CallTool(context.Background(), "kill_command", map[string]interface{}{
+				"pid": float64(pid),
+			})
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+			} else {
+				fmt.Println(result)
+			}
+			return
+		}
+	}
+	fmt.Println("No bash server found")
+}
+
 func getToolDescription(servers []MCPServer, toolName string) string {
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
@@ -732,6 +782,7 @@ Commands:
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
   /save, /save-exit - Save session and exit
+  /kill <pid>       - Kill a background process by PID
   /killbg           - Kill all background processes
   /bg               - List background processes
   /clear            - Clear the terminal
