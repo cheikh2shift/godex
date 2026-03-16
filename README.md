@@ -1,7 +1,7 @@
 > [!WARNING]
 > I love adding features, please add any requests to the issue tab.
 
-# GoDex - AI CLI Agent
+# GoDex - AI Agent
 
 ![GoDex Screenshot](screen2.gif)
 
@@ -176,7 +176,7 @@ curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh |
 ### Run
 
 ```bash
-# Run the CLI (uses default provider from config)
+# Run the TUI (uses default provider from config)
 godex
 
 # Run with custom config file
