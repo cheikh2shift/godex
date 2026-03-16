@@ -135,8 +135,8 @@ func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error
 
 	g.mu.Lock()
 	if resp.UsageMetadata != nil {
-		g.promptTokens = int(resp.UsageMetadata.PromptTokenCount)
-		g.completionTokens = int(resp.UsageMetadata.CandidatesTokenCount)
+		g.promptTokens += int(resp.UsageMetadata.PromptTokenCount)
+		g.completionTokens += int(resp.UsageMetadata.CandidatesTokenCount)
 	}
 	g.mu.Unlock()
 
