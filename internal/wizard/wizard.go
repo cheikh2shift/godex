@@ -128,7 +128,7 @@ func RunWizard(destination string) error {
 		provider.APIKey = prompt(reader, "API key (kept in YAML, not recommended)", "")
 	}
 
-	tempStr := prompt(reader, "Temperature (0.0-1.0)", getDefault("temperature", "0.5"))
+	tempStr := prompt(reader, "Temperature (0.0-1.0). The higher the value, the more random the output.", getDefault("temperature", "0.5"))
 	if tempStr != "" {
 		if val, err := strconv.ParseFloat(tempStr, 64); err == nil {
 			provider.Temperature = &val
