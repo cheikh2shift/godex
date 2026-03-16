@@ -188,9 +188,8 @@ func main() {
 		}
 
 		contextLimit := llmProvider.ContextLimit()
-		inputTokens, outputTokens := llmProvider.TokenUsage()
-		totalTokens := inputTokens + outputTokens
-		input, err := readPrompt(prompt, history, provider.Model, totalTokens, contextLimit)
+		inputTokens, _ := llmProvider.TokenUsage()
+		input, err := readPrompt(prompt, history, provider.Model, inputTokens, contextLimit)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
