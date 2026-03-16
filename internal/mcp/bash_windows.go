@@ -32,3 +32,9 @@ func killProcessGroup(targetPID int, removeTracking func()) (string, error) {
 func GetUnixTools() []Tool {
 	return []Tool{}
 }
+
+
+// HandleRunBashScript is not supported on Windows
+func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]interface{}) (string, error) {
+	return "", fmt.Errorf("run_bash_script is not supported on Windows")
+}
