@@ -144,7 +144,6 @@ func (o *ollamaProvider) fetchOllamaLibraryContext() error {
 	if idx := strings.Index(modelName, ":"); idx > 0 {
 		modelName = modelName[:idx]
 	}
-	modelName = strings.TrimPrefix(modelName, "hf.co/")
 
 	url := fmt.Sprintf("https://ollama.com/library/%s/tags", modelName)
 	resp, err := http.Get(url)
