@@ -32,7 +32,7 @@ func NewBashServer(allowedPaths []string) *BashServer {
 	allowedPaths = sanitizeAllowedPaths(allowedPaths)
 	allowedPaths = withDefaultCwd(allowedPaths)
 
-	return &BashServer{
+	server := &BashServer{
 		allowedPaths: allowedPaths,
 		tools: []Tool{
 			{
@@ -57,6 +57,12 @@ func NewBashServer(allowedPaths []string) *BashServer {
 			},
 		},
 	}
+
+	// Add Unix-only tools (mac, linux)
+	unixTools := GetUnixTools()
+	server.tools = append(server.tools, unixTools...)
+
+	return server
 }
 
 func (s *BashServer) Name() string {
@@ -79,6 +85,8 @@ func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[st
 		return s.runPython(ctx, arguments)
 	case "run_node":
 		return s.runNode(ctx, arguments)
+	case "run_bash_script":
+		return s.HandleRunBashScript(ctx, arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

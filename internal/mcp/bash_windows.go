@@ -26,3 +26,9 @@ func killProcessGroup(targetPID int, removeTracking func()) (string, error) {
 	}
 	return fmt.Sprintf("Killed process %d", targetPID), nil
 }
+
+
+// GetUnixTools returns an empty list on Windows (not supported)
+func GetUnixTools() []Tool {
+	return []Tool{}
+}
