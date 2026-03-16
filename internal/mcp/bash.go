@@ -59,6 +59,10 @@ func NewBashServer(allowedPaths []string) *BashServer {
 	}
 }
 
+func (s *BashServer) Name() string {
+	return "bash"
+}
+
 func (s *BashServer) Tools() []Tool {
 	return s.tools
 }

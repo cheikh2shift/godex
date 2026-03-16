@@ -63,6 +63,10 @@ func NewFileSystemServer(allowedPaths []string) *FileSystemServer {
 	return server
 }
 
+func (s *FileSystemServer) Name() string {
+	return "filesystem"
+}
+
 func (s *FileSystemServer) Tools() []Tool {
 	return s.tools
 }

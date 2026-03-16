@@ -26,7 +26,7 @@ type Tool struct {
 }
 
 type MCPToolExecutor struct {
-	Name       string
+	serverName string
 	server     MCPServer
 	mcpClient  *client.Client
 	tools      []Tool
@@ -35,7 +35,7 @@ type MCPToolExecutor struct {
 
 func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MCPToolExecutor, error) {
 	executor := &MCPToolExecutor{
-		Name:       server.Name,
+		serverName: server.Name,
 		server:     server,
 		workingDir: workingDir,
 	}
@@ -125,6 +125,10 @@ func listTools(ctx context.Context, mcpClient *client.Client) ([]Tool, error) {
 	}
 
 	return tools, nil
+}
+
+func (m *MCPToolExecutor) Name() string {
+	return m.server.Name
 }
 
 func (m *MCPToolExecutor) Tools() []Tool {

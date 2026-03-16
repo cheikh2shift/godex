@@ -51,6 +51,10 @@ func NewWebScraperServer(allowedURLs []string) *WebScraperServer {
 	}
 }
 
+func (s *WebScraperServer) Name() string {
+	return "webscraper"
+}
+
 func (s *WebScraperServer) Tools() []Tool {
 	return s.tools
 }

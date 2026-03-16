@@ -34,6 +34,7 @@ const (
 )
 
 type MCPServer interface {
+	Name() string
 	Tools() []mcp.Tool
 	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
 	AllowedPaths() []string
@@ -850,7 +851,46 @@ func uniqueStrings(input []string) []string {
 
 func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
 	tree, _ := godexcontext.BuildTree(".")
-	fullPrompt := agent.ToolIntroPrompt(prompt, tree)
+	toolsDesc := getToolsDescription(servers)
+	wd, _ := os.Getwd()
+	fullPrompt := fmt.Sprintf(`You have access to these tools:
+%s
+
+CRITICAL: The current working directory is: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
+
+IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
+Do NOT use example paths like "/path/to/directory" - use the actual path: %s
+
+BASH TOOL LIMITATIONS:
+- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
+- Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
+- Shell aliases are NOT expanded - use full command names
+- NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
+- ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
+- ALWAYS use background: true when starting a webserver or a long-running background task
+- After starting a background process, use sleep before making requests to it
+- Use kill_command with the PID to stop background processes when done
+
+To call tools, respond with one or more JSON objects, each in its own markdown code block.
+You can call multiple tools at once to be more efficient.
+
+Example:
+`+"```json"+`
+{
+  "name": "read_file",
+  "arguments": {
+    "path": "/absolute/path/to/file"
+  }
+}
+`+"```"+`
+
+IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+
+Project tree:
+%s
+
+User request: %s`, toolsDesc, wd, wd, tree, prompt)
 
 	// Get tool settings
 	maxToolRounds := 10
@@ -963,7 +1003,8 @@ func getToolsDescription(servers []MCPServer) string {
 		if len(tools) == 0 {
 			continue
 		}
-		desc.WriteString(fmt.Sprintf("\n%s tools:\n", server.Tools()[0].Name))
+		serverName := server.Name()
+		desc.WriteString(fmt.Sprintf("\n[%s]\n", serverName))
 		for _, tool := range tools {
 			desc.WriteString(fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description))
 		}
@@ -1181,44 +1222,85 @@ func truncate(s string, maxLen int) string {
 func extractAllToolCalls(text string) []map[string]interface{} {
 	var results []map[string]interface{}
 
-	// First, try to find markdown code blocks (```json ... ``` or ``` ... ```)
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\n(.*?)\n```")
-	blocks := codeBlockRe.FindAllStringSubmatch(text, -1)
+	candidates := []string{text}
+	if normalized := normalizeToolCallText(text); normalized != text {
+		candidates = append(candidates, normalized)
+	}
 
-	for _, block := range blocks {
-		content := strings.TrimSpace(block[1])
-		// Try to parse the whole block as one JSON object
-		var data map[string]interface{}
-		if err := json.Unmarshal([]byte(content), &data); err == nil {
-			if _, ok := data["name"].(string); ok {
-				results = append(results, processToolData(data))
+	for _, candidate := range candidates {
+		// First, try to find markdown code blocks (```json ... ``` or ``` ... ```)
+		codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\n(.*?)\n```")
+		blocks := codeBlockRe.FindAllStringSubmatch(candidate, -1)
+
+		for _, block := range blocks {
+			content := strings.TrimSpace(block[1])
+			// Try to parse the whole block as one JSON object
+			var data map[string]interface{}
+			if err := json.Unmarshal([]byte(content), &data); err == nil {
+				if _, ok := data["name"].(string); ok {
+					results = append(results, processToolData(data))
+				}
+			} else {
+				// If not a single object, maybe multiple objects in the block?
+				results = append(results, extractJsonObjects(content)...)
 			}
-		} else {
-			// If not a single object, maybe multiple objects in the block?
-			results = append(results, extractJsonObjects(content)...)
 		}
-	}
 
-	// If no tools found in code blocks, search the whole text for { ... } blobs
-	if len(results) == 0 {
-		results = append(results, extractJsonObjects(text)...)
-	}
+		// If no tools found in code blocks, search the whole text for { ... } blobs
+		if len(results) == 0 {
+			results = append(results, extractJsonObjects(candidate)...)
+		}
 
-	// Safety fallback for the specific [TOOL_CALL] format
-	if len(results) == 0 {
-		toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
-		tcMatches := toolCallRe.FindAllStringSubmatch(text, -1)
-		for _, m := range tcMatches {
-			if len(m) > 1 {
-				nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
-				if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
-					results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
+		// Safety fallback for the specific [TOOL_CALL] format
+		if len(results) == 0 {
+			toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
+			tcMatches := toolCallRe.FindAllStringSubmatch(candidate, -1)
+			for _, m := range tcMatches {
+				if len(m) > 1 {
+					nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
+					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
+						results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
+					}
 				}
 			}
+		}
+
+		if len(results) > 0 {
+			break
 		}
 	}
 
 	return results
+}
+
+func normalizeToolCallText(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return text
+	}
+
+	nonEmpty := 0
+	withMargin := 0
+	marginRe := regexp.MustCompile(`^\s*│`)
+	stripRe := regexp.MustCompile(`^\s*│\s?`)
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		nonEmpty++
+		if marginRe.MatchString(line) {
+			withMargin++
+		}
+	}
+	if nonEmpty == 0 || withMargin*2 < nonEmpty {
+		return text
+	}
+
+	for i, line := range lines {
+		lines[i] = stripRe.ReplaceAllString(line, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // extractJsonObjects finds all balanced { ... } strings and tries to parse them as tool calls

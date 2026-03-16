@@ -180,7 +180,7 @@ func (a *App) handleInput(input string) {
 		var pathList []string
 		for _, executor := range a.mcpExecutors {
 			paths := executor.AllowedPaths()
-			pathList = append(pathList, fmt.Sprintf("%s: %s", executor.Name, strings.Join(paths, ", ")))
+			pathList = append(pathList, fmt.Sprintf("%s: %s", executor.Name(), strings.Join(paths, ", ")))
 		}
 		if len(pathList) == 0 {
 			a.addMessage(fmt.Sprintf("[System] No MCP servers configured"))
@@ -283,21 +283,21 @@ func (a *App) addMCPPath(pathType, value string) {
 
 	for _, executor := range a.mcpExecutors {
 		if isURL {
-			if strings.Contains(executor.Name, "web") || strings.Contains(executor.Name, "scraper") || strings.Contains(executor.Name, "fetch") {
+			if strings.Contains(executor.Name(), "web") || strings.Contains(executor.Name(), "scraper") || strings.Contains(executor.Name(), "fetch") {
 				if err := executor.AddURL(a.baseCtx, value); err != nil {
 					a.addMessage(fmt.Sprintf("[System] Failed to add URL: %v", err))
 					return
 				}
-				a.addMessage(fmt.Sprintf("[System] Added URL '%s' to %s", value, executor.Name))
+				a.addMessage(fmt.Sprintf("[System] Added URL '%s' to %s", value, executor.Name()))
 				added = true
 			}
 		} else {
-			if executor.Name == "filesystem" || strings.Contains(executor.Name, "file") || strings.Contains(executor.Name, "bash") || strings.Contains(executor.Name, "command") {
+			if executor.Name() == "filesystem" || strings.Contains(executor.Name(), "file") || strings.Contains(executor.Name(), "bash") || strings.Contains(executor.Name(), "command") {
 				if err := executor.AddPath(a.baseCtx, value); err != nil {
 					a.addMessage(fmt.Sprintf("[System] Failed to add path: %v", err))
 					return
 				}
-				a.addMessage(fmt.Sprintf("[System] Added path '%s' to %s", value, executor.Name))
+				a.addMessage(fmt.Sprintf("[System] Added path '%s' to %s", value, executor.Name()))
 				added = true
 			}
 		}
