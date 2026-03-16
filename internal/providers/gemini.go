@@ -16,15 +16,15 @@ import (
 const DefaultGeminiModel = "gemini-2.5-flash"
 
 type geminiProvider struct {
-	client         *genai.Client
-	model          string
-	temperature    *float64
-	cancelMu       sync.Mutex
-	mu             sync.Mutex
-	cancelFunc     context.CancelFunc
-	cancelGen      uint64
-	contextLimit   int
-	promptTokens   int
+	client           *genai.Client
+	model            string
+	temperature      *float64
+	cancelMu         sync.Mutex
+	mu               sync.Mutex
+	cancelFunc       context.CancelFunc
+	cancelGen        uint64
+	contextLimit     int
+	promptTokens     int
 	completionTokens int
 }
 
@@ -135,8 +135,8 @@ func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error
 
 	g.mu.Lock()
 	if resp.UsageMetadata != nil {
-		g.promptTokens += int(resp.UsageMetadata.PromptTokenCount)
-		g.completionTokens += int(resp.UsageMetadata.CandidatesTokenCount)
+		g.promptTokens = int(resp.UsageMetadata.PromptTokenCount)
+		g.completionTokens = int(resp.UsageMetadata.CandidatesTokenCount)
 	}
 	g.mu.Unlock()
 
