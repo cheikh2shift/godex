@@ -23,6 +23,8 @@ type Provider interface {
 	Tools() []Tool
 	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
 	Close() error
+	ContextLimit() int
+	TokenUsage() (input int, output int)
 }
 
 type factory func(cfg *config.Provider) (Provider, error)

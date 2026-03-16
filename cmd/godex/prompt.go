@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -50,9 +52,11 @@ type promptModel struct {
 	showCompletions bool
 	width           int
 	modelName       string
+	contextUsage    int
+	contextLimit    int
 }
 
-func newPromptModel(prompt string, history []string, modelName string) promptModel {
+func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int) promptModel {
 	ti := textinput.New()
 	ti.Prompt = prompt
 	ti.Placeholder = "Press ↵ Enter to submit"
@@ -67,11 +71,13 @@ func newPromptModel(prompt string, history []string, modelName string) promptMod
 		history:      history,
 		historyIndex: len(history),
 		modelName:    modelName,
+		contextUsage: contextUsage,
+		contextLimit: contextLimit,
 	}
 }
 
-func readPrompt(prompt string, history []string, modelName string) (string, error) {
-	m := newPromptModel(prompt, history, modelName)
+func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int) (string, error) {
+	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -170,9 +176,57 @@ func (m promptModel) View() string {
 		boxStyle = boxStyle.Width(max(0, m.width-4))
 	}
 	b.WriteString(boxStyle.Render(m.input.View()))
-	if m.modelName != "" {
+
+	if m.contextLimit > 0 || m.modelName != "" {
 		b.WriteByte('\n')
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render("Model: " + m.modelName))
+
+		var leftContent, rightContent string
+
+		if m.modelName != "" {
+			leftContent = "Model: " + m.modelName
+		}
+
+		if m.contextLimit > 0 {
+			usedPercent := float64(m.contextUsage) / float64(m.contextLimit)
+			meterWidth := 10
+			filled := int(usedPercent * float64(meterWidth))
+			if filled > meterWidth {
+				filled = meterWidth
+			}
+			var meter strings.Builder
+			meter.WriteString("[")
+			greenStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+			yellowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("226"))
+			redStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+			for i := 0; i < meterWidth; i++ {
+				if i < filled {
+					if usedPercent > 0.8 {
+						meter.WriteString(redStyle.Render("="))
+					} else if usedPercent > 0.5 {
+						meter.WriteString(yellowStyle.Render("="))
+					} else {
+						meter.WriteString(greenStyle.Render("="))
+					}
+				} else {
+					meter.WriteString("-")
+				}
+			}
+			meter.WriteString("]")
+			meter.WriteString(fmt.Sprintf(" %s/%s", formatNumber(m.contextUsage), formatNumber(m.contextLimit)))
+			rightContent = meter.String()
+		}
+
+		grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+		if leftContent != "" {
+			b.WriteString(grayStyle.Render(leftContent))
+		}
+		if rightContent != "" {
+			if leftContent != "" {
+				b.WriteString(" ")
+			}
+			b.WriteString(grayStyle.Render(rightContent))
+		}
 	}
 	if m.showCompletions && len(m.completions) > 0 {
 		var display []string
@@ -334,4 +388,18 @@ func appendHistory(history []string, item string) []string {
 		return history
 	}
 	return append(history, item)
+}
+
+func formatNumber(n int) string {
+	s := strconv.FormatInt(int64(n), 10)
+	result := ""
+	count := 0
+	for i := len(s) - 1; i >= 0; i-- {
+		if count > 0 && count%3 == 0 {
+			result = "," + result
+		}
+		result = string(s[i]) + result
+		count++
+	}
+	return result
 }

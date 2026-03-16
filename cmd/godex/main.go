@@ -65,10 +65,9 @@ type sessionEntry struct {
 	Timestamp string
 }
 
-
 var (
-	version     string
-	buildTime   string
+	version      string
+	buildTime    string
 	printVersion bool
 )
 
@@ -130,6 +129,11 @@ func main() {
 			log.Fatalf("provider %q not found. Available: %v", providerName, available)
 		}
 	}
+	llmProvider, err := agent.GetProvider(provider)
+	if err != nil {
+		log.Fatalf("failed to create provider: %v", err)
+	}
+
 	if provider == nil {
 		log.Fatalf("no provider configured; use --wizard to create one")
 	}
@@ -183,7 +187,10 @@ func main() {
 			prompt = fmt.Sprintf("[%d bg] >", bgCount)
 		}
 
-		input, err := readPrompt(prompt, history, provider.Model)
+		contextLimit := llmProvider.ContextLimit()
+		inputTokens, outputTokens := llmProvider.TokenUsage()
+		totalTokens := inputTokens + outputTokens
+		input, err := readPrompt(prompt, history, provider.Model, totalTokens, contextLimit)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
@@ -1161,7 +1168,6 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 	}
 	return "", fmt.Errorf("tool %s not found", name)
 }
-
 
 func normalizeToolPathArgs(toolName string, args map[string]interface{}) {
 	if !isFilesystemTool(toolName) {

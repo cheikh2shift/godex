@@ -208,3 +208,11 @@ func resolveHFAPIKey(cfg *config.Provider) (string, error) {
 	}
 	return "", fmt.Errorf("huggingface API key not set (set api_key, api_key_env, or HF_TOKEN)")
 }
+
+func (h *huggingfaceProvider) ContextLimit() int {
+	return 0
+}
+
+func (h *huggingfaceProvider) TokenUsage() (input int, output int) {
+	return 0, 0
+}
