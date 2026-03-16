@@ -70,15 +70,15 @@ func (s *BashServer) Tools() []Tool {
 func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
 	switch name {
 	case "run_command":
-		return s.runCommand(arguments)
+		return s.runCommand(ctx, arguments)
 	case "kill_command":
 		return s.killCommand(arguments)
 	case "kill_all_background":
 		return s.killAllBackground(arguments)
 	case "run_python":
-		return s.runPython(arguments)
+		return s.runPython(ctx, arguments)
 	case "run_node":
-		return s.runNode(arguments)
+		return s.runNode(ctx, arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -96,7 +96,7 @@ func (s *BashServer) isPathAllowed(path string) bool {
 	return false
 }
 
-func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
+func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
 		return "", fmt.Errorf("command is required")
@@ -125,7 +125,7 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 
 	// Run in background with nohup
 	if background {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 		defer cancel()
 
 		// Use nohup to run in background, redirect output to nohup.out, and capture the PID.
@@ -150,7 +150,7 @@ func (s *BashServer) runCommand(args map[string]interface{}) (string, error) {
 		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", pid), nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
@@ -252,7 +252,7 @@ func (s *BashServer) KillAllBackground() (string, error) {
 	return s.killAllBackground(nil)
 }
 
-func (s *BashServer) runPython(args map[string]interface{}) (string, error) {
+func (s *BashServer) runPython(ctx context.Context, args map[string]interface{}) (string, error) {
 	code, ok := args["code"].(string)
 	if !ok {
 		return "", fmt.Errorf("code is required")
@@ -263,7 +263,7 @@ func (s *BashServer) runPython(args map[string]interface{}) (string, error) {
 		timeout = int(t)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "python3", "-c", code)
@@ -276,7 +276,7 @@ func (s *BashServer) runPython(args map[string]interface{}) (string, error) {
 	return string(output), nil
 }
 
-func (s *BashServer) runNode(args map[string]interface{}) (string, error) {
+func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (string, error) {
 	code, ok := args["code"].(string)
 	if !ok {
 		return "", fmt.Errorf("code is required")
@@ -287,7 +287,7 @@ func (s *BashServer) runNode(args map[string]interface{}) (string, error) {
 		timeout = int(t)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "node", "-e", code)

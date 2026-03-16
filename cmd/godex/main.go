@@ -440,7 +440,7 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
-				result, err := callTool(servers, toolName, args, toolTimeout)
+				result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
 					fmt.Printf("  Error: %v\n", err)
@@ -970,7 +970,7 @@ User request: %s`, toolsDesc, wd, wd, tree, prompt)
 				argsStr += fmt.Sprintf("%s=%v", k, v)
 			}
 			fmt.Printf("[%s] %s\n", toolName, argsStr)
-			result, err := callTool(servers, toolName, args, toolTimeout)
+			result, err := callTool(ctx, servers, toolName, args, toolTimeout)
 			if err != nil {
 				errMsg := fmt.Sprintf("ERROR: %v", err)
 				fmt.Printf("  Error: %v\n", err)
@@ -1148,12 +1148,12 @@ func parseArgs(argsStr string) map[string]interface{} {
 	return args
 }
 
-func callTool(servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
 	normalizeToolPathArgs(name, args)
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
 			if tool.Name == name {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
+				ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
 				defer cancel()
 				return server.CallTool(ctx, name, args)
 			}
