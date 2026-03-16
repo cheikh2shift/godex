@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,51 +133,41 @@ func (o *ollamaProvider) fetchHuggingFaceContext(model string) error {
 }
 
 func (o *ollamaProvider) fetchModelInfo() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	endpoint := o.baseURL + "/api/show"
-	reqBody := map[string]any{
-		"name": o.model,
+	if err := o.fetchOllamaLibraryContext(); err != nil {
+		fmt.Printf("[Ollama] Warning: could not fetch library context: %v\n", err)
 	}
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
+	return nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return err
+func (o *ollamaProvider) fetchOllamaLibraryContext() error {
+	modelName := o.model
+	if idx := strings.Index(modelName, ":"); idx > 0 {
+		modelName = modelName[:idx]
 	}
-	req.Header.Set("Content-Type", "application/json")
+	modelName = strings.TrimPrefix(modelName, "hf.co/")
 
-	resp, err := o.client.Do(req)
+	url := fmt.Sprintf("https://ollama.com/library/%s/tags", modelName)
+	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("API returned status %d", resp.StatusCode)
+		return fmt.Errorf("library page returned status %d", resp.StatusCode)
 	}
 
-	var info struct {
-		Parameters string `json:"parameters"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return err
 	}
 
-	lines := strings.Split(info.Parameters, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "num_ctx") {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				if val, err := strconv.Atoi(parts[1]); err == nil {
-					o.contextLimit = val
-				}
-			}
+	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	matches := re.FindStringSubmatch(string(body))
+	if len(matches) >= 2 {
+		contextStr := matches[1]
+		if val, err := strconv.Atoi(contextStr); err == nil {
+			o.contextLimit = val * 1000
 		}
 	}
 
