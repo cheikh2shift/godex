@@ -57,6 +57,21 @@ func NewFileSystemServer(allowedPaths []string) *FileSystemServer {
 				Description: "Get information about a file",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to file"}},"required":["path"]}`),
 			},
+			{
+				Name:        "read_file_line_range",
+				Description: "Read a specific range of lines from a file",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"}},"required":["path","start","end"]}`),
+			},
+			{
+				Name:        "delete_line_range",
+				Description: "Delete a range of lines from a file",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"}},"required":["path","start","end"]}`),
+			},
+			{
+				Name:        "insert_at_line",
+				Description: "Insert content at a specific line number",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"line":{"type":"integer","description":"Line number to insert at (1-indexed, 0 = append at end)"},"content":{"type":"string","description":"Content to insert"}},"required":["path","line","content"]}`),
+			},
 		},
 	}
 
@@ -87,6 +102,12 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.searchFiles(arguments)
 	case "get_file_info":
 		return s.getFileInfo(arguments)
+	case "read_file_line_range":
+		return s.readFileLineRange(arguments)
+	case "delete_line_range":
+		return s.deleteLineRange(arguments)
+	case "insert_at_line":
+		return s.insertAtLine(arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -289,6 +310,127 @@ func (s *FileSystemServer) getFileInfo(args map[string]interface{}) (string, err
 
 	return fmt.Sprintf("Name: %s\nSize: %d bytes\nIsDir: %t\nModTime: %s",
 		info.Name(), info.Size(), info.IsDir(), info.ModTime().Format("2006-01-02 15:04:05")), nil
+}
+
+func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if !s.isAllowed(path) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	start, ok := args["start"].(float64)
+	if !ok {
+		return "", fmt.Errorf("start is required")
+	}
+	end, ok := args["end"].(float64)
+	if !ok {
+		return "", fmt.Errorf("end is required")
+	}
+
+	startIdx := int(start) - 1
+	endIdx := int(end)
+
+	if startIdx < 0 || startIdx >= len(lines) {
+		return "", fmt.Errorf("start line out of range")
+	}
+	if endIdx < startIdx || endIdx > len(lines) {
+		return "", fmt.Errorf("end line out of range")
+	}
+
+	return strings.Join(lines[startIdx:endIdx], "\n"), nil
+}
+
+func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if !s.isAllowed(path) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	start, ok := args["start"].(float64)
+	if !ok {
+		return "", fmt.Errorf("start is required")
+	}
+	end, ok := args["end"].(float64)
+	if !ok {
+		return "", fmt.Errorf("end is required")
+	}
+
+	startIdx := int(start) - 1
+	endIdx := int(end)
+
+	if startIdx < 0 || startIdx >= len(lines) {
+		return "", fmt.Errorf("start line out of range")
+	}
+	if endIdx < startIdx || endIdx > len(lines) {
+		return "", fmt.Errorf("end line out of range")
+	}
+
+	lines = append(lines[:startIdx], lines[endIdx:]...)
+
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return fmt.Sprintf("Deleted lines %d-%d from %s", int(start), int(end), path), nil
+}
+
+func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if !s.isAllowed(path) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	lineNum, ok := args["line"].(float64)
+	if !ok {
+		return "", fmt.Errorf("line is required")
+	}
+	contentToInsert, ok := args["content"].(string)
+	if !ok {
+		return "", fmt.Errorf("content is required")
+	}
+
+	insertIdx := int(lineNum)
+	if insertIdx < 0 || insertIdx > len(lines) {
+		return "", fmt.Errorf("line number out of range")
+	}
+
+	lines = append(lines[:insertIdx], append([]string{contentToInsert}, lines[insertIdx:]...)...)
+
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return fmt.Sprintf("Inserted content at line %d in %s", int(lineNum), path), nil
 }
 
 func (s *FileSystemServer) AddPath(ctx context.Context, path string) error {
