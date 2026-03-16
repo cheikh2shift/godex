@@ -370,6 +370,10 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			// Only execute tool calls if response is primarily tool calls (JSON format)
 			// If there's substantial explanatory text, don't treat as tool call
 			toolCalls, isToolCallResponse := shouldExecuteToolCall(preResp)
+			toolCalls, missingTools := filterToolCallsByAvailability(servers, toolCalls)
+			if len(missingTools) > 0 {
+				fmt.Printf("\n[Ignored unknown tool(s): %s]\n", strings.Join(missingTools, ", "))
+			}
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
@@ -916,6 +920,10 @@ User request: %s`, toolsDesc, wd, wd, tree, prompt)
 
 		// Only execute tool calls if response is primarily tool calls (JSON format)
 		toolCalls, isToolCallResponse := shouldExecuteToolCall(preResp)
+		toolCalls, missingTools := filterToolCallsByAvailability(servers, toolCalls)
+		if len(missingTools) > 0 {
+			fmt.Printf("\n[Ignored unknown tool(s): %s]\n", strings.Join(missingTools, ", "))
+		}
 
 		fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
@@ -1377,6 +1385,32 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 		return nil, false
 	}
 	return toolCalls, true
+}
+
+func filterToolCallsByAvailability(servers []MCPServer, toolCalls []map[string]interface{}) ([]map[string]interface{}, []string) {
+	if len(toolCalls) == 0 {
+		return nil, nil
+	}
+	available := make(map[string]struct{})
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			available[tool.Name] = struct{}{}
+		}
+	}
+	var filtered []map[string]interface{}
+	var missing []string
+	for _, tc := range toolCalls {
+		name, _ := tc["name"].(string)
+		if name == "" {
+			continue
+		}
+		if _, ok := available[name]; ok {
+			filtered = append(filtered, tc)
+		} else {
+			missing = append(missing, name)
+		}
+	}
+	return filtered, uniqueStrings(missing)
 }
 
 func loadPreviousSession(cwd string) string {
