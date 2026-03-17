@@ -347,6 +347,10 @@ func (s *WebScraperServer) AddURL(ctx context.Context, url string) error {
 	return nil
 }
 
+func (s *WebScraperServer) TempAddPath(path string) {
+	s.AddPath(context.Background(), path)
+}
+
 func (s *WebScraperServer) RemovePath(ctx context.Context, path string) error {
 	return s.RemoveURL(ctx, path)
 }

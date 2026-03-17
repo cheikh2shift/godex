@@ -33,12 +33,15 @@ const (
 	sessionFileName   = "session.txt"
 )
 
+var ErrUserAborted = errors.New("user aborted")
+
 type MCPServer interface {
 	Name() string
 	Tools() []mcp.Tool
 	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
 	AllowedPaths() []string
 	AddPath(ctx context.Context, path string) error
+	TempAddPath(path string)
 	AddURL(ctx context.Context, url string) error
 	RemovePath(ctx context.Context, path string) error
 	RemoveURL(ctx context.Context, url string) error
@@ -181,6 +184,7 @@ func main() {
 	var sessionEntries []sessionEntry
 	var history []string
 
+promptLoop:
 	for {
 		// Show prompt with background process count
 		bgCount := getBgCount(servers)
@@ -453,6 +457,10 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 				}
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
 				result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
+				if errors.Is(err, ErrUserAborted) {
+					fmt.Println("\nUser aborted.")
+					goto promptLoop
+				}
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
 					fmt.Printf("  Error: %v\n", err)
@@ -1259,9 +1267,17 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 						}
 						return result, nil
 					case 1:
-						return "", fmt.Errorf("operation cancelled by user")
+						server.TempAddPath(path)
+						result, err = server.CallTool(ctx, name, args)
+						server.RemovePath(ctx, path)
+						if err != nil {
+							return "", err
+						}
+						return result, nil
 					case 2:
-						return "", fmt.Errorf("path restricted: '%s' is not in allowed paths. The LLM should find another way or request access to this path.", path)
+						return "", ErrUserAborted
+					case 3:
+						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction.", path)
 					}
 					return "", err
 				}
@@ -1298,7 +1314,11 @@ func showPathRestrictionPrompt(path string, allowedPaths []string) int {
 	options := []selectOption{
 		{
 			label: "Allow path",
-			desc:  fmt.Sprintf("Add '%s' to allowed paths and retry", path),
+			desc:  fmt.Sprintf("Add '%s' to allowed paths permanently", path),
+		},
+		{
+			label: "Allow once",
+			desc:  fmt.Sprintf("Allow '%s' for this command only", path),
 		},
 		{
 			label: "Stop",

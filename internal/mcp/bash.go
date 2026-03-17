@@ -112,6 +112,13 @@ var (
 	nodePathOp   = regexp.MustCompile(`(?i)(?:process\.chdir|fs\.(?:mkdir|rmdir|unlink|rename|writeFile|readFile)|fs\.promises\.(?:mkdir|rmdir|unlink|rename|writeFile|readFile))\s*\(\s*['"]`)
 )
 
+var pathCommands = []string{
+	"cat", "ls", "rm", "rmdir", "mv", "cp", "touch", "chmod", "chown", "chgrp",
+	"head", "tail", "less", "more", "grep", "rg", "find", "stat", "file",
+	"mkdir", "tar", "zip", "unzip", "gzip", "gunzip", "xz", "diff", "cmp",
+	"du", "df", "ln", "readlink", "realpath", "which", "whereis",
+}
+
 func (s *BashServer) isCommandAllowed(command string) bool {
 	trimmed := strings.TrimSpace(command)
 
@@ -122,6 +129,29 @@ func (s *BashServer) isCommandAllowed(command string) bool {
 		targetPath = filepath.Clean(targetPath)
 		if !s.isPathAllowed(targetPath) {
 			return false
+		}
+	}
+
+	for _, cmd := range pathCommands {
+		re := regexp.MustCompile(fmt.Sprintf(`(?i)^%s\s+(\S+)`, cmd))
+		match := re.FindStringSubmatch(trimmed)
+		if len(match) > 1 {
+			targetPath := match[1]
+			targetPath = strings.ReplaceAll(targetPath, "~", os.Getenv("HOME"))
+			targetPath = filepath.Clean(targetPath)
+			if !s.isPathAllowed(targetPath) {
+				return false
+			}
+		}
+		reWithFlags := regexp.MustCompile(fmt.Sprintf(`(?i)^%s\s+-[a-zA-Z]+\s+(\S+)`, cmd))
+		match = reWithFlags.FindStringSubmatch(trimmed)
+		if len(match) > 1 {
+			targetPath := match[1]
+			targetPath = strings.ReplaceAll(targetPath, "~", os.Getenv("HOME"))
+			targetPath = filepath.Clean(targetPath)
+			if !s.isPathAllowed(targetPath) {
+				return false
+			}
 		}
 	}
 
@@ -392,6 +422,19 @@ func (s *BashServer) AddPath(ctx context.Context, path string) error {
 	}
 	s.allowedPaths = append(s.allowedPaths, path)
 	return nil
+}
+
+func (s *BashServer) TempAddPath(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	for _, p := range s.allowedPaths {
+		if p == path {
+			return
+		}
+	}
+	s.allowedPaths = append(s.allowedPaths, path)
 }
 
 func (s *BashServer) AddURL(ctx context.Context, url string) error {

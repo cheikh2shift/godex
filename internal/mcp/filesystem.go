@@ -447,6 +447,19 @@ func (s *FileSystemServer) AddPath(ctx context.Context, path string) error {
 	return nil
 }
 
+func (s *FileSystemServer) TempAddPath(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	for _, p := range s.allowedPaths {
+		if p == path {
+			return
+		}
+	}
+	s.allowedPaths = append(s.allowedPaths, path)
+}
+
 func (s *FileSystemServer) AddURL(ctx context.Context, url string) error {
 	return fmt.Errorf("filesystem server does not support URLs")
 }

@@ -157,6 +157,15 @@ func (m *MCPToolExecutor) AddURL(ctx context.Context, url string) error {
 	return m.AddPath(ctx, url)
 }
 
+func (m *MCPToolExecutor) TempAddPath(path string) {
+	for _, p := range m.server.AllowedPaths {
+		if p == path {
+			return
+		}
+	}
+	m.server.AllowedPaths = append(m.server.AllowedPaths, path)
+}
+
 func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
 	found := -1
 	for i, p := range m.server.AllowedPaths {
