@@ -48,7 +48,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var thinkingStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
@@ -253,6 +253,14 @@ promptLoop:
 		}
 		if input == "/tools" {
 			handleTools(servers)
+			continue
+		}
+		if input == "/clear-context" {
+			if err := llmProvider.Reset(); err != nil {
+				fmt.Printf("Error resetting context: %v\n", err)
+			} else {
+				fmt.Println("Context cleared.")
+			}
 			continue
 		}
 
@@ -901,6 +909,7 @@ Commands:
                                     url <url>      - Remove from web scraper
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
+  /clear-context    - Reset context counter and LLM client
   /save, /save-exit - Save session and exit
   /kill <pid>       - Kill a background process by PID
   /killbg           - Kill all background processes

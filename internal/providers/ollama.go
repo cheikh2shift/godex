@@ -25,6 +25,7 @@ const (
 type ollamaProvider struct {
 	baseURL          string
 	model            string
+	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
 	messages         []map[string]string
@@ -58,6 +59,7 @@ func newOllamaProvider(cfg *config.Provider) (Provider, error) {
 	p := &ollamaProvider{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       model,
+		cfg:         cfg,
 		temperature: cfg.Temperature,
 		client: &http.Client{
 			Timeout: 10 * time.Minute,
@@ -352,4 +354,17 @@ func (o *ollamaProvider) TokenUsage() (input int, output int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.promptTokens, o.completionTokens
+}
+
+func (o *ollamaProvider) Reset() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.client = &http.Client{
+		Timeout: 10 * time.Minute,
+	}
+	o.messages = []map[string]string{}
+	o.promptTokens = 0
+	o.completionTokens = 0
+	return nil
 }

@@ -17,6 +17,7 @@ const DefaultGeminiModel = "gemini-2.5-flash"
 
 type geminiProvider struct {
 	client           *genai.Client
+	cfg              *config.Provider
 	model            string
 	temperature      *float64
 	cancelMu         sync.Mutex
@@ -68,6 +69,7 @@ func newGeminiProvider(cfg *config.Provider) (Provider, error) {
 
 	p := &geminiProvider{
 		client:       client,
+		cfg:          cfg,
 		model:        model,
 		temperature:  cfg.Temperature,
 		contextLimit: 0,
@@ -176,6 +178,43 @@ func (g *geminiProvider) TokenUsage() (input int, output int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.promptTokens, g.completionTokens
+}
+
+func (g *geminiProvider) Reset() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	cfg := g.cfg
+	clientCfg := &genai.ClientConfig{}
+
+	backend := strings.ToLower(strings.TrimSpace(cfg.Params["backend"]))
+	switch backend {
+	case "", "gemini", "geminiapi":
+		apiKey, err := resolveAPIKey(cfg)
+		if err != nil {
+			return err
+		}
+		clientCfg.APIKey = apiKey
+		clientCfg.Backend = genai.BackendGeminiAPI
+	case "vertex", "vertexai":
+		clientCfg.Backend = genai.BackendVertexAI
+		if project := strings.TrimSpace(cfg.Params["project"]); project != "" {
+			clientCfg.Project = project
+		}
+		if location := strings.TrimSpace(cfg.Params["location"]); location != "" {
+			clientCfg.Location = location
+		}
+	}
+
+	client, err := genai.NewClient(context.Background(), clientCfg)
+	if err != nil {
+		return err
+	}
+
+	g.client = client
+	g.promptTokens = 0
+	g.completionTokens = 0
+	return nil
 }
 
 func extractText(resp *genai.GenerateContentResponse) string {

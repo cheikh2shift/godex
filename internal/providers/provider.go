@@ -25,6 +25,7 @@ type Provider interface {
 	Close() error
 	ContextLimit() int
 	TokenUsage() (input int, output int)
+	Reset() error
 }
 
 type factory func(cfg *config.Provider) (Provider, error)

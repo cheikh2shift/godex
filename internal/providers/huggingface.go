@@ -216,3 +216,7 @@ func (h *huggingfaceProvider) ContextLimit() int {
 func (h *huggingfaceProvider) TokenUsage() (input int, output int) {
 	return 0, 0
 }
+
+func (h *huggingfaceProvider) Reset() error {
+	return nil
+}
