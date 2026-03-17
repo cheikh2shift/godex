@@ -659,7 +659,7 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 					fmt.Printf("Error adding URL: %v\n", err)
 					return
 				}
-				fmt.Printf("Added URL '%s' to %s\n", value, server.Tools()[0].Name)
+				fmt.Printf("Added URL '%s' to %s\n", value, server.Name())
 				added = true
 			}
 		} else {
@@ -668,7 +668,7 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 					fmt.Printf("Error adding path: %v\n", err)
 					return
 				}
-				fmt.Printf("Added path '%s' to %s\n", value, server.Tools()[0].Name)
+				fmt.Printf("Added path '%s' to  %s\n", value, server.Name())
 				added = true
 			}
 		}
@@ -726,7 +726,7 @@ func handleRemovePath(servers []MCPServer, input string, ctx context.Context) {
 					fmt.Printf("Error removing path: %v\n", err)
 					return
 				}
-				fmt.Printf("Removed path '%s' from %s\n", value, server.Tools()[0].Name)
+				fmt.Printf("Removed path '%s' from %s (all file/command operations)\n", value, server.Tools()[0].Name)
 				removed = true
 			}
 		}
@@ -743,14 +743,31 @@ func handlePaths(servers []MCPServer) {
 		fmt.Println("No MCP servers configured")
 		return
 	}
+
+	typePaths := make(map[string][]string)
 	for _, server := range servers {
 		paths := server.AllowedPaths()
-		serverType := "filesys"
+		serverType := server.Name()
 		if len(server.Tools()) > 0 {
 			if strings.Contains(server.Tools()[0].Name, "web") || strings.Contains(server.Tools()[0].Name, "fetch") {
 				serverType = "url"
 			}
 		}
+		for _, p := range paths {
+			found := false
+			for _, existing := range typePaths[serverType] {
+				if existing == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				typePaths[serverType] = append(typePaths[serverType], p)
+			}
+		}
+	}
+
+	for serverType, paths := range typePaths {
 		fmt.Printf("%s: %s\n", serverType, strings.Join(paths, ", "))
 	}
 }
