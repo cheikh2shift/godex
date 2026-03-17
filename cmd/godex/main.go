@@ -199,8 +199,8 @@ promptLoop:
 		}
 
 		contextLimit := llmProvider.ContextLimit()
-		inputTokens, _ := llmProvider.TokenUsage()
-		input, err := readPrompt(prompt, history, provider.Model, inputTokens, contextLimit)
+		inputTokens, outputTokens := llmProvider.TokenUsage()
+		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
