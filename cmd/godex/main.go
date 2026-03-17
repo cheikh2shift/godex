@@ -272,8 +272,9 @@ promptLoop:
 		toolsDesc := getToolsDescription(servers)
 
 		sessionContext := ""
+		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
 		if prevSession != "" {
-			sessionContext = fmt.Sprintf("\n\nPrevious session summary:\n%s\n", prevSession)
+			sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
 		}
 		if agentsContext != "" {
 			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
@@ -1659,7 +1660,7 @@ func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provid
 	defer cancel()
 
 	var promptBuilder strings.Builder
-	promptBuilder.WriteString("Create a comprehensive summary of this session. No longer than 10 paragraphs. Include:\n")
+	promptBuilder.WriteString("Create a comprehensive summary of this session. Include:\n")
 	promptBuilder.WriteString("1. What the user asked for\n")
 	promptBuilder.WriteString("2. What tools were used and what they revealed\n")
 	promptBuilder.WriteString("3. Key findings, decisions, or code that was written\n")
