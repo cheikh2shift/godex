@@ -107,17 +107,8 @@ func (s *BashServer) isPathAllowed(path string) bool {
 }
 
 var (
-	cdRegex      = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
-	pythonPathOp = regexp.MustCompile(`(?i)(?:os\.chdir|os\.mkdir|os\.makedirs|os\.rmdir|os\.remove|os\.rename|shutil\.move|shutil\.copy|open)\s*\(\s*['"]`)
-	nodePathOp   = regexp.MustCompile(`(?i)(?:process\.chdir|fs\.(?:mkdir|rmdir|unlink|rename|writeFile|readFile)|fs\.promises\.(?:mkdir|rmdir|unlink|rename|writeFile|readFile))\s*\(\s*['"]`)
+	cdRegex = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
 )
-
-var pathCommands = []string{
-	"cat", "ls", "rm", "rmdir", "mv", "cp", "touch", "chmod", "chown", "chgrp",
-	"head", "tail", "less", "more", "grep", "rg", "find", "stat", "file",
-	"mkdir", "tar", "zip", "unzip", "gzip", "gunzip", "xz", "diff", "cmp",
-	"du", "df", "ln", "readlink", "realpath", "which", "whereis",
-}
 
 func (s *BashServer) isCommandAllowed(command string) bool {
 	trimmed := strings.TrimSpace(command)
@@ -132,65 +123,6 @@ func (s *BashServer) isCommandAllowed(command string) bool {
 		}
 	}
 
-	for _, cmd := range pathCommands {
-		re := regexp.MustCompile(fmt.Sprintf(`(?i)^%s\s+(\S+)`, cmd))
-		match := re.FindStringSubmatch(trimmed)
-		if len(match) > 1 {
-			targetPath := match[1]
-			targetPath = strings.ReplaceAll(targetPath, "~", os.Getenv("HOME"))
-			targetPath = filepath.Clean(targetPath)
-			if !s.isPathAllowed(targetPath) {
-				return false
-			}
-		}
-		reWithFlags := regexp.MustCompile(fmt.Sprintf(`(?i)^%s\s+-[a-zA-Z]+\s+(\S+)`, cmd))
-		match = reWithFlags.FindStringSubmatch(trimmed)
-		if len(match) > 1 {
-			targetPath := match[1]
-			targetPath = strings.ReplaceAll(targetPath, "~", os.Getenv("HOME"))
-			targetPath = filepath.Clean(targetPath)
-			if !s.isPathAllowed(targetPath) {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-func (s *BashServer) isPythonCodeAllowed(code string) bool {
-	indices := pythonPathOp.FindAllStringIndex(code, -1)
-	for _, loc := range indices {
-		quote := code[loc[1]]
-		endIdx := loc[1] + 1
-		for endIdx < len(code) && code[endIdx] != quote {
-			endIdx++
-		}
-		path := code[loc[1]+1 : endIdx]
-		path = strings.ReplaceAll(path, "~", os.Getenv("HOME"))
-		path = filepath.Clean(path)
-		if !s.isPathAllowed(path) {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *BashServer) isNodeCodeAllowed(code string) bool {
-	indices := nodePathOp.FindAllStringIndex(code, -1)
-	for _, loc := range indices {
-		quote := code[loc[1]]
-		endIdx := loc[1] + 1
-		for endIdx < len(code) && code[endIdx] != quote {
-			endIdx++
-		}
-		path := code[loc[1]+1 : endIdx]
-		path = strings.ReplaceAll(path, "~", os.Getenv("HOME"))
-		path = filepath.Clean(path)
-		if !s.isPathAllowed(path) {
-			return false
-		}
-	}
 	return true
 }
 
@@ -360,10 +292,6 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 		return "", fmt.Errorf("code is required")
 	}
 
-	if !s.isPythonCodeAllowed(code) {
-		return "", fmt.Errorf("code not allowed: must operate within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
-	}
-
 	timeout := 30
 	if t, ok := args["timeout"].(float64); ok {
 		timeout = int(t)
@@ -386,10 +314,6 @@ func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (
 	code, ok := args["code"].(string)
 	if !ok {
 		return "", fmt.Errorf("code is required")
-	}
-
-	if !s.isNodeCodeAllowed(code) {
-		return "", fmt.Errorf("code not allowed: must operate within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
 	}
 
 	timeout := 30

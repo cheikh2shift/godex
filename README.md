@@ -141,6 +141,8 @@ GoDex includes built-in MCP servers:
 | `bash` | Run shell commands, Python, Node.js |
 | `webscraper` | Fetch URLs with JavaScript rendering, search HTML, extract links |
 
+For detailed MCP configuration including external servers, see [MCP.md](MCP.md).
+
 #### Adding Allowed Paths
 
 By default, MCP servers only allow access to the current working directory. Add more allowed paths:
