@@ -48,7 +48,14 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+
+var (
+	greenOrb  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
+	orangeOrb = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
+	muted     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	debugMode bool
+)
 
 var thinkingStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
@@ -96,6 +103,7 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
+	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to show MCP logs")
 	flag.Parse()
 
 	// Handle version flag
@@ -145,10 +153,11 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	servers, err := initMCPServers(ctx, provider)
-	if err != nil {
-		fmt.Printf("MCP init warning: %v\n", err)
-	}
+	servers, mcpLogs := initMCPServers(ctx, provider)
+
+	printStartupBanner(provider, servers, mcpLogs)
+
+	fmt.Println()
 
 	if prompt != "" {
 		err := runSinglePrompt(ctx, provider, prompt, autoConfirm, servers)
@@ -159,25 +168,21 @@ func main() {
 		return
 	}
 
-	fmt.Printf("GoDex - Connected to %s (%s)\n", provider.Name, provider.Model)
-	fmt.Printf("MCP Servers: %d\n", len(servers))
-	fmt.Println("Commands: /paths, /add-path <path>, /exit, Up/Down for history, Ctrl+C to cancel")
-	fmt.Println("Type your prompt or /help for more options.")
-	fmt.Println("Multiline: paste with newlines to enter multiline, Enter on empty line to submit")
-
 	// Get working directory for session files
 	wd, _ := os.Getwd()
 
 	// Load previous session summary from ./.godex
 	prevSession := loadPreviousSession(wd)
 	if prevSession != "" {
-		fmt.Println("[Session] Loaded previous session context")
+		fmt.Println()
+		fmt.Println(muted.Render("[Session] Loaded previous session context"))
 	}
 
 	// Load AGENTS.md if present
 	agentsContext := loadAgentsFile(wd)
 	if agentsContext != "" {
-		fmt.Println("[Agents] Loaded AGENTS.md")
+		fmt.Println()
+		fmt.Println(muted.Render("[Agents] Loaded AGENTS.md"))
 	}
 
 	// Track session for summary
@@ -212,7 +217,7 @@ promptLoop:
 
 		history = appendHistory(history, input)
 
-		if input == "/exit" || input == "/quit" {
+		if input == "/exit" || input == "/quit" || input == "/q" {
 			break
 		}
 		if input == "/save" || input == "/save-exit" {
@@ -257,7 +262,7 @@ promptLoop:
 		}
 		if input == "/clear-context" {
 			if err := llmProvider.Reset(); err != nil {
-				fmt.Printf("Error resetting context: %v\n", err)
+				fmt.Printf("Error resetting context\n")
 			} else {
 				fmt.Println("Context cleared.")
 			}
@@ -334,19 +339,13 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 			stopSpinner := make(chan bool)
 			go func() {
 				elapsed := 0
-				pulse := false
 				ticker := time.NewTicker(1 * time.Second)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ticker.C:
 						elapsed++
-						pulse = !pulse
-						icon := "o"
-						if pulse {
-							icon = "O"
-						}
-						fmt.Printf("\r\033[33m%s\033[0m - Thinking - %s", icon, formatElapsed(elapsed))
+						fmt.Printf("\r%s - Thinking - %s", orangeOrb, formatElapsed(elapsed))
 					case <-stopSpinner:
 						return
 					}
@@ -517,25 +516,47 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 	fmt.Println("Goodbye!")
 }
 
-func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer, error) {
+type mcpLog struct {
+	lines []string
+}
+
+func (m *mcpLog) Printf(format string, args ...interface{}) {
+	m.lines = append(m.lines, fmt.Sprintf(format, args...))
+}
+
+func (m *mcpLog) Print(args ...interface{}) {
+	m.lines = append(m.lines, fmt.Sprint(args...))
+}
+
+func (m *mcpLog) Println(args ...interface{}) {
+	m.lines = append(m.lines, fmt.Sprint(args...))
+}
+
+func (m *mcpLog) String() string {
+	return strings.Join(m.lines, "\n")
+}
+
+func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer, string) {
+	logs := &mcpLog{}
+
 	if len(provider.MCPServers) == 0 {
-		fmt.Println("[MCP] No MCP servers configured")
-		return nil, nil
+		logs.Println("[MCP] No MCP servers configured")
+		return nil, logs.String()
 	}
 
-	fmt.Printf("[MCP] Initializing %d MCP server(s)...\n", len(provider.MCPServers))
+	logs.Printf("[MCP] Initializing %d MCP server(s)...", len(provider.MCPServers))
 
 	wd, _ := os.Getwd()
-	fmt.Printf("[MCP] Working directory: %s\n", wd)
+	logs.Printf("[MCP] Working directory: %s", wd)
 
 	var servers []MCPServer
 
 	for i, serverConfig := range provider.MCPServers {
 		if strings.TrimSpace(serverConfig.Name) == "" {
-			fmt.Printf("[MCP] [!] Skipping unnamed MCP server entry\n")
+			logs.Printf("[MCP] [!] Skipping unnamed MCP server entry")
 			continue
 		}
-		fmt.Printf("[MCP] [%d/%d] Connecting to server: %s\n", i+1, len(provider.MCPServers), serverConfig.Name)
+		logs.Printf("[MCP] [%d/%d] Connecting to server: %s", i+1, len(provider.MCPServers), serverConfig.Name)
 
 		var server MCPServer
 
@@ -557,8 +578,8 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 				}
 			}
 			paths = uniqueStrings(paths)
-			fmt.Printf("[MCP]   Type: inline (Go)\n")
-			fmt.Printf("[MCP]   Allowed paths: %v\n", paths)
+			logs.Printf("[MCP]   Type: inline (Go)")
+			logs.Printf("[MCP]   Allowed paths: %v", paths)
 			server = mcp.NewFileSystemServer(paths)
 		} else if serverConfig.Name == "bash" || serverConfig.Name == "shell" || serverConfig.Name == "exec" {
 			if len(paths) == 0 {
@@ -576,21 +597,21 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 				}
 			}
 			paths = uniqueStrings(paths)
-			fmt.Printf("[MCP]   Type: inline (Go - command execution)\n")
-			fmt.Printf("[MCP]   Allowed paths: %v\n", paths)
+			logs.Printf("[MCP]   Type: inline (Go - command execution)")
+			logs.Printf("[MCP]   Allowed paths: %v", paths)
 			server = mcp.NewBashServer(paths)
 		} else if serverConfig.Name == "webscraper" || serverConfig.Name == "web" || serverConfig.Name == "browser" {
 			paths = uniqueStrings(paths)
-			fmt.Printf("[MCP]   Type: inline (Go - web scraper with JS rendering)\n")
-			fmt.Printf("[MCP]   Allowed URLs: %v\n", paths)
+			logs.Printf("[MCP]   Type: inline (Go - web scraper with JS rendering)")
+			logs.Printf("[MCP]   Allowed URLs: %v", paths)
 			server = mcp.NewWebScraperServer(paths)
 		} else {
-			fmt.Printf("[MCP]   Type: external\n")
-			fmt.Printf("[MCP]   Command: %s %v\n", serverConfig.Command, serverConfig.Args)
-			fmt.Printf("[MCP]   Allowed paths: %v\n", serverConfig.AllowedPaths)
+			logs.Printf("[MCP]   Type: external")
+			logs.Printf("[MCP]   Command: %s %v", serverConfig.Command, serverConfig.Args)
+			logs.Printf("[MCP]   Allowed paths: %v", serverConfig.AllowedPaths)
 
 			if strings.TrimSpace(serverConfig.Command) == "" {
-				fmt.Printf("[MCP] [!] Skipping external MCP server %q: missing command\n", serverConfig.Name)
+				logs.Printf("[MCP] [!] Skipping external MCP server %q: missing command", serverConfig.Name)
 				continue
 			}
 
@@ -603,7 +624,7 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 				AllowedPaths: serverConfig.AllowedPaths,
 			}, wd)
 			if err != nil {
-				fmt.Printf("[MCP] [!] Failed to connect to %s: %v\n", serverConfig.Name, err)
+				logs.Printf("[MCP] [!] Failed to connect to %s: %v", serverConfig.Name, err)
 				continue
 			}
 			server = executor
@@ -612,24 +633,24 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 		servers = append(servers, server)
 
 		toolCount := len(server.Tools())
-		fmt.Printf("[MCP] [+] Connected to %s with %d tool(s)\n", serverConfig.Name, toolCount)
+		logs.Printf("[MCP] [+] Connected to %s with %d tool(s)", serverConfig.Name, toolCount)
 
 		if toolCount > 0 {
 			toolNames := make([]string, toolCount)
 			for i, t := range server.Tools() {
 				toolNames[i] = t.Name
 			}
-			fmt.Printf("[MCP]   Tools: %s\n", strings.Join(toolNames, ", "))
+			logs.Printf("[MCP]   Tools: %s", strings.Join(toolNames, ", "))
 		}
 	}
 
 	if len(servers) == 0 {
-		fmt.Println("[MCP] No MCP servers connected")
-		return servers, nil
+		logs.Println("[MCP] No MCP servers connected")
+		return servers, logs.String()
 	}
 
-	fmt.Printf("[MCP] Connected to %d MCP server(s)\n", len(servers))
-	return servers, nil
+	logs.Printf("[MCP] Connected to %d MCP server(s)", len(servers))
+	return servers, logs.String()
 }
 
 func cleanup(servers []MCPServer) {
@@ -1667,5 +1688,58 @@ func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provid
 		fmt.Printf("[Session] Failed to save session: %v\n", err)
 	} else {
 		fmt.Printf("[Session] Saved to %s\n", sessionPath)
+	}
+}
+
+func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string) {
+	leftContent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("  GoDex  ") + "\n"
+
+	info := []string{
+		fmt.Sprintf("Provider: %s (%s)", provider.Name, provider.Model),
+		fmt.Sprintf("MCP Servers: %d", len(servers)),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Commands:"),
+		"  /paths - List allowed paths",
+		"  /add-path <path> - Add path",
+		"  /remove-path <path> - Remove",
+		"  /tools - Show available tools",
+		"  /clear-context - Reset context",
+		"  /help - Show all commands",
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Tips:"),
+		"  Ctrl+C - Cancel prompt",
+		"  Up/Down - Command history",
+		"  Tab - Autocomplete",
+		"  Multiline: paste with newlines",
+		"  Enter on empty line to submit",
+	}
+
+	for _, line := range info {
+		leftContent += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
+	}
+
+	panel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("252")).
+		Padding(1, 2).
+		Width(40)
+
+	fmt.Println(panel.Render(leftContent))
+
+	if debugMode {
+		logLines := strings.Split(mcpLogs, "\n")
+		for _, line := range logLines {
+			if strings.Contains(line, "[+] Connected") {
+				fmt.Println(greenOrb + " " + muted.Render(line))
+			} else {
+				fmt.Println(muted.Render(line))
+			}
+		}
+	} else {
+		for _, line := range strings.Split(mcpLogs, "\n") {
+			if strings.Contains(line, "[+] Connected") {
+				fmt.Println(greenOrb + " " + muted.Render(line))
+			}
+		}
 	}
 }
