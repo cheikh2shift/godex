@@ -1245,11 +1245,71 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 			if tool.Name == name {
 				ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
 				defer cancel()
-				return server.CallTool(ctx, name, args)
+				result, err := server.CallTool(ctx, name, args)
+				if isPathRestrictionError(err) {
+					path := extractPathFromError(err)
+					allowedPaths := server.AllowedPaths()
+					selected := showPathRestrictionPrompt(path, allowedPaths)
+					switch selected {
+					case 0:
+						server.AddPath(ctx, path)
+						result, err = server.CallTool(ctx, name, args)
+						if err != nil {
+							return "", err
+						}
+						return result, nil
+					case 1:
+						return "", fmt.Errorf("operation cancelled by user")
+					case 2:
+						return "", fmt.Errorf("path restricted: '%s' is not in allowed paths. The LLM should find another way or request access to this path.", path)
+					}
+					return "", err
+				}
+				return result, err
 			}
 		}
 	}
 	return "", fmt.Errorf("tool %s not found", name)
+}
+
+func isPathRestrictionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "path not allowed") ||
+		strings.Contains(errMsg, "command not allowed") ||
+		strings.Contains(errMsg, "code not allowed")
+}
+
+func extractPathFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errMsg := err.Error()
+	parts := strings.Split(errMsg, ":")
+	if len(parts) > 1 {
+		return strings.TrimSpace(parts[len(parts)-1])
+	}
+	return ""
+}
+
+func showPathRestrictionPrompt(path string, allowedPaths []string) int {
+	options := []selectOption{
+		{
+			label: "Allow path",
+			desc:  fmt.Sprintf("Add '%s' to allowed paths and retry", path),
+		},
+		{
+			label: "Stop",
+			desc:  "Tell LLM to stop immediately",
+		},
+		{
+			label: "Find another way",
+			desc:  "Tell LLM path is restricted - find alternative",
+		},
+	}
+	return selectOptionPrompt("Path Restricted", options)
 }
 
 func normalizeToolPathArgs(toolName string, args map[string]interface{}) {

@@ -404,3 +404,81 @@ func formatNumber(n int) string {
 	}
 	return result
 }
+
+type selectOption struct {
+	label string
+	desc  string
+}
+
+type selectModel struct {
+	options []selectOption
+	cursor  int
+	done    bool
+	result  int
+}
+
+func newSelectModel(options []selectOption) selectModel {
+	return selectModel{
+		options: options,
+		cursor:  0,
+		done:    false,
+		result:  -1,
+	}
+}
+
+func (m selectModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.KeyDown:
+			if m.cursor < len(m.options)-1 {
+				m.cursor++
+			}
+		case tea.KeyEnter:
+			m.result = m.cursor
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.result = -1
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m selectModel) View() string {
+	var b strings.Builder
+	b.WriteString("\n")
+	for i, opt := range m.options {
+		if i == m.cursor {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true).Render("  > " + opt.label))
+		} else {
+			b.WriteString("    " + opt.label)
+		}
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("    "+opt.desc) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  ↑↓ select  ↵ confirm  esc cancel"))
+	return b.String()
+}
+
+func selectOptionPrompt(title string, options []selectOption) int {
+	m := newSelectModel(options)
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return -1
+	}
+	result := finalModel.(selectModel)
+	return result.result
+}
