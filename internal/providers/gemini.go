@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -15,12 +16,16 @@ import (
 const DefaultGeminiModel = "gemini-2.5-flash"
 
 type geminiProvider struct {
-	client      *genai.Client
-	model       string
-	temperature *float64
-	cancelMu    sync.Mutex
-	cancelFunc  context.CancelFunc
-	cancelGen   uint64
+	client           *genai.Client
+	model            string
+	temperature      *float64
+	cancelMu         sync.Mutex
+	mu               sync.Mutex
+	cancelFunc       context.CancelFunc
+	cancelGen        uint64
+	contextLimit     int
+	promptTokens     int
+	completionTokens int
 }
 
 func init() {
@@ -61,11 +66,43 @@ func newGeminiProvider(cfg *config.Provider) (Provider, error) {
 		return nil, err
 	}
 
-	return &geminiProvider{
-		client:      client,
-		model:       model,
-		temperature: cfg.Temperature,
-	}, nil
+	p := &geminiProvider{
+		client:       client,
+		model:        model,
+		temperature:  cfg.Temperature,
+		contextLimit: 0,
+	}
+
+	if cfg.ContextLimit > 0 {
+		p.contextLimit = cfg.ContextLimit
+	} else {
+		if err := p.fetchModelInfo(); err != nil {
+			fmt.Printf("[Gemini] Warning: could not fetch model info: %v\n", err)
+		}
+	}
+
+	return p, nil
+}
+
+func (g *geminiProvider) fetchModelInfo() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	modelName := g.model
+	if !strings.HasPrefix(modelName, "models/") {
+		modelName = "models/" + modelName
+	}
+
+	modelInfo, err := g.client.Models.Get(ctx, modelName, nil)
+	if err != nil {
+		return err
+	}
+
+	if modelInfo != nil {
+		g.contextLimit = int(modelInfo.InputTokenLimit)
+	}
+
+	return nil
 }
 
 func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error) {
@@ -95,6 +132,14 @@ func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error
 	if err != nil {
 		return "", err
 	}
+
+	g.mu.Lock()
+	if resp.UsageMetadata != nil {
+		g.promptTokens += int(resp.UsageMetadata.PromptTokenCount)
+		g.completionTokens += int(resp.UsageMetadata.CandidatesTokenCount)
+	}
+	g.mu.Unlock()
+
 	return extractText(resp), nil
 }
 
@@ -119,6 +164,18 @@ func (g *geminiProvider) Cancel() {
 
 func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
 	return "", fmt.Errorf("Gemini provider does not support direct tool calls")
+}
+
+func (g *geminiProvider) ContextLimit() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.contextLimit
+}
+
+func (g *geminiProvider) TokenUsage() (input int, output int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.promptTokens, g.completionTokens
 }
 
 func extractText(resp *genai.GenerateContentResponse) string {

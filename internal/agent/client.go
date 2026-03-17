@@ -24,7 +24,7 @@ func SendPrompt(ctx context.Context, provider *config.Provider, prompt string) (
 		return "", fmt.Errorf("no provider provided")
 	}
 
-	p, err := getProvider(provider)
+	p, err := GetProvider(provider)
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +42,7 @@ func SendPromptWithThink(ctx context.Context, provider *config.Provider, prompt 
 		return "", fmt.Errorf("no provider provided")
 	}
 
-	p, err := getProvider(provider)
+	p, err := GetProvider(provider)
 	if err != nil {
 		return "", err
 	}
@@ -61,7 +61,7 @@ func CancelPrompt(provider *config.Provider) {
 	if provider == nil {
 		return
 	}
-	p, err := getProvider(provider)
+	p, err := GetProvider(provider)
 	if err != nil {
 		return
 	}
@@ -74,7 +74,7 @@ func CallTool(ctx context.Context, provider *config.Provider, toolName string, a
 		return "", fmt.Errorf("no provider provided")
 	}
 
-	p, err := getProvider(provider)
+	p, err := GetProvider(provider)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +88,7 @@ func GetTools(provider *config.Provider) []providers.Tool {
 		return nil
 	}
 
-	p, err := getProvider(provider)
+	p, err := GetProvider(provider)
 	if err != nil {
 		return nil
 	}
@@ -116,7 +116,7 @@ func CloseProvider(cfg *config.Provider) {
 	mcpExecutorsMu.Unlock()
 }
 
-func getProvider(cfg *config.Provider) (providers.Provider, error) {
+func GetProvider(cfg *config.Provider) (providers.Provider, error) {
 	key := cacheKey(cfg)
 	providerCacheMu.Lock()
 	defer providerCacheMu.Unlock()

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,16 +23,19 @@ const (
 )
 
 type ollamaProvider struct {
-	baseURL     string
-	model       string
-	temperature *float64
-	client      *http.Client
-	messages    []map[string]string
-	mu          sync.Mutex
-	sendMu      sync.Mutex
-	OnThink     func(string)
-	cancelFunc  context.CancelFunc
-	cancelGen   uint64
+	baseURL          string
+	model            string
+	temperature      *float64
+	client           *http.Client
+	messages         []map[string]string
+	mu               sync.Mutex
+	sendMu           sync.Mutex
+	OnThink          func(string)
+	cancelFunc       context.CancelFunc
+	cancelGen        uint64
+	contextLimit     int
+	promptTokens     int
+	completionTokens int
 }
 
 func init() {
@@ -50,15 +55,122 @@ func newOllamaProvider(cfg *config.Provider) (Provider, error) {
 		baseURL = defaultOllamaBase
 	}
 
-	return &ollamaProvider{
+	p := &ollamaProvider{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       model,
 		temperature: cfg.Temperature,
 		client: &http.Client{
 			Timeout: 10 * time.Minute,
 		},
-		messages: []map[string]string{},
-	}, nil
+		messages:     []map[string]string{},
+		contextLimit: 0,
+	}
+
+	if strings.Contains(model, "hf.co") {
+		if err := p.fetchHuggingFaceContext(model); err != nil {
+			fmt.Printf("[Ollama] Warning: could not fetch HuggingFace model info: %v\n", err)
+		}
+	} else {
+		if err := p.fetchModelInfo(); err != nil {
+			fmt.Printf("[Ollama] Warning: could not fetch model info: %v\n", err)
+		}
+	}
+
+	return p, nil
+}
+
+func (o *ollamaProvider) fetchHuggingFaceContext(model string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	model = strings.TrimPrefix(model, "hf.co/")
+	if idx := strings.Index(model, ":"); idx > 0 {
+		model = model[:idx]
+	}
+
+	url := fmt.Sprintf("https://huggingface.co/api/models/%s", model)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HuggingFace API returned status %d", resp.StatusCode)
+	}
+
+	var info struct {
+		Config struct {
+			MaxModelLength        int `json:"max_model_length"`
+			MaxPositionEmbeddings int `json:"max_position_embeddings"`
+		} `json:"config"`
+		GGUF struct {
+			ContextLength int `json:"context_length"`
+		} `json:"gguf"`
+		TransformersInfo struct {
+			ModelType string `json:"model_type"`
+		} `json:"transformers_info"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return err
+	}
+
+	if info.GGUF.ContextLength > 0 {
+		o.contextLimit = info.GGUF.ContextLength
+	} else if info.Config.MaxModelLength > 0 {
+		o.contextLimit = info.Config.MaxModelLength
+	} else if info.Config.MaxPositionEmbeddings > 0 {
+		o.contextLimit = info.Config.MaxPositionEmbeddings
+	}
+
+	return nil
+}
+
+func (o *ollamaProvider) fetchModelInfo() error {
+	if err := o.fetchOllamaLibraryContext(); err != nil {
+		fmt.Printf("[Ollama] Warning: could not fetch library context: %v\n", err)
+	}
+	return nil
+}
+
+func (o *ollamaProvider) fetchOllamaLibraryContext() error {
+	modelName := o.model
+	if idx := strings.Index(modelName, ":"); idx > 0 {
+		modelName = modelName[:idx]
+	}
+
+	url := fmt.Sprintf("https://ollama.com/library/%s/tags", modelName)
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("library page returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	matches := re.FindStringSubmatch(string(body))
+	if len(matches) >= 2 {
+		contextStr := matches[1]
+		if val, err := strconv.Atoi(contextStr); err == nil {
+			o.contextLimit = val * 1000
+		}
+	}
+
+	return nil
 }
 
 func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error) {
@@ -122,13 +234,17 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 	decoder := json.NewDecoder(resp.Body)
 	var fullResponse strings.Builder
 	var hasContent bool
+	var totalPromptTokens int
+	var totalCompletionTokens int
 
 	for {
 		var chunk struct {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
-			Done bool `json:"done"`
+			PromptEvalCount int  `json:"prompt_eval_count"`
+			EvalCount       int  `json:"eval_count"`
+			Done            bool `json:"done"`
 		}
 		if err := decoder.Decode(&chunk); err != nil {
 			break
@@ -140,6 +256,13 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 			if o.OnThink != nil {
 				o.OnThink(chunk.Message.Content)
 			}
+		}
+
+		if chunk.PromptEvalCount > 0 {
+			totalPromptTokens = chunk.PromptEvalCount
+		}
+		if chunk.EvalCount > 0 {
+			totalCompletionTokens = chunk.EvalCount
 		}
 
 		if chunk.Done {
@@ -157,6 +280,8 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		"role":    "assistant",
 		"content": response,
 	})
+	o.promptTokens = totalPromptTokens
+	o.completionTokens = totalCompletionTokens
 	o.mu.Unlock()
 
 	return response, nil
@@ -215,4 +340,16 @@ func (o *ollamaProvider) Cancel() {
 
 func (o *ollamaProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
 	return "", fmt.Errorf("Ollama provider does not support direct tool calls, use MCP servers configured in provider")
+}
+
+func (o *ollamaProvider) ContextLimit() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.contextLimit
+}
+
+func (o *ollamaProvider) TokenUsage() (input int, output int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.promptTokens, o.completionTokens
 }
