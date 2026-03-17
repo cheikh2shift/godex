@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"syscall"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-		"time"
+	"syscall"
+	"time"
 )
 
 func GetWorkingDir() (string, error) {
@@ -19,6 +19,7 @@ func GetWorkingDir() (string, error) {
 
 type BashServer struct {
 	allowedPaths   []string
+	workingDir     string
 	tools          []Tool
 	backgroundPIDs []bgProcess
 }
@@ -323,6 +324,24 @@ func (s *BashServer) AddPath(ctx context.Context, path string) error {
 }
 
 func (s *BashServer) AddURL(ctx context.Context, url string) error {
+	return fmt.Errorf("bash server does not support URLs")
+}
+
+func (s *BashServer) RemovePath(ctx context.Context, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	for i, p := range s.allowedPaths {
+		if p == path {
+			s.allowedPaths = append(s.allowedPaths[:i], s.allowedPaths[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("path not found: %s", path)
+}
+
+func (s *BashServer) RemoveURL(ctx context.Context, url string) error {
 	return fmt.Errorf("bash server does not support URLs")
 }
 

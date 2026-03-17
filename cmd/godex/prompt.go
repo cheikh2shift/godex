@@ -21,18 +21,19 @@ var inputBoxStyle = lipgloss.NewStyle().
 	Padding(0, 1)
 
 var commandTips = map[string]string{
-	"/add-path":  "Add allowed MCP path: /add-path <filesys|url> <value>",
-	"/paths":     "List allowed MCP paths",
-	"/tools":     "List available MCP tools",
-	"/exit":      "Exit without saving",
-	"/quit":      "Exit without saving",
-	"/save":      "Save session and exit",
-	"/save-exit": "Save session and exit",
-	"/kill":      "Kill a background process by PID or prune dead entries: /kill <pid> | /kill --prune",
-	"/killbg":    "Kill all background processes",
-	"/bg":        "List background processes",
-	"/clear":     "Clear the screen",
-	"/help":      "Show help for commands",
+	"/add-path":    "Add allowed MCP path: /add-path <filesys|url> <value>",
+	"/remove-path": "Remove allowed MCP path: /remove-path <filesys|url> <value>",
+	"/paths":       "List allowed MCP paths",
+	"/tools":       "List available MCP tools",
+	"/exit":        "Exit without saving",
+	"/quit":        "Exit without saving",
+	"/save":        "Save session and exit",
+	"/save-exit":   "Save session and exit",
+	"/kill":        "Kill a background process by PID or prune dead entries: /kill <pid> | /kill --prune",
+	"/killbg":      "Kill all background processes",
+	"/bg":          "List background processes",
+	"/clear":       "Clear the screen",
+	"/help":        "Show help for commands",
 }
 
 type promptModel struct {

@@ -157,6 +157,33 @@ func (m *MCPToolExecutor) AddURL(ctx context.Context, url string) error {
 	return m.AddPath(ctx, url)
 }
 
+func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
+	found := -1
+	for i, p := range m.server.AllowedPaths {
+		if p == path {
+			found = i
+			break
+		}
+	}
+	if found == -1 {
+		return fmt.Errorf("path not found: %s", path)
+	}
+
+	m.server.AllowedPaths = append(m.server.AllowedPaths[:found], m.server.AllowedPaths[found+1:]...)
+
+	_ = m.mcpClient.Close()
+
+	if err := m.connect(ctx); err != nil {
+		return fmt.Errorf("failed to reconnect after removing path: %w", err)
+	}
+
+	return nil
+}
+
+func (m *MCPToolExecutor) RemoveURL(ctx context.Context, url string) error {
+	return m.RemovePath(ctx, url)
+}
+
 func (m *MCPToolExecutor) AllowedPaths() []string {
 	paths := m.server.AllowedPaths
 	if len(paths) == 0 {

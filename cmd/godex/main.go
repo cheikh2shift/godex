@@ -40,10 +40,12 @@ type MCPServer interface {
 	AllowedPaths() []string
 	AddPath(ctx context.Context, path string) error
 	AddURL(ctx context.Context, url string) error
+	RemovePath(ctx context.Context, path string) error
+	RemoveURL(ctx context.Context, url string) error
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/exit", "/quit", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var thinkingStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
@@ -235,6 +237,10 @@ func main() {
 		}
 		if strings.HasPrefix(input, "/add-path") {
 			handleAddPath(servers, input, ctx)
+			continue
+		}
+		if strings.HasPrefix(input, "/remove-path") {
+			handleRemovePath(servers, input, ctx)
 			continue
 		}
 		if input == "/paths" {
@@ -674,6 +680,64 @@ func handleAddPath(servers []MCPServer, input string, ctx context.Context) {
 	}
 }
 
+func handleRemovePath(servers []MCPServer, input string, ctx context.Context) {
+	parts := strings.Fields(input)
+	if len(parts) < 3 {
+		fmt.Println("Usage: /remove-path <filesys|url> <value>")
+		fmt.Println("  filesys <path> - Remove allowed path from filesystem/bash server")
+		fmt.Println("  url <url>      - Remove allowed URL from web scraper server")
+		return
+	}
+	pathType := strings.ToLower(parts[1])
+	value := strings.TrimSpace(strings.Join(parts[2:], " "))
+	if value == "" {
+		fmt.Println("Usage: /remove-path <filesys|url> <value>")
+		return
+	}
+	if len(servers) == 0 {
+		fmt.Println("No MCP servers configured")
+		return
+	}
+
+	isURL := pathType == "url"
+	if !isURL {
+		abs, err := resolveUserPath(value)
+		if err != nil {
+			fmt.Printf("Error resolving path: %v\n", err)
+			return
+		}
+		value = abs
+	}
+	removed := false
+
+	for _, server := range servers {
+		if isURL {
+			if strings.Contains(server.Tools()[0].Name, "web") || strings.Contains(server.Tools()[0].Name, "scraper") || strings.Contains(server.Tools()[0].Name, "fetch") {
+				if err := server.RemoveURL(ctx, value); err != nil {
+					fmt.Printf("Error removing URL: %v\n", err)
+					return
+				}
+				fmt.Printf("Removed URL '%s' from %s\n", value, server.Tools()[0].Name)
+				removed = true
+			}
+		} else {
+			if strings.Contains(server.Tools()[0].Name, "file") || strings.Contains(server.Tools()[0].Name, "bash") || strings.Contains(server.Tools()[0].Name, "command") {
+				if err := server.RemovePath(ctx, value); err != nil {
+					fmt.Printf("Error removing path: %v\n", err)
+					return
+				}
+				fmt.Printf("Removed path '%s' from %s\n", value, server.Tools()[0].Name)
+				removed = true
+			}
+		}
+	}
+	if isURL && !removed {
+		fmt.Println("No web scraper server found")
+	} else if !isURL && !removed {
+		fmt.Println("No filesystem server found")
+	}
+}
+
 func handlePaths(servers []MCPServer) {
 	if len(servers) == 0 {
 		fmt.Println("No MCP servers configured")
@@ -807,6 +871,9 @@ Commands:
   /add-path <filesys|url> <value> - Add allowed path/URL to MCP server
                                     filesys <path> - Add to filesystem/bash
                                     url <url>      - Add to web scraper
+  /remove-path <filesys|url> <value> - Remove allowed path/URL from MCP server
+                                    filesys <path> - Remove from filesystem/bash
+                                    url <url>      - Remove from web scraper
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
   /save, /save-exit - Save session and exit

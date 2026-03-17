@@ -347,6 +347,20 @@ func (s *WebScraperServer) AddURL(ctx context.Context, url string) error {
 	return nil
 }
 
+func (s *WebScraperServer) RemovePath(ctx context.Context, path string) error {
+	return s.RemoveURL(ctx, path)
+}
+
+func (s *WebScraperServer) RemoveURL(ctx context.Context, url string) error {
+	for i, u := range s.allowedURLs {
+		if u == url {
+			s.allowedURLs = append(s.allowedURLs[:i], s.allowedURLs[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("URL not found: %s", url)
+}
+
 func (s *WebScraperServer) AllowedPaths() []string {
 	return s.allowedURLs
 }

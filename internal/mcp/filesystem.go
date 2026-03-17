@@ -451,6 +451,24 @@ func (s *FileSystemServer) AddURL(ctx context.Context, url string) error {
 	return fmt.Errorf("filesystem server does not support URLs")
 }
 
+func (s *FileSystemServer) RemovePath(ctx context.Context, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	for i, p := range s.allowedPaths {
+		if p == path {
+			s.allowedPaths = append(s.allowedPaths[:i], s.allowedPaths[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("path not found: %s", path)
+}
+
+func (s *FileSystemServer) RemoveURL(ctx context.Context, url string) error {
+	return fmt.Errorf("filesystem server does not support URLs")
+}
+
 func (s *FileSystemServer) AllowedPaths() []string {
 	return s.allowedPaths
 }
