@@ -21,11 +21,11 @@ GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face (and othe
    ollama serve
    ```
 
-3. **Pull a model** (recommended: nemotron-3-super:cloud or minimax-m2.5:cloud):
+3. **Pull a model** (recommended: nemotron-3-super:cloud or minimax-m2.7:cloud):
    ```bash
    ollama pull nemotron-3-super:cloud
    # or
-   ollama pull minimax-m2.5:cloud
+   ollama pull minimax-m2.7:cloud
    ```
 
 4. **Verify Ollama is running**:
@@ -105,7 +105,7 @@ providers:
   - name: ollama
     type: ollama
     endpoint: http://localhost:11434
-    model: minimax-m2.5:cloud
+    model: minimax-m2.7:cloud
     description: Ollama with codeqwen
     temperature: 0.2
     mcp_servers:
@@ -122,7 +122,7 @@ default_provider: ollama
 | `name` | Provider identifier |
 | `type` | Provider type: `ollama`, `gemini`, or `huggingface` |
 | `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`) |
-| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
+| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.7:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |

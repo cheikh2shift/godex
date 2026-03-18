@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultOllamaModel = "minimax-m2.5:cloud"
+	DefaultOllamaModel = "minimax-m2.7:cloud"
 	defaultOllamaBase  = "http://localhost:11434"
 	ollamaKeepAlive    = "30m"
 )
