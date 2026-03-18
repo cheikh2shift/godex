@@ -200,6 +200,7 @@ promptLoop:
 
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
+
 		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit)
 		if err != nil {
 			if err == ErrPromptAborted {
