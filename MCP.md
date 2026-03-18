@@ -42,9 +42,10 @@ mcp:
         - "GITHUB_PERSONAL_ACCESS_TOKEN=$GITHUB_TOKEN"
 ```
 
+User: Can you read the contents of /home/user/projects/README.md?
 ## Built-in MCP Servers
 
-GoDex includes several built-in MCP tools:
+GoDex includes several built-in MCP tools that are implemented as inline Go servers. These servers don't require external process execution - they're built directly into the Go codebase.
 
 ### Bash
 
@@ -54,8 +55,9 @@ Execute shell commands on your system.
 mcp:
   servers:
     bash:
-      command: "godex"
-      args: ["mcp", "bash"]
+      allowed_paths:
+        - "/home/user/projects"
+        - "/tmp"
 ```
 
 ### Filesystem
@@ -66,32 +68,34 @@ Perform file operations (read, write, list, delete, search).
 mcp:
   servers:
     filesystem:
-      command: "godex"
-      args: ["mcp", "filesystem"]
       allowed_paths:
         - "/home/user/projects"
 ```
 
 ### Webscraper
 
-Fetch URLs and extract content from web pages.
+Fetch URLs and extract content from web pages with JavaScript rendering support.
 
 ```yaml
 mcp:
   servers:
     webscraper:
-      command: "godex"
-      args: ["mcp", "webscraper"]
+      allowed_urls:
+        - "https://example.com"
+        - "https://*.github.io"
 ```
 
-## Using MCP Servers in Conversations
+### How It Works
 
-Once configured, you can use MCP servers in your conversations with GoDex. The AI agent will automatically discover and use available tools from your configured MCP servers.
+The built-in servers are created inline within GoDex itself using:
+- `mcp.NewFileSystemServer(paths)` for filesystem operations
+- `mcp.NewBashServer(paths)` for command execution
+- `mcp.NewWebScraperServer(urls)` for web scraping
 
-For example:
+The `allowed_paths` (or `allowed_urls` for webscraper) field restricts what paths/URLs the respective server can access. If not specified, reasonable defaults are applied.
 
-```
-User: Can you read the contents of /home/user/projects/README.md?
+> **Note:** You can also configure external MCP servers by specifying the `command` and `args` fields to run external MCP server processes.
+
 
 GoDex: (uses filesystem MCP server to read the file)
 # Contents of README.md
