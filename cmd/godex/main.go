@@ -474,7 +474,7 @@ User request: %s`, toolsDesc, sessionContext, wd, wd, input)
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					toolResults = append(toolResults, truncate(result, 500))
+					toolResults = append(toolResults, truncate(result, 800))
 				}
 			}
 
@@ -1105,7 +1105,7 @@ User request: %s`, toolsDesc, wd, wd, tree, prompt)
 				toolResults = append(toolResults, errMsg)
 				hasError = true
 			} else {
-				toolResults = append(toolResults, truncate(result, 500))
+				toolResults = append(toolResults, truncate(result, 800))
 			}
 		}
 
