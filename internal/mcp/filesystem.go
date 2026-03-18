@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -72,6 +73,16 @@ func NewFileSystemServer(allowedPaths []string) *FileSystemServer {
 				Description: "Insert content at a specific line number",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"line":{"type":"integer","description":"Line number to insert at (1-indexed, 0 = append at end)"},"content":{"type":"string","description":"Content to insert"}},"required":["path","line","content"]}`),
 			},
+			{
+				Name:        "search_file_text",
+				Description: "Search for text content within files in a directory",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory to search"},"query":{"type":"string","description":"Text to search for"},"case_sensitive":{"type":"boolean","description":"Enable case-sensitive matching"},"use_regex":{"type":"boolean","description":"Treat query as a regular expression"}},"required":["path","query"]}`),
+			},
+			{
+				Name:        "search_in_file",
+				Description: "Search for text within a specific file, returns matching lines with line numbers",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"query":{"type":"string","description":"Text to search for"},"case_sensitive":{"type":"boolean","description":"Enable case-sensitive matching"},"use_regex":{"type":"boolean","description":"Treat query as a regular expression"}},"required":["path","query"]}`),
+			},
 		},
 	}
 
@@ -108,6 +119,10 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.deleteLineRange(arguments)
 	case "insert_at_line":
 		return s.insertAtLine(arguments)
+	case "search_file_text":
+		return s.searchFileText(arguments)
+	case "search_in_file":
+		return s.searchInFile(arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -431,6 +446,142 @@ func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, er
 	}
 
 	return fmt.Sprintf("Inserted content at line %d in %s", int(lineNum), path), nil
+}
+
+func (s *FileSystemServer) searchFileText(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+	query, ok := args["query"].(string)
+	if !ok {
+		return "", fmt.Errorf("query is required")
+	}
+	caseSensitive, _ := args["case_sensitive"].(bool)
+	useRegex, _ := args["use_regex"].(bool)
+
+	if !s.isAllowed(path) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+
+	var regex *regexp.Regexp
+
+	if useRegex {
+		pattern := query
+		if !caseSensitive {
+			pattern = "(?i)" + pattern
+		}
+		var err error
+		regex, err = regexp.Compile(pattern)
+		if err != nil {
+			return "", fmt.Errorf("invalid regex pattern: %w", err)
+		}
+	}
+
+	var results []string
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		text := string(content)
+		matched := false
+
+		if useRegex {
+			matched = regex.MatchString(text)
+		} else {
+			searchText := text
+			searchQuery := query
+			if !caseSensitive {
+				searchText = strings.ToLower(text)
+				searchQuery = strings.ToLower(query)
+			}
+			matched = strings.Contains(searchText, searchQuery)
+		}
+
+		if matched {
+			rel, _ := filepath.Rel(path, p)
+			results = append(results, rel)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("search failed: %w", err)
+	}
+
+	if len(results) == 0 {
+		return "No matches found", nil
+	}
+
+	return strings.Join(results, "\n"), nil
+}
+
+func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+	query, ok := args["query"].(string)
+	if !ok {
+		return "", fmt.Errorf("query is required")
+	}
+	caseSensitive, _ := args["case_sensitive"].(bool)
+	useRegex, _ := args["use_regex"].(bool)
+
+	if !s.isAllowed(path) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var regex *regexp.Regexp
+	if useRegex {
+		pattern := query
+		if !caseSensitive {
+			pattern = "(?i)" + pattern
+		}
+		regex, err = regexp.Compile(pattern)
+		if err != nil {
+			return "", fmt.Errorf("invalid regex pattern: %w", err)
+		}
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var matches []string
+
+	for i, line := range lines {
+		matched := false
+		if useRegex {
+			matched = regex.MatchString(line)
+		} else {
+			searchLine := line
+			searchQuery := query
+			if !caseSensitive {
+				searchLine = strings.ToLower(line)
+				searchQuery = strings.ToLower(query)
+			}
+			matched = strings.Contains(searchLine, searchQuery)
+		}
+		if matched {
+			matches = append(matches, fmt.Sprintf("%d: %s", i+1, line))
+		}
+	}
+
+	if len(matches) == 0 {
+		return "No matches found", nil
+	}
+
+	return strings.Join(matches, "\n"), nil
 }
 
 func (s *FileSystemServer) AddPath(ctx context.Context, path string) error {
