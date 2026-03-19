@@ -201,7 +201,7 @@ godex --wizard
 
 - `/help` - Show help
 - `/paths` - Show allowed MCP paths
-- `/add-path <path>` - Add allowed path
+- `/add-path <filesys|url> <path>` - Add allowed path
 - `/tools` - Show available MCP tools
 - `/exit` or `/quit` - Exit
 - Up/Down arrows - Command history

@@ -83,26 +83,30 @@ func RunWizard(destination string) error {
 		return defaultVal
 	}
 
-	provider.Name = prompt(reader, "Provider name", getDefault("name", "ollama"))
-	provider.Type = prompt(reader, "Provider type (gemini, ollama, or huggingface)", getDefault("type", "ollama"))
+	provider.Name = prompt(reader, "Provider name", getDefault("name", "my-local-identifier"))
+	provider.Type = prompt(reader, "Provider type (gemini, ollama, huggingface, or openrouter)", getDefault("type", "ollama"))
 
 	modelDefault := providers.DefaultGeminiModel
 	if provider.Type == "ollama" {
 		modelDefault = providers.DefaultOllamaModel
 	} else if provider.Type == "huggingface" {
 		modelDefault = "deepseek-ai/DeepSeek-R1:fastest"
+	} else if provider.Type == "openrouter" {
+		modelDefault = "nvidia/nemotron-3-nano-30b-a3b:free"
 	}
 	modelQuestion := "Model"
 	if provider.Type == "huggingface" {
 		modelQuestion = "Model (supports :fastest or :provider)"
 	}
 	provider.Model = prompt(reader, modelQuestion, getDefault("model", modelDefault))
-	provider.Description = prompt(reader, "Description", getDefault("description", "Ollama model"))
+	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
 	backend := ""
 	if provider.Type == "gemini" {
 		backend = prompt(reader, "Backend (gemini or vertex)", getDefault("backend", "gemini"))
 	} else if provider.Type == "huggingface" {
 		backend = "huggingface"
+	} else if provider.Type == "openrouter" {
+		backend = "openrouter"
 	} else {
 		backend = "ollama"
 	}
@@ -115,6 +119,9 @@ func RunWizard(destination string) error {
 	if provider.Type == "huggingface" {
 		provider.Endpoint = prompt(reader, "Hugging Face base URL", getDefault("endpoint", "https://router.huggingface.co/v1"))
 		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "HF_TOKEN"))
+	} else if provider.Type == "openrouter" {
+		provider.Endpoint = prompt(reader, "OpenRouter base URL", getDefault("endpoint", "https://openrouter.ai/api/v1"))
+		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "OPENROUTER_API_KEY"))
 	} else if backend == "ollama" || provider.Type == "ollama" {
 		provider.Endpoint = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
 	} else if backend == "vertex" || backend == "vertexai" {
