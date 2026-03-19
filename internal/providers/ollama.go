@@ -237,7 +237,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 	var fullResponse strings.Builder
 	var hasContent bool
 	var totalPromptTokens int
-	//var totalCompletionTokens int
+	var totalCompletionTokens int
 
 	for {
 		var chunk struct {
@@ -260,11 +260,12 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 			}
 		}
 
-		if chunk.PromptEvalCount > 0 {
-			totalPromptTokens += chunk.PromptEvalCount
+		// Use the last chunk's counts (prompt_eval_count is same for all chunks)
+		if chunk.Done && chunk.PromptEvalCount > 0 {
+			totalPromptTokens = chunk.PromptEvalCount
 		}
-		if chunk.EvalCount > 0 {
-			//totalCompletionTokens += chunk.EvalCount
+		if chunk.Done && chunk.EvalCount > 0 {
+			totalCompletionTokens += chunk.EvalCount
 		}
 
 		if chunk.Done {
@@ -283,7 +284,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		"content": response,
 	})
 	o.promptTokens += totalPromptTokens
-	//o.completionTokens += totalCompletionTokens
+	o.completionTokens += totalCompletionTokens
 	o.mu.Unlock()
 
 	return response, nil
