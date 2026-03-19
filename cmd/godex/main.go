@@ -137,9 +137,23 @@ func main() {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Fatalf("config %s does not exist; run with --wizard to create it", configPath)
+			fmt.Printf("No config found at %s. Launching wizard to create one...\n", configPath)
+			if err := wizard.RunWizard(configPath); err != nil {
+				log.Fatalf("wizard failed: %v", err)
+			}
+			fmt.Println("Config created. Please run godex again.")
+			return
 		}
 		log.Fatalf("unable to load config: %v", err)
+	}
+
+	if len(cfg.Providers) == 0 {
+		fmt.Println("No providers configured. Launching wizard...")
+		if err := wizard.RunWizard(configPath); err != nil {
+			log.Fatalf("wizard failed: %v", err)
+		}
+		fmt.Println("Config updated. Please run godex again.")
+		return
 	}
 
 	provider := cfg.DefaultOrFirst()
