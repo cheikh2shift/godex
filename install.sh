@@ -150,19 +150,49 @@ complete -F _godex_completion godex
 '
 
 setup_completion() {
-    echo ""
-    echo "Setup shell completion?"
-    echo "1) Bash"
-    echo "2) Zsh"
-    echo "3) Fish"
-    echo "4) Skip"
-    printf "Select option (1-4): "
+    # Check GODEX_COMPLETION env var
+    if [ -n "$GODEX_COMPLETION" ]; then
+        choice="$GODEX_COMPLETION"
+    # Check for .env file
+    elif [ -f ".env" ]; then
+        . .env 2>/dev/null || true
+        if [ -n "$GODEX_COMPLETION" ]; then
+            choice="$GODEX_COMPLETION"
+        fi
+    fi
     
-    if [ -n "$CI" ]; then
-        # Non-interactive mode
-        choice=4
-    else
-        read -r choice
+    # If not set by env/.env, auto-detect shell or prompt
+    if [ -z "$choice" ]; then
+        if [ -t 0 ]; then
+            # Terminal - prompt user
+            echo ""
+            echo "Setup shell completion?"
+            echo "1) Bash"
+            echo "2) Zsh"
+            echo "3) Fish"
+            echo "4) Skip"
+            printf "Select option (1-4): "
+            read -r choice
+        else
+            # Piped - auto-detect shell
+            case "${SHELL:-}" in
+                */bash)
+                    choice=1
+                    echo "Auto-detected Bash, installing completion..."
+                    ;;
+                */zsh)
+                    choice=2
+                    echo "Auto-detected Zsh, installing completion..."
+                    ;;
+                */fish)
+                    choice=3
+                    echo "Auto-detected Fish, installing completion..."
+                    ;;
+                *)
+                    choice=4
+                    ;;
+            esac
+        fi
     fi
     
     case "$choice" in
