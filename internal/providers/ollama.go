@@ -265,7 +265,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 			totalPromptTokens = chunk.PromptEvalCount
 		}
 		if chunk.Done && chunk.EvalCount > 0 {
-			totalCompletionTokens += chunk.EvalCount
+			totalCompletionTokens = chunk.EvalCount
 		}
 
 		if chunk.Done {
