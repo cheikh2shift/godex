@@ -99,6 +99,7 @@ func RunWizard(destination string) error {
 		modelQuestion = "Model (supports :fastest or :provider)"
 	}
 	provider.Model = prompt(reader, modelQuestion, getDefault("model", modelDefault))
+
 	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
 	backend := ""
 	if provider.Type == "gemini" {
