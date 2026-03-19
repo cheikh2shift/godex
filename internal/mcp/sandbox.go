@@ -193,9 +193,8 @@ func (s *BashServer) nodeSecurityWrapper() string {
 	}(), ",") + "]"
 
 	return fmt.Sprintf(`
-(function() {
-var _fs = typeof fs !== 'undefined' ? fs : require('fs');
-var _path = typeof path !== 'undefined' ? path : require('path');
+var _fs = require('fs');
+var _path = require('path');
 var _ALLOWED_PATHS = %s;
 var _unsafeModules = {};
 ['child_process', 'exec', 'spawn', 'fork', 'execSync', 'execFileSync', 'spawnSync',
@@ -289,6 +288,5 @@ Object.defineProperty(process, 'exit', { value: function() { throw new Error("pr
 Object.defineProperty(process, 'kill', { value: function() { throw new Error("process.kill() is disabled"); }});
 Object.defineProperty(process, 'binding', { value: function() { throw new Error("process.binding() is disabled"); }});
 Object.defineProperty(process, 'dlopen', { value: function() { throw new Error("process.dlopen() is disabled"); }});
-})();
 `, allowedPathsJSON)
 }
