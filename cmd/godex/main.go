@@ -81,6 +81,7 @@ var (
 	version      string
 	buildTime    string
 	printVersion bool
+	generateComp string
 )
 
 func main() {
@@ -103,8 +104,19 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
-	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to show MCP logs")
+	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
+	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
 	flag.Parse()
+
+	if os.Getenv("GODEX_COMPLETE") != "" {
+		runCompletion(strings.Fields(os.Getenv("GODEX_COMPLETE")))
+		os.Exit(0)
+	}
+
+	if generateComp != "" {
+		runCompletion([]string{generateComp})
+		os.Exit(0)
+	}
 
 	// Handle version flag
 	if printVersion {

@@ -197,6 +197,30 @@ godex --prompt "list files in current directory"
 godex --wizard
 ```
 
+### Shell Completion
+
+Enable tab completion for `godex` commands and provider names:
+
+**Bash** (add to `~/.bashrc`):
+```bash
+source <(godex --completion bash)
+```
+
+**Zsh** (add to `~/.zshrc`):
+```bash
+source <(godex --completion zsh)
+```
+
+**Fish**:
+```bash
+godex --completion fish | source
+```
+
+After sourcing, pressing Tab will show:
+- All available flags with descriptions
+- Provider names when using `--provider`
+- File paths when using `--config`
+
 ### Commands in TUI
 
 - `/help` - Show help
