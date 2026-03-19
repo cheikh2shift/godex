@@ -17,9 +17,11 @@ import (
 )
 
 const (
-	DefaultOllamaModel = "minimax-m2.5:cloud"
+	DefaultOllamaModel = "minimax-m2.7:cloud"
 	defaultOllamaBase  = "http://localhost:11434"
 	ollamaKeepAlive    = "30m"
+	ollamaMaxRetries   = 5
+	ollamaRetryDelay   = 10 * time.Second
 )
 
 type ollamaProvider struct {
@@ -216,28 +218,78 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		return "", err
 	}
 
+	var response string
+	var totalPromptTokens int
+	var lastErr error
+
+	for attempt := 0; attempt <= ollamaMaxRetries; attempt++ {
+		if attempt > 0 {
+			fmt.Printf("\n[Ollama] API Error, cooling down and retrying\n")
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(ollamaRetryDelay):
+			}
+		}
+
+		result, err := o.doSend(ctx, endpoint, payload)
+		if err != nil {
+			lastErr = err
+			if isRetryableError(err) {
+				continue
+			}
+			return "", err
+		}
+
+		response, totalPromptTokens, lastErr = result.response, result.totalPromptTokens, nil
+		break
+	}
+
+	if lastErr != nil {
+		return "", lastErr
+	}
+
+	o.mu.Lock()
+	o.messages = append(o.messages, map[string]string{
+		"role":    "assistant",
+		"content": response,
+	})
+	o.promptTokens += totalPromptTokens
+	o.mu.Unlock()
+
+	return response, nil
+}
+
+type sendResult struct {
+	response          string
+	totalPromptTokens int
+}
+
+func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []byte) (sendResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return "", err
+		return sendResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return "", err
+		return sendResult{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ollama responded with %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return sendResult{}, &ollamaError{
+			statusCode: resp.StatusCode,
+			message:    strings.TrimSpace(string(body)),
+		}
 	}
 
 	decoder := json.NewDecoder(resp.Body)
 	var fullResponse strings.Builder
 	var hasContent bool
 	var totalPromptTokens int
-	var totalCompletionTokens int
 
 	for {
 		var chunk struct {
@@ -260,11 +312,8 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 			}
 		}
 
-		if chunk.PromptEvalCount > 0 {
+		if totalPromptTokens == 0 && chunk.PromptEvalCount > 0 {
 			totalPromptTokens = chunk.PromptEvalCount
-		}
-		if chunk.EvalCount > 0 {
-			totalCompletionTokens = chunk.EvalCount
 		}
 
 		if chunk.Done {
@@ -274,19 +323,26 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 
 	response := strings.TrimSpace(fullResponse.String())
 	if response == "" && !hasContent {
-		return "", fmt.Errorf("ollama returned empty response")
+		return sendResult{}, fmt.Errorf("ollama returned empty response")
 	}
 
-	o.mu.Lock()
-	o.messages = append(o.messages, map[string]string{
-		"role":    "assistant",
-		"content": response,
-	})
-	o.promptTokens = totalPromptTokens
-	o.completionTokens = totalCompletionTokens
-	o.mu.Unlock()
+	return sendResult{response: response, totalPromptTokens: totalPromptTokens}, nil
+}
 
-	return response, nil
+type ollamaError struct {
+	statusCode int
+	message    string
+}
+
+func (e *ollamaError) Error() string {
+	return fmt.Sprintf("ollama responded with %d: %s", e.statusCode, e.message)
+}
+
+func isRetryableError(err error) bool {
+	if ollamaErr, ok := err.(*ollamaError); ok {
+		return ollamaErr.statusCode >= 500
+	}
+	return false
 }
 
 func (o *ollamaProvider) Close() error {

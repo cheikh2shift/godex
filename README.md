@@ -5,12 +5,12 @@
 
 ![GoDex Screenshot](screen2.gif)
 
-GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face (and other LLM providers) through a TUI, with built-in MCP support.
+GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
 
 ## Requirements
 
 - **Go 1.25.7+** - Build from source
-- **Ollama** - For the default LLM backend (or use Gemini or Hugging Face)
+- **Ollama** - For the default LLM backend (or use Gemini, Hugging Face, or OpenRouter)
 
 ### Ollama Setup
 
@@ -21,17 +21,32 @@ GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face (and othe
    ollama serve
    ```
 
-3. **Pull a model** (recommended: nemotron-3-super:cloud or minimax-m2.5:cloud):
+3. **Pull a model** (recommended: nemotron-3-super:cloud or minimax-m2.7:cloud):
    ```bash
    ollama pull nemotron-3-super:cloud
    # or
-   ollama pull minimax-m2.5:cloud
+   ollama pull minimax-m2.7:cloud
    ```
 
 4. **Verify Ollama is running**:
    ```bash
    curl http://localhost:11434
    ```
+
+### OpenRouter Setup
+
+1. **Get an API key**: Sign up at https://openrouter.ai/keys
+
+2. **Set the environment variable**:
+   ```bash
+   export OPENROUTER_API_KEY=sk-or-v1-...
+   ```
+
+3. **Run the wizard** to configure:
+   ```bash
+   godex --wizard
+   ```
+   Select `openrouter` as the provider type and choose from 100+ available models.
 
 ## Configuration
 
@@ -105,7 +120,7 @@ providers:
   - name: ollama
     type: ollama
     endpoint: http://localhost:11434
-    model: minimax-m2.5:cloud
+    model: minimax-m2.7:cloud
     description: Ollama with codeqwen
     temperature: 0.2
     mcp_servers:
@@ -120,16 +135,17 @@ default_provider: ollama
 | Field | Description |
 |-------|-------------|
 | `name` | Provider identifier |
-| `type` | Provider type: `ollama`, `gemini`, or `huggingface` |
-| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`) |
-| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.5:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
+| `type` | Provider type: `ollama`, `gemini`, `huggingface`, or `openrouter` |
+| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`, OpenRouter: `https://openrouter.ai/api/v1`) |
+| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.7:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |
 | `tool_timeout` | Tool execution timeout in seconds (default: 180) |
-| `api_key_env` | Environment variable for API key (Gemini/Hugging Face) |
+| `api_key_env` | Environment variable for API key (Gemini/Hugging Face/OpenRouter) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |
+| `context_limit` | Context window size in tokens (auto-detected for OpenRouter) |
 
 ### MCP Servers
 
@@ -225,7 +241,7 @@ After sourcing, pressing Tab will show:
 
 - `/help` - Show help
 - `/paths` - Show allowed MCP paths
-- `/add-path <path>` - Add allowed path
+- `/add-path <filesys|url> <path>` - Add allowed path
 - `/tools` - Show available MCP tools
 - `/exit` or `/quit` - Exit
 - Up/Down arrows - Command history

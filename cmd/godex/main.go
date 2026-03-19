@@ -227,6 +227,7 @@ promptLoop:
 
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
+
 		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit)
 		if err != nil {
 			if err == ErrPromptAborted {
@@ -504,7 +505,7 @@ User request: %s`, toolsDesc, sessionContext, runtime.GOOS, runtime.GOARCH, wd, 
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					toolResults = append(toolResults, truncate(result, 500))
+					toolResults = append(toolResults, truncate(result, 800))
 				}
 			}
 
@@ -1137,7 +1138,7 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				toolResults = append(toolResults, errMsg)
 				hasError = true
 			} else {
-				toolResults = append(toolResults, truncate(result, 500))
+				toolResults = append(toolResults, truncate(result, 800))
 			}
 		}
 
