@@ -222,7 +222,7 @@ complete -c godex -l completion -x -a "bash zsh fish" -d "Generate shell complet
 }
 
 func printCompletionHelp() {
-	fmt.Println(`Shell completion for godex
+	fmt.Print(`Shell completion for godex
 
 Usage:
   godex --completion <shell>
@@ -231,16 +231,5 @@ Shells:
   bash    Generate bash completion script
   zsh     Generate zsh completion script
   fish    Generate fish completion script
-
-To enable completion:
-
-  Bash (add to ~/.bashrc):
-    source <(godex --completion bash)
-
-  Zsh (add to ~/.zshrc):
-    source <(godex --completion zsh)
-
-  Fish:
-    godex --completion fish | source
 `)
 }
