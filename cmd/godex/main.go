@@ -180,7 +180,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	servers, mcpLogs := initMCPServers(ctx, provider)
+	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
 
 	printStartupBanner(provider, servers, mcpLogs)
 
@@ -567,7 +567,7 @@ func (m *mcpLog) String() string {
 	return strings.Join(m.lines, "\n")
 }
 
-func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer, string) {
+func initMCPServers(ctx context.Context, provider *config.Provider, autoConfirm bool) ([]MCPServer, string) {
 	logs := &mcpLog{}
 
 	if len(provider.MCPServers) == 0 {
@@ -611,7 +611,7 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 			paths = uniqueStrings(paths)
 			logs.Printf("[MCP]   Type: inline (Go)")
 			logs.Printf("[MCP]   Allowed paths: %v", paths)
-			server = mcp.NewFileSystemServer(paths)
+			server = mcp.NewFileSystemServer(paths, autoConfirm)
 		} else if serverConfig.Name == "bash" || serverConfig.Name == "shell" || serverConfig.Name == "exec" {
 			if len(paths) == 0 {
 				paths = []string{wd}
@@ -630,12 +630,12 @@ func initMCPServers(ctx context.Context, provider *config.Provider) ([]MCPServer
 			paths = uniqueStrings(paths)
 			logs.Printf("[MCP]   Type: inline (Go - command execution)")
 			logs.Printf("[MCP]   Allowed paths: %v", paths)
-			server = mcp.NewBashServer(paths)
+			server = mcp.NewBashServer(paths, autoConfirm)
 		} else if serverConfig.Name == "webscraper" || serverConfig.Name == "web" || serverConfig.Name == "browser" {
 			paths = uniqueStrings(paths)
 			logs.Printf("[MCP]   Type: inline (Go - web scraper with JS rendering)")
 			logs.Printf("[MCP]   Allowed URLs: %v", paths)
-			server = mcp.NewWebScraperServer(paths)
+			server = mcp.NewWebScraperServer(paths, autoConfirm)
 		} else {
 			logs.Printf("[MCP]   Type: external")
 			logs.Printf("[MCP]   Command: %s %v", serverConfig.Command, serverConfig.Args)

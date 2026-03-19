@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,7 @@ type BashServer struct {
 	allowedPaths   []string
 	tools          []Tool
 	backgroundPIDs []bgProcess
+	autoConfirm    bool
 }
 
 type bgProcess struct {
@@ -30,12 +32,13 @@ type bgProcess struct {
 	Command string
 }
 
-func NewBashServer(allowedPaths []string) *BashServer {
+func NewBashServer(allowedPaths []string, autoConfirm bool) *BashServer {
 	allowedPaths = sanitizeAllowedPaths(allowedPaths)
 	allowedPaths = withDefaultCwd(allowedPaths)
 
 	server := &BashServer{
 		allowedPaths: allowedPaths,
+		autoConfirm:  autoConfirm,
 		tools: []Tool{
 			{
 				Name:        "run_command",
@@ -201,9 +204,19 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 		}
 		allowed, restrictedPath := s.checkCommandPaths(command)
 		if !allowed && restrictedPath != "" {
-			return "", fmt.Errorf("PATH_RESTRICTED: path not allowed: %s", restrictedPath)
+			if s.autoConfirm {
+				s.allowedPaths = append(s.allowedPaths, restrictedPath)
+				log.Printf("[BASH] Auto-confirmed restricted path: %s", restrictedPath)
+			} else {
+				return "", fmt.Errorf("PATH_RESTRICTED: path not allowed: %s", restrictedPath)
+			}
+		} else if !allowed {
+			if s.autoConfirm {
+				log.Printf("[BASH] Auto-confirmed command execution")
+			} else {
+				return "", fmt.Errorf("PATH_RESTRICTED: command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
+			}
 		}
-		return "", fmt.Errorf("PATH_RESTRICTED: command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
 	}
 
 	timeout := 180 // default 3 minutes

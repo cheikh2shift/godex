@@ -26,7 +26,7 @@ func TestFileSystemServer_DefaultAllowsCwd(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	server := NewFileSystemServer(nil)
+	server := NewFileSystemServer(nil, false)
 	out, err := server.CallTool(context.Background(), "list_directory", map[string]interface{}{
 		"path": ".",
 	})
@@ -51,7 +51,7 @@ func TestFileSystemServer_SanitizesEmptyAllowedPaths(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	server := NewFileSystemServer([]string{""})
+	server := NewFileSystemServer([]string{""}, false)
 	paths := server.AllowedPaths()
 	if len(paths) == 0 || strings.TrimSpace(paths[0]) == "" {
 		t.Fatalf("expected default allowed path, got: %v", paths)

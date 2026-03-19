@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,14 +15,16 @@ import (
 type FileSystemServer struct {
 	allowedPaths []string
 	tools        []Tool
+	autoConfirm  bool
 }
 
-func NewFileSystemServer(allowedPaths []string) *FileSystemServer {
+func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemServer {
 	allowedPaths = sanitizeAllowedPaths(allowedPaths)
 	allowedPaths = withDefaultCwd(allowedPaths)
 
 	server := &FileSystemServer{
 		allowedPaths: allowedPaths,
+		autoConfirm:  autoConfirm,
 		tools: []Tool{
 			{
 				Name:        "read_file",
@@ -146,14 +149,26 @@ func (s *FileSystemServer) isAllowed(path string) bool {
 	return false
 }
 
+func (s *FileSystemServer) checkAndMaybeAddPath(path string) error {
+	if !s.isAllowed(path) {
+		if s.autoConfirm {
+			s.allowedPaths = append(s.allowedPaths, path)
+			log.Printf("[FILESYSTEM] Auto-confirmed restricted path: %s", path)
+			return nil
+		}
+		return fmt.Errorf("path not allowed: %s", path)
+	}
+	return nil
+}
+
 func (s *FileSystemServer) readFile(args map[string]interface{}) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(path)
@@ -174,8 +189,8 @@ func (s *FileSystemServer) writeFile(args map[string]interface{}) (string, error
 		return "", fmt.Errorf("content is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	dir := filepath.Dir(path)
@@ -202,8 +217,8 @@ func (s *FileSystemServer) listDirectory(args map[string]interface{}) (string, e
 		}
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	entries, err := os.ReadDir(path)
@@ -230,8 +245,8 @@ func (s *FileSystemServer) createDirectory(args map[string]interface{}) (string,
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	if err := os.MkdirAll(path, 0755); err != nil {
@@ -247,8 +262,8 @@ func (s *FileSystemServer) deleteFile(args map[string]interface{}) (string, erro
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	info, err := os.Stat(path)
@@ -280,8 +295,8 @@ func (s *FileSystemServer) searchFiles(args map[string]interface{}) (string, err
 		return "", fmt.Errorf("pattern is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	var matches []string
@@ -314,8 +329,8 @@ func (s *FileSystemServer) getFileInfo(args map[string]interface{}) (string, err
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	info, err := os.Stat(path)
@@ -333,8 +348,8 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(path)
@@ -371,8 +386,8 @@ func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string,
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(path)
@@ -415,8 +430,8 @@ func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, er
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(path)
@@ -460,8 +475,8 @@ func (s *FileSystemServer) searchFileText(args map[string]interface{}) (string, 
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	useRegex, _ := args["use_regex"].(bool)
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	var regex *regexp.Regexp
@@ -535,8 +550,8 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	useRegex, _ := args["use_regex"].(bool)
 
-	if !s.isAllowed(path) {
-		return "", fmt.Errorf("path not allowed: %s", path)
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
 	}
 
 	content, err := os.ReadFile(path)

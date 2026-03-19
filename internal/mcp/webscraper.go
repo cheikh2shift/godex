@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -17,15 +18,17 @@ type WebScraperServer struct {
 	tools         []Tool
 	browserCtx    context.Context
 	browserCancel context.CancelFunc
+	autoConfirm   bool
 }
 
-func NewWebScraperServer(allowedURLs []string) *WebScraperServer {
+func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServer {
 	if len(allowedURLs) == 0 {
 		allowedURLs = []string{}
 	}
 
 	return &WebScraperServer{
 		allowedURLs: allowedURLs,
+		autoConfirm: autoConfirm,
 		tools: []Tool{
 			{
 				Name:        "fetch_url",
@@ -84,6 +87,18 @@ func (s *WebScraperServer) isURLAllowed(rawURL string) bool {
 	return false
 }
 
+func (s *WebScraperServer) checkAndMaybeAddURL(rawURL string) error {
+	if !s.isURLAllowed(rawURL) {
+		if s.autoConfirm {
+			s.allowedURLs = append(s.allowedURLs, rawURL)
+			log.Printf("[WEBSCRAPER] Auto-confirmed restricted URL: %s", rawURL)
+			return nil
+		}
+		return fmt.Errorf("URL not allowed: %s", rawURL)
+	}
+	return nil
+}
+
 func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
 	switch name {
 	case "fetch_url":
@@ -105,8 +120,8 @@ func (s *WebScraperServer) fetchURL(args map[string]interface{}) (string, error)
 		return "", fmt.Errorf("url is required")
 	}
 
-	if !s.isURLAllowed(rawURL) {
-		return "", fmt.Errorf("URL not allowed: %s", rawURL)
+	if err := s.checkAndMaybeAddURL(rawURL); err != nil {
+		return "", err
 	}
 
 	waitSec := 2
