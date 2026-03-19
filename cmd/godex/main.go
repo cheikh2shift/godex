@@ -990,7 +990,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 %s
 
 CRITICAL: The current working directory is: %s
-Use this path when the user asks about "this folder", "current directory", or similar.
+Use this path when the user asks about "this folder", "~", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
