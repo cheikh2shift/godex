@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -309,7 +310,9 @@ promptLoop:
 		fullPrompt := fmt.Sprintf(`You have access to these tools:
 %s%s
 
-CRITICAL: The current working directory is: %s
+CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
 Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
@@ -340,7 +343,7 @@ Example:
 
 IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
-User request: %s`, toolsDesc, sessionContext, wd, wd, input)
+User request: %s`, toolsDesc, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -1015,7 +1018,9 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	fullPrompt := fmt.Sprintf(`You have access to these tools:
 %s
 
-CRITICAL: The current working directory is: %s
+CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
 Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
@@ -1049,7 +1054,7 @@ IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include an
 Project tree:
 %s
 
-User request: %s`, toolsDesc, wd, wd, tree, prompt)
+User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
 
 	// Get tool settings
 	maxToolRounds := 10
