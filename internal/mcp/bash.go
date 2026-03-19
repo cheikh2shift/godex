@@ -107,11 +107,74 @@ func (s *BashServer) isPathAllowed(path string) bool {
 }
 
 var (
-	cdRegex = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
+	cdRegex          = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
+	interpreterRegex = regexp.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|node|nodejs|ruby|perl|php|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
+	pathRegex        = regexp.MustCompile(`(?:^|\s)([/\\]+[^\s/\\]+(?:/[^\s/\\]*)*|[\.]{1,2}[/\\]|(?:~|\$(?:HOME|\w+))[/\\][^\s/\\]+)`)
 )
 
+func extractPathsFromCommand(command string) []string {
+	var paths []string
+	matches := pathRegex.FindAllStringSubmatch(command, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			paths = append(paths, match[1])
+		}
+	}
+	return paths
+}
+
+func resolvePath(p string) string {
+	p = strings.TrimSpace(p)
+	if strings.HasPrefix(p, "$") {
+		if idx := strings.IndexAny(p, "/\\"); idx > 0 {
+			envVar := p[:idx]
+			envVal := os.Getenv(envVar[1:])
+			if envVal != "" {
+				p = envVal + p[idx:]
+			}
+		}
+	}
+	p = os.ExpandEnv(p)
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			if p == "~" {
+				p = home
+			} else {
+				p = filepath.Join(home, p[2:])
+			}
+		}
+	}
+	p = filepath.Clean(p)
+	return p
+}
+
+func (s *BashServer) extractAndCheckPaths(command string) (bool, string) {
+	paths := extractPathsFromCommand(command)
+	if len(paths) == 0 {
+		return true, ""
+	}
+	p := paths[0]
+	resolved := resolvePath(p)
+	if _, err := os.Stat(resolved); err == nil {
+		if !s.isPathAllowed(resolved) {
+			return false, resolved
+		}
+	}
+	return true, ""
+}
+
 func (s *BashServer) isCommandAllowed(command string) bool {
+	allowed, _ := s.checkCommandPaths(command)
+	return allowed
+}
+
+func (s *BashServer) checkCommandPaths(command string) (bool, string) {
 	trimmed := strings.TrimSpace(command)
+
+	if interpreterRegex.MatchString(command) {
+		return false, ""
+	}
 
 	match := cdRegex.FindStringSubmatch(trimmed)
 	if len(match) > 1 {
@@ -119,11 +182,11 @@ func (s *BashServer) isCommandAllowed(command string) bool {
 		targetPath = strings.ReplaceAll(targetPath, "~", os.Getenv("HOME"))
 		targetPath = filepath.Clean(targetPath)
 		if !s.isPathAllowed(targetPath) {
-			return false
+			return false, targetPath
 		}
 	}
 
-	return true
+	return s.extractAndCheckPaths(command)
 }
 
 func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -133,7 +196,14 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 	}
 
 	if !s.isCommandAllowed(command) {
-		return "", fmt.Errorf("command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
+		if interpreterRegex.MatchString(command) {
+			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, node, ruby, php, etc.) are not allowed in run_command. Use run_python or run_node instead.")
+		}
+		allowed, restrictedPath := s.checkCommandPaths(command)
+		if !allowed && restrictedPath != "" {
+			return "", fmt.Errorf("PATH_RESTRICTED: path not allowed: %s", restrictedPath)
+		}
+		return "", fmt.Errorf("PATH_RESTRICTED: command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
 	}
 
 	timeout := 180 // default 3 minutes
@@ -287,9 +357,9 @@ func (s *BashServer) KillAllBackground() (string, error) {
 }
 
 func (s *BashServer) runPython(ctx context.Context, args map[string]interface{}) (string, error) {
-	code, ok := args["code"].(string)
+	code, ok := args["code"]
 	if !ok {
-		return "", fmt.Errorf("code is required")
+		return "", fmt.Errorf("code is required: args=%v", args)
 	}
 
 	timeout := 30
@@ -300,7 +370,9 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "python3", "-c", code)
+	secureCode := s.pythonSecurityWrapper() + "\n" + fmt.Sprintf("%v", code)
+
+	cmd := exec.CommandContext(ctx, "python3", "-c", secureCode)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
@@ -311,9 +383,9 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 }
 
 func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (string, error) {
-	code, ok := args["code"].(string)
+	code, ok := args["code"]
 	if !ok {
-		return "", fmt.Errorf("code is required")
+		return "", fmt.Errorf("code is required: args=%v", args)
 	}
 
 	timeout := 30
@@ -324,7 +396,11 @@ func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "node", "-e", code)
+	wrapper := s.nodeSecurityWrapper()
+	userCode := fmt.Sprintf("%v", code)
+	secureCode := wrapper + "\n" + userCode
+
+	cmd := exec.CommandContext(ctx, "node", "-e", secureCode)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {

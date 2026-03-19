@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -81,6 +82,7 @@ var (
 	version      string
 	buildTime    string
 	printVersion bool
+	generateComp string
 )
 
 func main() {
@@ -103,8 +105,19 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
-	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to show MCP logs")
+	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
+	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
 	flag.Parse()
+
+	if os.Getenv("GODEX_COMPLETE") != "" {
+		runCompletion(strings.Fields(os.Getenv("GODEX_COMPLETE")))
+		os.Exit(0)
+	}
+
+	if generateComp != "" {
+		runCompletion([]string{generateComp})
+		os.Exit(0)
+	}
 
 	// Handle version flag
 	if printVersion {
@@ -125,9 +138,23 @@ func main() {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			log.Fatalf("config %s does not exist; run with --wizard to create it", configPath)
+			fmt.Printf("No config found at %s. Launching wizard to create one...\n", configPath)
+			if err := wizard.RunWizard(configPath); err != nil {
+				log.Fatalf("wizard failed: %v", err)
+			}
+			fmt.Println("Config created. Please run godex again.")
+			return
 		}
 		log.Fatalf("unable to load config: %v", err)
+	}
+
+	if len(cfg.Providers) == 0 {
+		fmt.Println("No providers configured. Launching wizard...")
+		if err := wizard.RunWizard(configPath); err != nil {
+			log.Fatalf("wizard failed: %v", err)
+		}
+		fmt.Println("Config updated. Please run godex again.")
+		return
 	}
 
 	provider := cfg.DefaultOrFirst()
@@ -273,8 +300,9 @@ promptLoop:
 		toolsDesc := getToolsDescription(servers)
 
 		sessionContext := ""
+		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
 		if prevSession != "" {
-			sessionContext = fmt.Sprintf("\n\nPrevious session summary:\n%s\n", prevSession)
+			sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
 		}
 		if agentsContext != "" {
 			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
@@ -283,7 +311,9 @@ promptLoop:
 		fullPrompt := fmt.Sprintf(`You have access to these tools:
 %s%s
 
-CRITICAL: The current working directory is: %s
+CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
 Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
@@ -314,7 +344,7 @@ Example:
 
 IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
-User request: %s`, toolsDesc, sessionContext, wd, wd, input)
+User request: %s`, toolsDesc, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -989,8 +1019,10 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	fullPrompt := fmt.Sprintf(`You have access to these tools:
 %s
 
-CRITICAL: The current working directory is: %s
-Use this path when the user asks about "this folder", "~", "current directory", or similar.
+CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
@@ -1023,7 +1055,7 @@ IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include an
 Project tree:
 %s
 
-User request: %s`, toolsDesc, wd, wd, tree, prompt)
+User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
 
 	// Get tool settings
 	maxToolRounds := 10
@@ -1324,8 +1356,8 @@ func isPathRestrictionError(err error) bool {
 		return false
 	}
 	errMsg := err.Error()
-	return strings.Contains(errMsg, "path not allowed") ||
-		strings.Contains(errMsg, "command not allowed") ||
+	return strings.Contains(errMsg, "PATH_RESTRICTED") ||
+		strings.Contains(errMsg, "path not allowed") ||
 		strings.Contains(errMsg, "code not allowed")
 }
 
