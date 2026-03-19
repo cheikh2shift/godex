@@ -1336,8 +1336,8 @@ func isPathRestrictionError(err error) bool {
 		return false
 	}
 	errMsg := err.Error()
-	return strings.Contains(errMsg, "path not allowed") ||
-		strings.Contains(errMsg, "command not allowed") ||
+	return strings.Contains(errMsg, "PATH_RESTRICTED") ||
+		strings.Contains(errMsg, "path not allowed") ||
 		strings.Contains(errMsg, "code not allowed")
 }
 

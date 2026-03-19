@@ -107,11 +107,16 @@ func (s *BashServer) isPathAllowed(path string) bool {
 }
 
 var (
-	cdRegex = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
+	cdRegex          = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
+	interpreterRegex = regexp.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|node|nodejs|ruby|perl|php|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
 )
 
 func (s *BashServer) isCommandAllowed(command string) bool {
 	trimmed := strings.TrimSpace(command)
+
+	if interpreterRegex.MatchString(command) {
+		return false
+	}
 
 	match := cdRegex.FindStringSubmatch(trimmed)
 	if len(match) > 1 {
@@ -133,7 +138,10 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 	}
 
 	if !s.isCommandAllowed(command) {
-		return "", fmt.Errorf("command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
+		if interpreterRegex.MatchString(command) {
+			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, node, ruby, php, etc.) are not allowed in run_command. Use run_python or run_node instead.")
+		}
+		return "", fmt.Errorf("PATH_RESTRICTED: command not allowed: must be run within allowed paths: %s", strings.Join(s.allowedPaths, ", "))
 	}
 
 	timeout := 180 // default 3 minutes
