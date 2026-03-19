@@ -287,9 +287,9 @@ func (s *BashServer) KillAllBackground() (string, error) {
 }
 
 func (s *BashServer) runPython(ctx context.Context, args map[string]interface{}) (string, error) {
-	code, ok := args["code"].(string)
+	code, ok := args["code"]
 	if !ok {
-		return "", fmt.Errorf("code is required")
+		return "", fmt.Errorf("code is required: args=%v", args)
 	}
 
 	timeout := 30
@@ -300,7 +300,9 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "python3", "-c", code)
+	secureCode := s.pythonSecurityWrapper() + "\n" + fmt.Sprintf("%v", code)
+
+	cmd := exec.CommandContext(ctx, "python3", "-c", secureCode)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
@@ -311,9 +313,9 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 }
 
 func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (string, error) {
-	code, ok := args["code"].(string)
+	code, ok := args["code"]
 	if !ok {
-		return "", fmt.Errorf("code is required")
+		return "", fmt.Errorf("code is required: args=%v", args)
 	}
 
 	timeout := 30
@@ -324,7 +326,11 @@ func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "node", "-e", code)
+	wrapper := s.nodeSecurityWrapper()
+	userCode := fmt.Sprintf("%v", code)
+	secureCode := wrapper + "\n" + userCode
+
+	cmd := exec.CommandContext(ctx, "node", "-e", secureCode)
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
