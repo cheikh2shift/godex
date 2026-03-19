@@ -122,7 +122,12 @@ func RunWizard(destination string) error {
 		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "HF_TOKEN"))
 	} else if provider.Type == "openrouter" {
 		provider.Endpoint = prompt(reader, "OpenRouter base URL", getDefault("endpoint", "https://openrouter.ai/api/v1"))
-		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "OPENROUTER_API_KEY"))
+		storeApiKey := prompt(reader, "Store API key in config? (env/file/skip)", getDefault("store_api_key", "skip"))
+		if storeApiKey == "env" {
+			provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "OPENROUTER_API_KEY"))
+		} else if storeApiKey == "file" {
+			provider.APIKey = prompt(reader, "API key (kept in YAML, not recommended)", "")
+		}
 	} else if backend == "ollama" || provider.Type == "ollama" {
 		provider.Endpoint = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
 	} else if backend == "vertex" || backend == "vertexai" {
