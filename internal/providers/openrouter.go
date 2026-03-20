@@ -89,7 +89,13 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
-		apiKey = os.Getenv("OPENROUTER_API_KEY")
+		envKey := "OPENROUTER_API_KEY"
+
+		if cfg.APIKeyEnv != "" {
+			envKey = cfg.APIKeyEnv
+		}
+
+		apiKey = os.Getenv(envKey)
 	}
 
 	contextLimit := cfg.ContextLimit
