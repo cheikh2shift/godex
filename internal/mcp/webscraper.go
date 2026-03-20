@@ -45,11 +45,11 @@ func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServ
 				Description: "Extract all links from HTML content",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"html":{"type":"string","description":"HTML content to parse"},"base_url":{"type":"string","description":"Base URL for resolving relative links"}},"required":["html"]}`),
 			},
-			{
+			/*{
 				Name:        "click_element",
 				Description: "Click an element on a rendered page and return the new HTML (requires active browser context)",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click"},"wait":{"type":"number","description":"Wait time in seconds after click (default 2)"}},"required":["selector"]}`),
-			},
+			},*/
 		},
 	}
 }
