@@ -4,7 +4,7 @@ GoDex supports integrating with external MCP (Model Context Protocol) servers to
 
 ## Configuration
 
-External MCP servers are configured in your `config.yaml` file under the `mcp` section.
+External MCP servers are configured in your `~/.godex/providers.yaml` file under each provider's `mcp_servers` section.
 
 ### MCPServer Structure
 
@@ -22,27 +22,28 @@ Each MCP server is defined with the following properties:
 ### Example Configuration
 
 ```yaml
-mcp:
-  servers:
-    # Example: A custom filesystem server
-    filesystem:
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/myuser/docs"]
-      transport: "stdio"
-      allowed_paths:
-        - "/Users/myuser/docs"
-        - "/Users/myuser/shared"
+providers:
+  - name: ollama
+    type: ollama
+    endpoint: http://localhost:11434
+    model: minimax-m2.7:cloud
+    description: Ollama with Chrome MCP
+    mcp_servers:
+      - name: chrome
+        command: "/usr/local/bin/chrome-mcp"
+        transport: "stdio"
 
-    # Example: A GitHub MCP server
-    github:
-      command: "npx"
-      args: ["-y", "@modelcontextprotocol/server-github"]
-      transport: "stdio"
-      env:
-        - "GITHUB_PERSONAL_ACCESS_TOKEN=$GITHUB_TOKEN"
+      # Example: A GitHub MCP server
+      - name: github
+        command: "npx"
+        args: ["-y", "@modelcontextprotocol/server-github"]
+        transport: "stdio"
+        env:
+          - "GITHUB_PERSONAL_ACCESS_TOKEN=$GITHUB_TOKEN"
+
+default_provider: ollama
 ```
 
-User: Can you read the contents of /home/user/projects/README.md?
 ## Built-in MCP Servers
 
 GoDex includes several built-in MCP tools that are implemented as inline Go servers. These servers don't require external process execution - they're built directly into the Go codebase.
@@ -52,12 +53,11 @@ GoDex includes several built-in MCP tools that are implemented as inline Go serv
 Execute shell commands on your system.
 
 ```yaml
-mcp:
-  servers:
-    bash:
-      allowed_paths:
-        - "/home/user/projects"
-        - "/tmp"
+mcp_servers:
+  - name: bash
+    allowed_paths:
+      - "/home/user/projects"
+      - "/tmp"
 ```
 
 ### Filesystem
@@ -65,11 +65,10 @@ mcp:
 Perform file operations (read, write, list, delete, search).
 
 ```yaml
-mcp:
-  servers:
-    filesystem:
-      allowed_paths:
-        - "/home/user/projects"
+mcp_servers:
+  - name: filesystem
+    allowed_paths:
+      - "/home/user/projects"
 ```
 
 ### Webscraper
@@ -77,15 +76,65 @@ mcp:
 Fetch URLs and extract content from web pages with JavaScript rendering support.
 
 ```yaml
-mcp:
-  servers:
-    webscraper:
-      allowed_urls:
-        - "https://example.com"
-        - "https://*.github.io"
+mcp_servers:
+  - name: webscraper
+    allowed_urls:
+      - "https://example.com"
+      - "https://*.github.io"
 ```
 
-### How It Works
+## External MCP Servers
+
+### Chrome MCP Controller
+
+Control Chrome tabs via a browser extension. Requires the [chrome-mcp](https://github.com/cheikh2shift/chrome-mcp) server and Chrome extension.
+
+**Features:**
+- List and manage connected Chrome tabs
+- Execute JavaScript in target tabs
+- Extract page structure and content
+- Find elements with CSS/XPath selectors
+- Take screenshots
+
+**Configuration:**
+
+```yaml
+providers:
+  - name: ollama
+    type: ollama
+    endpoint: http://localhost:11434
+    model: minimax-m2.7:cloud
+    mcp_servers:
+      - name: chrome
+        command: "/usr/local/bin/chrome-mcp"
+        transport: "stdio"
+
+default_provider: ollama
+```
+
+**Available Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `list_connected_tabs` | List all tabs connected via extension |
+| `get_tab_info` | Get detailed tab information |
+| `get_page_structure` | Get structured DOM overview |
+| `extract_page_content` | Extract readable text, links, forms |
+| `get_page_source` | Get raw HTML source |
+| `find_elements` | Find elements with CSS/XPath |
+| `execute_script` | Execute JavaScript in tab |
+| `get_element_details` | Get element styles and position |
+| `wait_for_element` | Wait for element to appear |
+| `take_screenshot` | Capture page screenshot |
+
+**Usage:**
+
+1. Install the Chrome extension from `chrome-mcp/extension/`
+2. Start the extension's HTTP server via the popup
+3. Connect tabs you want to control
+4. Use godex to interact with the tab
+
+### How Built-in Servers Work
 
 The built-in servers are created inline within GoDex itself using:
 - `mcp.NewFileSystemServer(paths)` for filesystem operations
@@ -94,26 +143,19 @@ The built-in servers are created inline within GoDex itself using:
 
 The `allowed_paths` (or `allowed_urls` for webscraper) field restricts what paths/URLs the respective server can access. If not specified, reasonable defaults are applied.
 
-> **Note:** You can also configure external MCP servers by specifying the `command` and `args` fields to run external MCP server processes.
-
-
-GoDex: (uses filesystem MCP server to read the file)
-# Contents of README.md
-...
-```
+> **Note:** External MCP servers run as separate processes. Configure them via the `command` and `args` fields.
 
 ## Environment Variables
 
 You can reference environment variables in your MCP server configuration using `$VAR_NAME` syntax:
 
 ```yaml
-mcp:
-  servers:
-    myserver:
-      command: "my-mcp-server"
-      env:
-        - "API_KEY=$MY_API_KEY"
-        - "DATABASE_URL=$DB_URL"
+mcp_servers:
+  - name: myserver
+    command: "my-mcp-server"
+    env:
+      - "API_KEY=$MY_API_KEY"
+      - "DATABASE_URL=$DB_URL"
 ```
 
 Make sure these environment variables are set before starting GoDex.
