@@ -99,10 +99,9 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 	}
 
 	contextLimit := cfg.ContextLimit
-	if contextLimit == 0 {
-		if limit, err := GetOpenRouterContextLimit(model); err == nil {
-			contextLimit = limit
-		}
+
+	if limit, err := GetOpenRouterContextLimit(model); err == nil {
+		contextLimit = limit
 	}
 
 	return &openRouterProvider{
