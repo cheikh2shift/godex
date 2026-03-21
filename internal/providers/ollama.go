@@ -220,6 +220,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 
 	var response string
 	var totalPromptTokens int
+	var totalCompletionTokens int
 	var lastErr error
 
 	for attempt := 0; attempt <= ollamaMaxRetries; attempt++ {
@@ -241,7 +242,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 			return "", err
 		}
 
-		response, totalPromptTokens, lastErr = result.response, result.totalPromptTokens, nil
+		response, totalPromptTokens, totalCompletionTokens, lastErr = result.response, result.totalPromptTokens, result.totalCompletionTokens, nil
 		break
 	}
 
@@ -255,14 +256,16 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		"content": response,
 	})
 	o.promptTokens = totalPromptTokens
+	o.completionTokens = totalCompletionTokens
 	o.mu.Unlock()
 
 	return response, nil
 }
 
 type sendResult struct {
-	response          string
-	totalPromptTokens int
+	response              string
+	totalPromptTokens     int
+	totalCompletionTokens int
 }
 
 func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []byte) (sendResult, error) {
@@ -290,7 +293,7 @@ func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []
 	var fullResponse strings.Builder
 	var hasContent bool
 	var totalPromptTokens int
-
+	var totalCompletionTokens int
 	for {
 		var chunk struct {
 			Message struct {
@@ -316,6 +319,10 @@ func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []
 			totalPromptTokens = chunk.PromptEvalCount
 		}
 
+		if totalCompletionTokens == 0 && chunk.EvalCount > 0 {
+			totalCompletionTokens = chunk.EvalCount
+		}
+
 		if chunk.Done {
 			break
 		}
@@ -326,7 +333,7 @@ func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []
 		return sendResult{}, fmt.Errorf("ollama returned empty response")
 	}
 
-	return sendResult{response: response, totalPromptTokens: totalPromptTokens}, nil
+	return sendResult{response: response, totalPromptTokens: totalPromptTokens, totalCompletionTokens: totalCompletionTokens}, nil
 }
 
 type ollamaError struct {
