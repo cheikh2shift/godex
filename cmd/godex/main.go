@@ -342,7 +342,7 @@ Use this path when the user asks about "this folder", "current directory", or si
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
-User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
+User request: %s`, sessionContext, runtime.GOOS, runtime.GOARCH, wd, input)
 		} else {
 			fullPrompt = fmt.Sprintf(`You have access to these tools:
 %s%s
@@ -555,7 +555,7 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					toolResults = append(toolResults, truncate(result, 800))
+					toolResults = append(toolResults, truncate(result, 2500))
 				}
 			}
 
@@ -1123,7 +1123,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 Project tree:
 %s
 
-User request: %s`, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
+User request: %s`, runtime.GOOS, runtime.GOARCH, wd, tree, prompt)
 	} else {
 		toolsDesc := getToolsDescription(servers)
 		fullPrompt = fmt.Sprintf(`You have access to these tools:
@@ -1261,7 +1261,7 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				toolResults = append(toolResults, errMsg)
 				hasError = true
 			} else {
-				toolResults = append(toolResults, truncate(result, 800))
+				toolResults = append(toolResults, truncate(result, 2500))
 			}
 		}
 
