@@ -44,7 +44,6 @@ type openRouterProvider struct {
 	apiKey           string
 	temperature      *float64
 	client           *http.Client
-	messages         []map[string]interface{}
 	tools            []map[string]interface{}
 	cancelMu         sync.Mutex
 	cancelFunc       context.CancelFunc
@@ -128,16 +127,14 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
-	p.mu.Lock()
-	p.messages = append(p.messages, map[string]interface{}{
-		"role":    "user",
-		"content": prompt,
-	})
-	p.mu.Unlock()
+	// Send just the current prompt without maintaining conversation history
+	messages := []map[string]interface{}{
+		{"role": "user", "content": prompt},
+	}
 
 	reqBody := map[string]interface{}{
 		"model":    p.model,
-		"messages": p.messages,
+		"messages": messages,
 	}
 
 	if len(p.tools) > 0 {
@@ -157,15 +154,12 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			fmt.Printf("\n[OPENROUTER] Waiting %v before retry (attempt %d/%d)...\n", retryDelay, attempt, maxRetries)
-			p.mu.Lock()
 			select {
 			case <-ctx.Done():
-				p.mu.Unlock()
 				return "", ctx.Err()
 			case <-time.After(retryDelay):
 			}
 			fmt.Printf("\n[OPENROUTER] Retrying request (attempt %d/%d)...\n", attempt, maxRetries)
-			p.mu.Unlock()
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(body))
@@ -222,29 +216,15 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		p.mu.Lock()
 		p.promptTokens += response.Usage.PromptTokens
 		p.completionTokens += response.Usage.CompletionTokens
+		p.mu.Unlock()
 
-		var assistantMsg map[string]interface{}
 		if len(choice.Message.ToolCalls) > 0 {
-			assistantMsg = map[string]interface{}{
-				"role":       "assistant",
-				"tool_calls": choice.Message.ToolCalls,
-			}
-			p.messages = append(p.messages, assistantMsg)
-			p.mu.Unlock()
-
 			var content string
 			for _, tc := range choice.Message.ToolCalls {
 				content += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
 			}
 			return content, nil
 		}
-
-		assistantMsg = map[string]interface{}{
-			"role":    "assistant",
-			"content": choice.Message.Content,
-		}
-		p.messages = append(p.messages, assistantMsg)
-		p.mu.Unlock()
 
 		return choice.Message.Content, nil
 	}
@@ -290,13 +270,7 @@ func (p *openRouterProvider) CallTool(ctx context.Context, name string, args map
 }
 
 func (p *openRouterProvider) SubmitToolResult(toolCallID, result string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.messages = append(p.messages, map[string]interface{}{
-		"role":         "tool",
-		"tool_call_id": toolCallID,
-		"content":      result,
-	})
+	// No-op: not tracking conversation history
 }
 
 func (p *openRouterProvider) Close() error {
@@ -314,7 +288,6 @@ func (p *openRouterProvider) TokenUsage() (int, int) {
 func (p *openRouterProvider) Reset() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.messages = []map[string]interface{}{}
 	p.promptTokens = 0
 	p.completionTokens = 0
 	return nil

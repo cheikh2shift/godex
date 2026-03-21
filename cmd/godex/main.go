@@ -605,12 +605,20 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 			// Update previous round tool calls for next iteration
 			prevRoundToolCalls = currentToolCalls
 
+			// Add urgency based on round number
+			roundUrgency := ""
+			if round >= 4 {
+				roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now based on the tool results you have. Do NOT call any more tools."
+			} else if round >= 2 {
+				roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary to complete the task."
+			}
+
 			if llmProvider.SupportsNativeToolCalls() {
-				fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
+				fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 			} else {
 				toolsDesc := getToolsDescription(servers)
 				toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
-				fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
+				fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 			}
 		}
 
@@ -1298,12 +1306,20 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		// Update previous round tool calls for next iteration
 		prevRoundToolCalls = currentToolCalls
 
+		// Add urgency based on round number
+		roundUrgency := ""
+		if round >= 4 {
+			roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now based on the tool results you have. Do NOT call any more tools."
+		} else if round >= 2 {
+			roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary to complete the task."
+		}
+
 		if llmProvider.SupportsNativeToolCalls() {
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 		} else {
 			toolsDesc := getToolsDescription(servers)
 			toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
-			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
+			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 		}
 	}
 

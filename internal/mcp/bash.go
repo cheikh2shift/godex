@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -272,20 +273,42 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
 
-	output, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 
 	// Cancel after command completes (either success or error)
 	cancel()
+
+	stdoutStr := strings.TrimSpace(stdout.String())
+	stderrStr := strings.TrimSpace(stderr.String())
 
 	if err != nil {
 		// Check if it was a timeout
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Sprintf("TIMEOUT: Command exceeded %d seconds and was killed", timeout), nil
 		}
-		return fmt.Sprintf("Error: %v\nOutput: %s", err, string(output)), nil
+		// Return both stdout and stderr so model can self-correct
+		result := ""
+		if stdoutStr != "" {
+			result += fmt.Sprintf("STDOUT:\n%s\n", stdoutStr)
+		}
+		if stderrStr != "" {
+			result += fmt.Sprintf("STDERR:\n%s\n", stderrStr)
+		}
+		if result == "" {
+			result = fmt.Sprintf("Error: %v", err)
+		}
+		return strings.TrimSpace(result), nil
 	}
 
-	return string(output), nil
+	// Command succeeded - still include stderr if non-empty (warnings, etc.)
+	if stderrStr != "" {
+		return fmt.Sprintf("STDOUT:\n%s\nSTDERR:\n%s", stdoutStr, stderrStr), nil
+	}
+	return stdoutStr, nil
 }
 
 func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
