@@ -1740,14 +1740,15 @@ func normalizeToolCallText(text string) string {
 // Some providers return :/home/user instead of cd /home/user
 // Only replaces the first occurrence at the start of the command
 func fixDriveLetterPath(cmd string) string {
-	// Match :/<path> ONLY at the start and replace with cd /<path>
-	re := regexp.MustCompile(`(?i)^:\/(\S)`)
-	matches := re.FindStringIndex(cmd)
-	if matches == nil {
+	// Match :/<path> at start and convert to cd /<path>
+	re := regexp.MustCompile(`(?i)^:\/(.+)`)
+	match := re.FindStringSubmatch(cmd)
+	if match == nil {
 		return cmd
 	}
-	// Replace only the matched portion
-	return "cd " + cmd[matches[1]:]
+	// match[1] is the path (e.g., "home/cheikh-seck/godex")
+	// match[0] is the full match (e.g., ":/home/cheikh-seck/godex")
+	return "cd /" + match[1] + cmd[len(match[0]):]
 }
 
 // sanitizeMultilineJson attempts to fix JSON with multi-line string values by escaping newlines within quoted strings

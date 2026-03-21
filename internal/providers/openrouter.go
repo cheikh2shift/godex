@@ -44,6 +44,7 @@ type openRouterProvider struct {
 	apiKey           string
 	temperature      *float64
 	client           *http.Client
+	messages         []map[string]interface{}
 	tools            []map[string]interface{}
 	cancelMu         sync.Mutex
 	cancelFunc       context.CancelFunc
@@ -127,10 +128,18 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
-	// Send just the current prompt without maintaining conversation history
-	messages := []map[string]interface{}{
-		{"role": "user", "content": prompt},
-	}
+	// Extract the actual user input from the prompt (everything after "User request:" or "User asked:")
+	userInput := extractUserInput(prompt)
+
+	p.mu.Lock()
+	// Append user message with just the extracted user input (not full prompt)
+	p.messages = append(p.messages, map[string]interface{}{
+		"role":    "user",
+		"content": userInput,
+	})
+	messages := make([]map[string]interface{}, len(p.messages))
+	copy(messages, p.messages)
+	p.mu.Unlock()
 
 	reqBody := map[string]interface{}{
 		"model":    p.model,
@@ -139,6 +148,9 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 
 	if len(p.tools) > 0 {
 		reqBody["tools"] = p.tools
+		reqBody["response_format"] = map[string]interface{}{
+			"type": "json_object",
+		}
 	}
 
 	if p.temperature != nil {
@@ -216,20 +228,45 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		p.mu.Lock()
 		p.promptTokens += response.Usage.PromptTokens
 		p.completionTokens += response.Usage.CompletionTokens
-		p.mu.Unlock()
 
+		// Track assistant response in history
 		if len(choice.Message.ToolCalls) > 0 {
-			var content string
+			assistantContent := ""
 			for _, tc := range choice.Message.ToolCalls {
-				content += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
+				assistantContent += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
 			}
-			return content, nil
+			p.messages = append(p.messages, map[string]interface{}{
+				"role":    "assistant",
+				"content": assistantContent,
+			})
+			p.mu.Unlock()
+			return assistantContent, nil
 		}
+		p.messages = append(p.messages, map[string]interface{}{
+			"role":    "assistant",
+			"content": choice.Message.Content,
+		})
+		p.mu.Unlock()
 
 		return choice.Message.Content, nil
 	}
 
 	return "", lastErr
+}
+
+// extractUserInput extracts the actual user input from the full prompt
+// by finding "User request:" or "User asked:" and returning everything after it
+func extractUserInput(prompt string) string {
+	// Try to find "User request:" first (new format)
+	if idx := strings.Index(prompt, "User request:"); idx != -1 {
+		return strings.TrimSpace(prompt[idx+len("User request:"):])
+	}
+	// Fall back to "User asked:" (follow-up format)
+	if idx := strings.Index(prompt, "User asked:"); idx != -1 {
+		return strings.TrimSpace(prompt[idx+len("User asked:"):])
+	}
+	// Fall back to returning the whole prompt if markers not found
+	return prompt
 }
 
 func (p *openRouterProvider) SetThinkCallback(fn func(string)) {
@@ -288,6 +325,7 @@ func (p *openRouterProvider) TokenUsage() (int, int) {
 func (p *openRouterProvider) Reset() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.messages = []map[string]interface{}{}
 	p.promptTokens = 0
 	p.completionTokens = 0
 	return nil
