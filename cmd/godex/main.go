@@ -396,6 +396,9 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 		stopSignal := make(chan os.Signal, 1)
 		signal.Notify(stopSignal, os.Interrupt, syscall.SIGTERM)
 
+		// Track tool calls across rounds to detect infinite loops
+		prevRoundToolCalls := make(map[string]bool)
+
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
 			printedStreamed := false
@@ -531,6 +534,16 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
+
+				// Sanitize command args for providers with native tool calls (OpenRouter returns :/path instead of cd /path)
+				if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
+					if cmd, ok := args["command"].(string); ok {
+						// Replace :/<path> with cd /<path> at the start of commands
+						cmd = fixDriveLetterPath(cmd)
+						args["command"] = cmd
+					}
+				}
+
 				result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
 				if errors.Is(err, ErrUserAborted) {
 					fmt.Println("\nUser aborted.")
@@ -565,12 +578,39 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 
 			// Ask for final answer with all tool results (including errors)
 			// Include tools description so model knows available tools for follow-up (only if not using native tool calls)
+			// Check for repeated tool calls across rounds to prevent infinite loops
+			currentToolCalls := make(map[string]bool)
+			for _, tc := range toolCalls {
+				name := tc["name"].(string)
+				args := tc["arguments"]
+				argsJson, _ := json.Marshal(args)
+				sig := fmt.Sprintf("%s:%s", name, string(argsJson))
+				currentToolCalls[sig] = true
+			}
+
+			// Check if these tool calls were also called in the previous round
+			hasRepeatedCalls := false
+			for sig := range currentToolCalls {
+				if prevRoundToolCalls[sig] {
+					hasRepeatedCalls = true
+					break
+				}
+			}
+
+			duplicateWarning := ""
+			if hasRepeatedCalls && round > 0 {
+				duplicateWarning = "\n\nWARNING: You are calling the same tool(s) with the same arguments as the previous round. These tools are not producing new results. Do NOT call them again. Provide your FINAL_ANSWER based on the information you already have."
+			}
+
+			// Update previous round tool calls for next iteration
+			prevRoundToolCalls = currentToolCalls
+
 			if llmProvider.SupportsNativeToolCalls() {
-				fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"))
+				fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
 			} else {
 				toolsDesc := getToolsDescription(servers)
 				toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
-				fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"))
+				fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
 			}
 		}
 
@@ -1132,6 +1172,9 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 
 	input := prompt
 
+	// Track tool calls across rounds to detect infinite loops
+	prevRoundToolCalls := make(map[string]bool)
+
 	for round := 0; round < maxToolRounds; round++ {
 		resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
 			fmt.Print(think)
@@ -1194,6 +1237,15 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				argsStr += fmt.Sprintf("%s=%v", k, v)
 			}
 			fmt.Printf("[%s] %s\n", toolName, argsStr)
+
+			// Sanitize command args for providers with native tool calls (OpenRouter returns :/path instead of cd /path)
+			if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
+				if cmd, ok := args["command"].(string); ok {
+					cmd = fixDriveLetterPath(cmd)
+					args["command"] = cmd
+				}
+			}
+
 			result, err := callTool(ctx, servers, toolName, args, toolTimeout)
 			if err != nil {
 				errMsg := fmt.Sprintf("ERROR: %v", err)
@@ -1219,12 +1271,39 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 
 		// Ask for final answer with all tool results (including errors)
 		// Include tools description so model knows available tools for follow-up (only if not using native tool calls)
+		// Check for repeated tool calls across rounds to prevent infinite loops
+		currentToolCalls := make(map[string]bool)
+		for _, tc := range toolCalls {
+			name := tc["name"].(string)
+			args := tc["arguments"]
+			argsJson, _ := json.Marshal(args)
+			sig := fmt.Sprintf("%s:%s", name, string(argsJson))
+			currentToolCalls[sig] = true
+		}
+
+		// Check if these tool calls were also called in the previous round
+		hasRepeatedCalls := false
+		for sig := range currentToolCalls {
+			if prevRoundToolCalls[sig] {
+				hasRepeatedCalls = true
+				break
+			}
+		}
+
+		duplicateWarning := ""
+		if hasRepeatedCalls && round > 0 {
+			duplicateWarning = "\n\nWARNING: You are calling the same tool(s) with the same arguments as the previous round. These tools are not producing new results. Do NOT call them again. Provide your FINAL_ANSWER based on the information you already have."
+		}
+
+		// Update previous round tool calls for next iteration
+		prevRoundToolCalls = currentToolCalls
+
 		if llmProvider.SupportsNativeToolCalls() {
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"))
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
 		} else {
 			toolsDesc := getToolsDescription(servers)
 			toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
-			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"))
+			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning)
 		}
 	}
 
@@ -1639,6 +1718,20 @@ func normalizeToolCallText(text string) string {
 		lines[i] = stripRe.ReplaceAllString(line, "")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fixDriveLetterPath converts commands like ":/path" to "cd /path" for Windows compatibility
+// Some providers return :/home/user instead of cd /home/user
+// Only replaces the first occurrence at the start of the command
+func fixDriveLetterPath(cmd string) string {
+	// Match :/<path> ONLY at the start and replace with cd /<path>
+	re := regexp.MustCompile(`(?i)^:\/(\S)`)
+	matches := re.FindStringIndex(cmd)
+	if matches == nil {
+		return cmd
+	}
+	// Replace only the matched portion
+	return "cd " + cmd[matches[1]:]
 }
 
 // sanitizeMultilineJson attempts to fix JSON with multi-line string values by escaping newlines within quoted strings
