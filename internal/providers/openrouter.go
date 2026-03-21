@@ -226,8 +226,8 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 
 		choice := response.Choices[0]
 		p.mu.Lock()
-		p.promptTokens += response.Usage.PromptTokens
-		p.completionTokens += response.Usage.CompletionTokens
+		p.promptTokens = response.Usage.PromptTokens
+		p.completionTokens = response.Usage.CompletionTokens
 
 		// Track assistant response in history
 		if len(choice.Message.ToolCalls) > 0 {
