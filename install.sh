@@ -1,4 +1,4 @@
-:"#!/bin/sh
+#!/bin/sh
 
 set -e
 
@@ -63,24 +63,26 @@ URL="https://github.com/${REPO}/releases/download/v${LATEST_TAG}/${FILENAME}"
 SHA_URL="https://github.com/${REPO}/releases/download/v${LATEST_TAG}/${SHA_FILENAME}"
 
 echo "Downloading ${FILENAME}..."
-curl -sSL -o "${BINARY_NAME}" "$URL"
+curl -sSL -o "${FILENAME}" "$URL"
 
 echo "Downloading SHA256 checksum..."
-curl -sSL -o "${BINARY_NAME}.sha256" "$SHA_URL"
+curl -sSL -o "${SHA_FILENAME}" "$SHA_URL"
 
 echo "Verifying checksum..."
 if command -v sha256sum >/dev/null 2>&1; then
-    echo "$(cat ${BINARY_NAME}.sha256)  ${BINARY_NAME}" | sha256sum -c -
+    sha256sum -c "${SHA_FILENAME}"
 elif command -v shasum >/dev/null 2>&1; then
-    echo "$(cat ${BINARY_NAME}.sha256)  ${BINARY_NAME}" | shasum -a 256 -c -
+    shasum -a 256 -c "${SHA_FILENAME}"
 else
     echo "Warning: Neither sha256sum nor shasum found. Skipping checksum verification."
     echo "Consider installing coreutils (Linux) or using Homebrew (macOS) for security."
 fi
 
 # Clean up checksum file
-rm -f "${BINARY_NAME}.sha256"
+rm -f "${SHA_FILENAME}"
 
+# Rename to generic name for installation
+mv "${FILENAME}" "${BINARY_NAME}"
 chmod +x "${BINARY_NAME}"
 
 # Create install directory if it doesn't exist
@@ -122,4 +124,41 @@ _cgodex_completion() {
     local cur prev words cword
     _init_completion || return
     
-    ca...
+    case "$prev" in
+        --provider)
+            local providers=$(godex_get_providers)
+            if [[ -n "$providers" ]]; then
+                COMPREPLY=($(compgen -W "$providers" -- "$cur"))
+            fi
+            return 0
+            ;;
+        --config)
+            COMPREPLY=($(compgen -f -- "$cur"))
+            return 0
+            ;;
+    esac
+    
+    if [[ "$cur" == -* ]]; then
+        local flags=$(godex_get_flags_with_desc | cut -d: -f1)
+        COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    else
+        COMPREPLY=($(compgen -f -- "$cur"))
+    fi
+}
+
+complete -F _cgodex_completion godex
+'
+
+# Install bash completion
+if [ -d "/etc/bash_completion.d" ] && [ -w "/etc/bash_completion.d" ]; then
+    echo "$GODEX_BASH_COMPLETION" > "/etc/bash_completion.d/godex"
+    echo "Bash completion installed to /etc/bash_completion.d/godex"
+elif [ -n "$BASH_COMPLETION_USER_DIR" ] && [ -d "$BASH_COMPLETION_USER_DIR" ]; then
+    echo "$GODEX_BASH_COMPLETION" > "${BASH_COMPLETION_USER_DIR}/godex"
+    echo "Bash completion installed to ${BASH_COMPLETION_USER_DIR}/godex"
+else
+    echo "To enable bash completion, add this to your ~/.bashrc:"
+    echo "$GODEX_BASH_COMPLETION"
+fi
+
+echo "Installation complete!"
