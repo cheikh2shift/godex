@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -233,6 +234,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		if len(choice.Message.ToolCalls) > 0 {
 			assistantContent := ""
 			for _, tc := range choice.Message.ToolCalls {
+				log.Println(tc.Function.Arguments)
 				assistantContent += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
 			}
 			p.messages = append(p.messages, map[string]interface{}{

@@ -533,6 +533,21 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 					}
 					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
+
+				if raw, ok := args["_raw"]; ok {
+					log.Printf("_raw found, unwrapping: type=%T", raw)
+					if rawStr, ok := raw.(string); ok {
+						log.Printf("_raw is string, length=%d", len(rawStr))
+						var rawMap map[string]interface{}
+						if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
+							log.Printf("_raw unwrapped successfully: %+v", rawMap)
+							args = rawMap
+						} else {
+							log.Printf("_raw json unmarshal failed: %v", err)
+						}
+					}
+				}
+
 				fmt.Printf("[%s] %s\n", toolName, argsStr)
 
 				// Sanitize command args for providers with native tool calls (OpenRouter returns :/path instead of cd /path)
@@ -1237,6 +1252,20 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				fmt.Print("\033[0m")
 			}
 
+			if raw, ok := args["_raw"]; ok {
+				log.Printf("_raw found, unwrapping: type=%T", raw)
+				if rawStr, ok := raw.(string); ok {
+					log.Printf("_raw is string, length=%d", len(rawStr))
+					var rawMap map[string]interface{}
+					if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
+						log.Printf("_raw unwrapped successfully: %+v", rawMap)
+						args = rawMap
+					} else {
+						log.Printf("_raw json unmarshal failed: %v", err)
+					}
+				}
+			}
+
 			var argsStr string
 			for k, v := range args {
 				if argsStr != "" {
@@ -1475,19 +1504,7 @@ func parseArgs(argsStr string) map[string]interface{} {
 }
 
 func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
-	if raw, ok := args["_raw"]; ok {
-		log.Printf("_raw found, unwrapping: type=%T", raw)
-		if rawStr, ok := raw.(string); ok {
-			log.Printf("_raw is string, length=%d", len(rawStr))
-			var rawMap map[string]interface{}
-			if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
-				log.Printf("_raw unwrapped successfully: %+v", rawMap)
-				args = rawMap
-			} else {
-				log.Printf("_raw json unmarshal failed: %v", err)
-			}
-		}
-	}
+
 	//log.Println("args", args)
 	normalizeToolPathArgs(name, args)
 	for _, server := range servers {
@@ -1698,18 +1715,15 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 
 		// Parse native tool call format: [TOOL_CALL: name | {"arg": "value"}]
 		if len(results) == 0 {
-			nativeRe := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|\s*([^\]]+)\]`)
-			nativeMatches := nativeRe.FindAllStringSubmatch(candidate, -1)
+			nativeMatches := extractNativeToolCalls(candidate)
 			for _, m := range nativeMatches {
-				if len(m) > 2 {
-					name := m[1]
-					argsStr := m[2]
-					var args map[string]interface{}
-					if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-						args = map[string]interface{}{"_raw": argsStr}
-					}
-					results = append(results, map[string]interface{}{"name": name, "arguments": args})
+				name := m[0]
+				argsStr := m[1]
+				var args map[string]interface{}
+				if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+					args = map[string]interface{}{"_raw": argsStr}
 				}
+				results = append(results, map[string]interface{}{"name": name, "arguments": args})
 			}
 		}
 
@@ -1718,6 +1732,55 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 		}
 	}
 
+	return results
+}
+
+func extractNativeToolCalls(text string) [][2]string {
+	var results [][2]string
+	re := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
+	matches := re.FindAllStringSubmatchIndex(text, -1)
+	for _, m := range matches {
+		if len(m) < 4 {
+			continue
+		}
+		name := text[m[2]:m[3]]
+		jsonStart := m[1]
+		for jsonStart < len(text) && (text[jsonStart] == ' ' || text[jsonStart] == '\t') {
+			jsonStart++
+		}
+		var jsonEnd int
+		inString := false
+		escapeNext := false
+		braceDepth := 0
+		for i := jsonStart; i < len(text); i++ {
+			c := text[i]
+			if escapeNext {
+				escapeNext = false
+				continue
+			}
+			switch c {
+			case '\\':
+				escapeNext = true
+			case '"':
+				inString = !inString
+			case '{', '[':
+				if !inString {
+					braceDepth++
+				}
+			case '}', ']':
+				if !inString {
+					braceDepth--
+					if braceDepth == 0 {
+						jsonEnd = i + 1
+						break
+					}
+				}
+			}
+		}
+		if jsonEnd > jsonStart {
+			results = append(results, [2]string{name, text[jsonStart:jsonEnd]})
+		}
+	}
 	return results
 }
 
