@@ -607,7 +607,7 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 
 			// Add urgency based on round number
 			roundUrgency := ""
-			if round >= 4 {
+			if round >= 10 {
 				roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now based on the tool results you have. Do NOT call any more tools."
 			} else if round >= 2 {
 				roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary to complete the task."
@@ -1308,7 +1308,7 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 
 		// Add urgency based on round number
 		roundUrgency := ""
-		if round >= 4 {
+		if round >= 10 {
 			roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now based on the tool results you have. Do NOT call any more tools."
 		} else if round >= 2 {
 			roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary to complete the task."
@@ -1475,12 +1475,27 @@ func parseArgs(argsStr string) map[string]interface{} {
 }
 
 func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+	if raw, ok := args["_raw"]; ok {
+		log.Printf("_raw found, unwrapping: type=%T", raw)
+		if rawStr, ok := raw.(string); ok {
+			log.Printf("_raw is string, length=%d", len(rawStr))
+			var rawMap map[string]interface{}
+			if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
+				log.Printf("_raw unwrapped successfully: %+v", rawMap)
+				args = rawMap
+			} else {
+				log.Printf("_raw json unmarshal failed: %v", err)
+			}
+		}
+	}
+	//log.Println("args", args)
 	normalizeToolPathArgs(name, args)
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
 			if tool.Name == name {
 				ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
 				defer cancel()
+
 				result, err := server.CallTool(ctx, name, args)
 				if isPathRestrictionError(err) {
 					path := extractPathFromError(err)

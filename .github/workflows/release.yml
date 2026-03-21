@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -26,6 +28,19 @@ jobs:
       - name: Get tag
         id: get_tag
         run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+          else
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --max-count=50)
+          fi
+          echo "CHANGES<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Build Linux AMD64
         env:
@@ -71,7 +86,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_tag.outputs.TAG }}
-          generate_release_notes: true
+          name: Release ${{ steps.get_tag.outputs.TAG }}
+          body: ${{ steps.changelog.outputs.CHANGES }}
           files: |
             godex-linux-amd64
             godex-linux-arm64
