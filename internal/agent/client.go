@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,6 +18,25 @@ var (
 	mcpExecutors    = map[string]*mcp.MCPToolExecutor{}
 	mcpExecutorsMu  sync.Mutex
 )
+
+type SendResult struct {
+	Content   string
+	ToolCalls []ToolCallResult
+}
+
+type ToolCallResult struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+func (t *ToolCallResult) ParseArguments() (map[string]interface{}, error) {
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(t.Arguments), &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
 // SendPrompt dispatches the prompt to the configured provider via the registry.
 func SendPrompt(ctx context.Context, provider *config.Provider, prompt string) (string, error) {
@@ -94,6 +114,26 @@ func GetTools(provider *config.Provider) []providers.Tool {
 	}
 
 	return p.Tools()
+}
+
+func SetProviderTools(provider *config.Provider, tools []providers.Tool) {
+	p, err := GetProvider(provider)
+	if err != nil {
+		return
+	}
+	if pt, ok := p.(interface{ SetTools([]providers.Tool) }); ok {
+		pt.SetTools(tools)
+	}
+}
+
+func SubmitProviderToolResult(provider *config.Provider, toolCallID, result string) {
+	p, err := GetProvider(provider)
+	if err != nil {
+		return
+	}
+	if pt, ok := p.(interface{ SubmitToolResult(string, string) }); ok {
+		pt.SubmitToolResult(toolCallID, result)
+	}
 }
 
 func CloseProvider(cfg *config.Provider) {

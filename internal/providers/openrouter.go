@@ -29,12 +29,23 @@ type openRouterModelsResponse struct {
 	Data []openRouterModelInfo `json:"data"`
 }
 
+type toolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 type openRouterProvider struct {
 	baseURL          string
 	model            string
 	apiKey           string
 	temperature      *float64
 	client           *http.Client
+	messages         []map[string]interface{}
+	tools            []map[string]interface{}
 	cancelMu         sync.Mutex
 	cancelFunc       context.CancelFunc
 	cancelGen        uint64
@@ -118,13 +129,19 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.messages = append(p.messages, map[string]interface{}{
+		"role":    "user",
+		"content": prompt,
+	})
+	p.mu.Unlock()
 
 	reqBody := map[string]interface{}{
-		"model": p.model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
+		"model":    p.model,
+		"messages": p.messages,
+	}
+
+	if len(p.tools) > 0 {
+		reqBody["tools"] = p.tools
 	}
 
 	if p.temperature != nil {
@@ -140,15 +157,15 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			fmt.Printf("\n[OPENROUTER] Waiting %v before retry (attempt %d/%d)...\n", retryDelay, attempt, maxRetries)
-			p.mu.Unlock()
+			p.mu.Lock()
 			select {
 			case <-ctx.Done():
-				p.mu.Lock()
+				p.mu.Unlock()
 				return "", ctx.Err()
 			case <-time.After(retryDelay):
 			}
-			p.mu.Lock()
 			fmt.Printf("\n[OPENROUTER] Retrying request (attempt %d/%d)...\n", attempt, maxRetries)
+			p.mu.Unlock()
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(body))
@@ -182,8 +199,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		var response struct {
 			Choices []struct {
 				Message struct {
-					Content string `json:"content"`
+					Content   string     `json:"content"`
+					ToolCalls []toolCall `json:"tool_calls,omitempty"`
 				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage struct {
 				PromptTokens     int `json:"prompt_tokens"`
@@ -199,10 +218,35 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			return "", fmt.Errorf("no choices in response")
 		}
 
+		choice := response.Choices[0]
+		p.mu.Lock()
 		p.promptTokens += response.Usage.PromptTokens
 		p.completionTokens += response.Usage.CompletionTokens
 
-		return response.Choices[0].Message.Content, nil
+		var assistantMsg map[string]interface{}
+		if len(choice.Message.ToolCalls) > 0 {
+			assistantMsg = map[string]interface{}{
+				"role":       "assistant",
+				"tool_calls": choice.Message.ToolCalls,
+			}
+			p.messages = append(p.messages, assistantMsg)
+			p.mu.Unlock()
+
+			var content string
+			for _, tc := range choice.Message.ToolCalls {
+				content += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
+			}
+			return content, nil
+		}
+
+		assistantMsg = map[string]interface{}{
+			"role":    "assistant",
+			"content": choice.Message.Content,
+		}
+		p.messages = append(p.messages, assistantMsg)
+		p.mu.Unlock()
+
+		return choice.Message.Content, nil
 	}
 
 	return "", lastErr
@@ -225,8 +269,34 @@ func (p *openRouterProvider) Tools() []Tool {
 	return nil
 }
 
+func (p *openRouterProvider) SetTools(tools []Tool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tools = make([]map[string]interface{}, len(tools))
+	for i, t := range tools {
+		p.tools[i] = map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.InputSchema,
+			},
+		}
+	}
+}
+
 func (p *openRouterProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
 	return "", fmt.Errorf("tools not supported in openrouter provider")
+}
+
+func (p *openRouterProvider) SubmitToolResult(toolCallID, result string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.messages = append(p.messages, map[string]interface{}{
+		"role":         "tool",
+		"tool_call_id": toolCallID,
+		"content":      result,
+	})
 }
 
 func (p *openRouterProvider) Close() error {
@@ -242,5 +312,14 @@ func (p *openRouterProvider) TokenUsage() (int, int) {
 }
 
 func (p *openRouterProvider) Reset() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.messages = []map[string]interface{}{}
+	p.promptTokens = 0
+	p.completionTokens = 0
 	return nil
+}
+
+func (p *openRouterProvider) SupportsNativeToolCalls() bool {
+	return true
 }

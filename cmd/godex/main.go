@@ -26,6 +26,7 @@ import (
 	"github.com/cheikh-seck/godex/internal/config"
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
 	"github.com/cheikh-seck/godex/internal/mcp"
+	"github.com/cheikh-seck/godex/internal/providers"
 	"github.com/cheikh-seck/godex/internal/wizard"
 )
 
@@ -182,6 +183,22 @@ func main() {
 
 	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
 
+	var providerTools []providers.Tool
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			var inputSchema map[string]interface{}
+			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+				inputSchema = map[string]interface{}{}
+			}
+			providerTools = append(providerTools, providers.Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: inputSchema,
+			})
+		}
+	}
+	agent.SetProviderTools(provider, providerTools)
+
 	printStartupBanner(provider, servers, mcpLogs)
 
 	fmt.Println()
@@ -297,7 +314,13 @@ promptLoop:
 			continue
 		}
 
-		toolsDesc := getToolsDescription(servers)
+		nativeToolCalls := llmProvider.SupportsNativeToolCalls()
+		var toolsSection string
+		if nativeToolCalls {
+			toolsSection = ""
+		} else {
+			toolsSection = fmt.Sprintf("\nYou have access to these tools:\n%s\n", getToolsDescription(servers))
+		}
 
 		sessionContext := ""
 		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
@@ -308,7 +331,20 @@ promptLoop:
 			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
 		}
 
-		fullPrompt := fmt.Sprintf(`You have access to these tools:
+		var fullPrompt string
+		if nativeToolCalls {
+			fullPrompt = fmt.Sprintf(`%s
+
+CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
+
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+
+User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
+		} else {
+			fullPrompt = fmt.Sprintf(`You have access to these tools:
 %s%s
 
 CRITICAL INFORMATION:
@@ -342,9 +378,10 @@ Example:
 }
 `+"```"+`
 
-IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
-User request: %s`, toolsDesc, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
+User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
+		}
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -527,7 +564,14 @@ User request: %s`, toolsDesc, sessionContext, runtime.GOOS, runtime.GOARCH, wd, 
 			}
 
 			// Ask for final answer with all tool results (including errors)
-			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:'", input, strings.Join(toolResults, "\n---\n"))
+			// Include tools description so model knows available tools for follow-up (only if not using native tool calls)
+			if llmProvider.SupportsNativeToolCalls() {
+				fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"))
+			} else {
+				toolsDesc := getToolsDescription(servers)
+				toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
+				fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"))
+			}
 		}
 
 		signal.Stop(stopSignal)
@@ -1014,9 +1058,27 @@ func uniqueStrings(input []string) []string {
 
 func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
 	tree, _ := godexcontext.BuildTree(".")
-	toolsDesc := getToolsDescription(servers)
 	wd, _ := os.Getwd()
-	fullPrompt := fmt.Sprintf(`You have access to these tools:
+
+	llmProvider, _ := agent.GetProvider(provider)
+	nativeToolCalls := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+
+	var fullPrompt string
+	if nativeToolCalls {
+		fullPrompt = fmt.Sprintf(`CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
+
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+
+Project tree:
+%s
+
+User request: %s`, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
+	} else {
+		toolsDesc := getToolsDescription(servers)
+		fullPrompt = fmt.Sprintf(`You have access to these tools:
 %s
 
 CRITICAL INFORMATION:
@@ -1050,12 +1112,13 @@ Example:
 }
 `+"```"+`
 
-IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 
 Project tree:
 %s
 
 User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
+	}
 
 	// Get tool settings
 	maxToolRounds := 10
@@ -1155,7 +1218,14 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		}
 
 		// Ask for final answer with all tool results (including errors)
-		fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nYou MUST now provide the FINAL answer. Do NOT make any more tool calls. If there were errors, explain them. Start your response with 'FINAL_ANSWER:", input, strings.Join(toolResults, "\n---\n"))
+		// Include tools description so model knows available tools for follow-up (only if not using native tool calls)
+		if llmProvider.SupportsNativeToolCalls() {
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"))
+		} else {
+			toolsDesc := getToolsDescription(servers)
+			toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
+			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s\n\nBased on the tool results above, if you need additional information or want to try a different tool, you may call one more tool. Otherwise, provide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"))
+		}
 	}
 
 	return nil
@@ -1468,21 +1538,32 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 	}
 
 	for _, candidate := range candidates {
-		// First, try to find markdown code blocks (```json ... ``` or ``` ... ```)
-		codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\n(.*?)\n```")
-		blocks := codeBlockRe.FindAllStringSubmatch(candidate, -1)
+		// First, try to find markdown code blocks using proper extraction
+		codeBlocks := extractCodeBlockContent(candidate)
 
-		for _, block := range blocks {
-			content := strings.TrimSpace(block[1])
+		for _, content := range codeBlocks {
+			content = strings.TrimSpace(content)
 			// Try to parse the whole block as one JSON object
 			var data map[string]interface{}
 			if err := json.Unmarshal([]byte(content), &data); err == nil {
 				if _, ok := data["name"].(string); ok {
 					results = append(results, processToolData(data))
+					continue
 				}
-			} else {
-				// If not a single object, maybe multiple objects in the block?
-				results = append(results, extractJsonObjects(content)...)
+			}
+			// If not a single object, try sanitizing multi-line strings
+			sanitized := sanitizeMultilineJson(content)
+			var sanitizedData map[string]interface{}
+			if err := json.Unmarshal([]byte(sanitized), &sanitizedData); err == nil {
+				if _, ok := sanitizedData["name"].(string); ok {
+					results = append(results, processToolData(sanitizedData))
+					continue
+				}
+			}
+			// Fall back to extracting individual JSON objects
+			extracted := extractJsonObjects(sanitized)
+			if len(extracted) > 0 {
+				results = append(results, extracted...)
 			}
 		}
 
@@ -1501,6 +1582,23 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
 						results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
 					}
+				}
+			}
+		}
+
+		// Parse native tool call format: [TOOL_CALL: name | {"arg": "value"}]
+		if len(results) == 0 {
+			nativeRe := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|\s*([^\]]+)\]`)
+			nativeMatches := nativeRe.FindAllStringSubmatch(candidate, -1)
+			for _, m := range nativeMatches {
+				if len(m) > 2 {
+					name := m[1]
+					argsStr := m[2]
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+						args = map[string]interface{}{"_raw": argsStr}
+					}
+					results = append(results, map[string]interface{}{"name": name, "arguments": args})
 				}
 			}
 		}
@@ -1541,6 +1639,89 @@ func normalizeToolCallText(text string) string {
 		lines[i] = stripRe.ReplaceAllString(line, "")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sanitizeMultilineJson attempts to fix JSON with multi-line string values by escaping newlines within quoted strings
+func sanitizeMultilineJson(text string) string {
+	var result strings.Builder
+	inString := false
+	escapeNext := false
+	lines := strings.Split(text, "\n")
+
+	for lineIdx, line := range lines {
+		for i := 0; i < len(line); i++ {
+			char := rune(line[i])
+
+			if escapeNext {
+				if char == 'n' {
+					result.WriteString("\\n")
+				} else {
+					result.WriteRune('\\')
+					result.WriteRune(char)
+				}
+				escapeNext = false
+				continue
+			}
+
+			if char == '\\' && inString {
+				escapeNext = true
+				continue
+			}
+
+			if char == '"' {
+				if !inString {
+					inString = true
+				} else {
+					backslashCount := 0
+					j := i - 1
+					for j >= 0 && line[j] == '\\' {
+						backslashCount++
+						j--
+					}
+					if backslashCount%2 == 0 {
+						inString = false
+					}
+				}
+			}
+
+			result.WriteRune(char)
+		}
+
+		if inString && lineIdx < len(lines)-1 {
+			result.WriteString("\\n")
+		} else if !inString {
+			result.WriteRune('\n')
+		}
+	}
+
+	return result.String()
+}
+
+// extractCodeBlockContent extracts content from markdown code blocks, handling multi-line JSON
+func extractCodeBlockContent(text string) []string {
+	var results []string
+	lines := strings.Split(text, "\n")
+	inBlock := false
+	blockStart := -1
+
+	for i, line := range lines {
+		if !inBlock {
+			// Look for opening ```
+			if strings.Contains(line, "```") {
+				inBlock = true
+				blockStart = i + 1
+			}
+		} else {
+			// Look for closing ``` on its own line (with optional whitespace)
+			if strings.TrimSpace(line) == "```" {
+				content := strings.Join(lines[blockStart:i], "\n")
+				results = append(results, content)
+				inBlock = false
+				blockStart = -1
+			}
+		}
+	}
+	return results
 }
 
 // extractJsonObjects finds all balanced { ... } strings and tries to parse them as tool calls

@@ -424,3 +424,7 @@ func (o *ollamaProvider) Reset() error {
 	o.completionTokens = 0
 	return nil
 }
+
+func (o *ollamaProvider) SupportsNativeToolCalls() bool {
+	return false
+}

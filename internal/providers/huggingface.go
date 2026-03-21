@@ -220,3 +220,7 @@ func (h *huggingfaceProvider) TokenUsage() (input int, output int) {
 func (h *huggingfaceProvider) Reset() error {
 	return nil
 }
+
+func (h *huggingfaceProvider) SupportsNativeToolCalls() bool {
+	return false
+}

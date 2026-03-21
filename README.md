@@ -120,7 +120,7 @@ providers:
   - name: ollama
     type: ollama
     endpoint: http://localhost:11434
-    model: minimax-m2.7:cloud
+    model: minimax-m2.5:cloud
     description: Ollama with codeqwen
     temperature: 0.2
     mcp_servers:

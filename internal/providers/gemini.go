@@ -217,6 +217,10 @@ func (g *geminiProvider) Reset() error {
 	return nil
 }
 
+func (g *geminiProvider) SupportsNativeToolCalls() bool {
+	return false
+}
+
 func extractText(resp *genai.GenerateContentResponse) string {
 	if resp == nil || len(resp.Candidates) == 0 {
 		return ""

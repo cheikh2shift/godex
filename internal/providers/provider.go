@@ -26,6 +26,7 @@ type Provider interface {
 	ContextLimit() int
 	TokenUsage() (input int, output int)
 	Reset() error
+	SupportsNativeToolCalls() bool
 }
 
 type factory func(cfg *config.Provider) (Provider, error)
