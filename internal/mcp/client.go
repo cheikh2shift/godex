@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -80,6 +81,37 @@ func (m *MCPToolExecutor) connect(ctx context.Context) error {
 	return nil
 }
 
+// ping checks if the MCP client is still responsive
+func (m *MCPToolExecutor) ping(ctx context.Context) error {
+	if m.mcpClient == nil {
+		return fmt.Errorf("client is nil")
+	}
+
+	// Create a context with 2 second deadline
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	return m.mcpClient.Ping(pingCtx)
+}
+
+// ensureConnected pings the client and reconnects if needed
+func (m *MCPToolExecutor) ensureConnected(ctx context.Context) error {
+	if m.mcpClient == nil {
+		return m.connect(ctx)
+	}
+
+	if err := m.ping(ctx); err != nil {
+		// Ping failed, close and reconnect
+		_ = m.mcpClient.Close()
+		m.mcpClient = nil
+
+		if err := m.connect(ctx); err != nil {
+			return fmt.Errorf("failed to reconnect after ping failure: %w", err)
+		}
+	}
+	return nil
+}
+
 func (m *MCPToolExecutor) buildArgs() []string {
 	paths := m.server.AllowedPaths
 	if len(paths) == 0 {
@@ -99,19 +131,17 @@ func (m *MCPToolExecutor) buildArgs() []string {
 	return nil
 }
 
-func contains(slice []string, val string) bool {
-	for _, v := range slice {
-		if strings.Contains(v, val) {
-			return true
-		}
+func (m *MCPToolExecutor) buildTransport() string {
+	if m.server.Transport == "stdio" {
+		return "stdio"
 	}
-	return false
+	return "stdio"
 }
 
 func listTools(ctx context.Context, mcpClient *client.Client) ([]Tool, error) {
 	result, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 
 	var tools []Tool
@@ -163,6 +193,7 @@ func (m *MCPToolExecutor) TempAddPath(path string) {
 			return
 		}
 	}
+
 	m.server.AllowedPaths = append(m.server.AllowedPaths, path)
 }
 
@@ -174,8 +205,9 @@ func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
 			break
 		}
 	}
+
 	if found == -1 {
-		return fmt.Errorf("path not found: %s", path)
+		return nil
 	}
 
 	m.server.AllowedPaths = append(m.server.AllowedPaths[:found], m.server.AllowedPaths[found+1:]...)
@@ -202,6 +234,11 @@ func (m *MCPToolExecutor) AllowedPaths() []string {
 }
 
 func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+	// Ensure client is connected before making the tool call
+	if err := m.ensureConnected(ctx); err != nil {
+		return "", fmt.Errorf("failed to ensure client is connected: %w", err)
+	}
+
 	result, err := m.mcpClient.CallTool(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      name,
@@ -236,4 +273,22 @@ func (m *MCPToolExecutor) Close() error {
 		return m.mcpClient.Close()
 	}
 	return nil
+}
+
+func contains(slice []string, val string) bool {
+	for _, v := range slice {
+		if strings.Contains(v, val) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *MCPToolExecutor) GetContext() string {
+	var b strings.Builder
+	b.WriteString("MCP Server: " + m.server.Name + "\n")
+	b.WriteString("Command: " + m.server.Command + "\n")
+	b.WriteString("Args: " + strings.Join(m.server.Args, " ") + "\n")
+	b.WriteString("Allowed Paths: " + strings.Join(m.server.AllowedPaths, ", ") + "\n")
+	return b.String()
 }

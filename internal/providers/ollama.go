@@ -254,7 +254,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 		"role":    "assistant",
 		"content": response,
 	})
-	o.promptTokens += totalPromptTokens
+	o.promptTokens = totalPromptTokens
 	o.mu.Unlock()
 
 	return response, nil
