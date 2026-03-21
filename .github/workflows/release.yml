@@ -82,17 +82,41 @@ jobs:
         run: |
           go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-windows-amd64.exe ./cmd/godex
 
+      - name: Generate SHA256 checksums
+        run: |
+          sha256sum godex-linux-amd64 > godex-linux-amd64.sha256
+          sha256sum godex-linux-arm64 > godex-linux-arm64.sha256
+          sha256sum godex-darwin-amd64 > godex-darwin-amd64.sha256
+          sha256sum godex-darwin-arm64 > godex-darwin-arm64.sha256
+          sha256sum godex-windows-amd64.exe > godex-windows-amd64.exe.sha256
+
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.get_tag.outputs.TAG }}
           name: Release ${{ steps.get_tag.outputs.TAG }}
-          body: ${{ steps.changelog.outputs.CHANGES }}
+          body: |
+            ## Changes
+            ${{ steps.changelog.outputs.CHANGES }}
+            
+            ## Installation
+            Download the appropriate binary for your platform and run the install script:
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+            ```
+            
+            ## Verification
+            Each binary includes a SHA256 checksum file for verification.
           files: |
             godex-linux-amd64
+            godex-linux-amd64.sha256
             godex-linux-arm64
+            godex-linux-arm64.sha256
             godex-darwin-amd64
+            godex-darwin-amd64.sha256
             godex-darwin-arm64
+            godex-darwin-arm64.sha256
             godex-windows-amd64.exe
+            godex-windows-amd64.exe.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
