@@ -234,7 +234,16 @@ func (m *MCPToolExecutor) AllowedPaths() []string {
 }
 
 func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
-	// Ensure client is connected before making the tool call
+	return m.callToolWithRetry(ctx, name, arguments, 0)
+}
+
+func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, arguments map[string]interface{}, attempt int) (string, error) {
+	maxRetries := 1
+
+	if attempt >= maxRetries {
+		return "", fmt.Errorf("tool call failed after %d retries", maxRetries)
+	}
+
 	if err := m.ensureConnected(ctx); err != nil {
 		return "", fmt.Errorf("failed to ensure client is connected: %w", err)
 	}
@@ -256,6 +265,15 @@ func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments m
 				errMsg += textContent.Text
 			}
 		}
+
+		if isRetryableError(errMsg) && attempt < maxRetries {
+			_ = m.mcpClient.Close()
+			m.mcpClient = nil
+			if reconnectErr := m.connect(ctx); reconnectErr == nil {
+				return m.callToolWithRetry(ctx, name, arguments, attempt+1)
+			}
+		}
+
 		return "", fmt.Errorf("tool error: %s", errMsg)
 	}
 
@@ -266,6 +284,22 @@ func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments m
 		}
 	}
 	return output.String(), nil
+}
+
+func isRetryableError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	retryablePatterns := []string{
+		"invalid response format",
+		"parse error",
+		"unexpected token",
+		"json",
+	}
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MCPToolExecutor) Close() error {
