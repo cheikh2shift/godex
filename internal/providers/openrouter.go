@@ -19,6 +19,7 @@ import (
 const defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 const maxRetries = 6
 const retryDelay = 35 * time.Second
+const maxHistoryMessages = 20
 
 type openRouterModelInfo struct {
 	ID            string  `json:"id"`
@@ -46,6 +47,7 @@ type openRouterProvider struct {
 	temperature      *float64
 	client           *http.Client
 	messages         []map[string]interface{}
+	pendingToolCalls map[string]string // tool_call_id -> function_name for tracking
 	tools            []map[string]interface{}
 	cancelMu         sync.Mutex
 	cancelFunc       context.CancelFunc
@@ -117,11 +119,12 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 	}
 
 	return &openRouterProvider{
-		baseURL:      baseURL,
-		model:        model,
-		apiKey:       apiKey,
-		temperature:  cfg.Temperature,
-		contextLimit: contextLimit,
+		baseURL:          baseURL,
+		model:            model,
+		apiKey:           apiKey,
+		temperature:      cfg.Temperature,
+		contextLimit:     contextLimit,
+		pendingToolCalls: make(map[string]string),
 		client: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -138,6 +141,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		"role":    "user",
 		"content": userInput,
 	})
+	// Sliding window: keep only the last maxHistoryMessages
+	if len(p.messages) > maxHistoryMessages {
+		p.messages = p.messages[len(p.messages)-maxHistoryMessages:]
+	}
 	messages := make([]map[string]interface{}, len(p.messages))
 	copy(messages, p.messages)
 	p.mu.Unlock()
@@ -236,10 +243,13 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			for _, tc := range choice.Message.ToolCalls {
 				log.Println(tc.Function.Arguments)
 				assistantContent += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
+				// Track pending tool call for later result submission
+				p.pendingToolCalls[tc.ID] = tc.Function.Name
 			}
 			p.messages = append(p.messages, map[string]interface{}{
-				"role":    "assistant",
-				"content": assistantContent,
+				"role":       "assistant",
+				"content":    assistantContent,
+				"tool_calls": choice.Message.ToolCalls,
 			})
 			p.mu.Unlock()
 			return assistantContent, nil
@@ -309,7 +319,25 @@ func (p *openRouterProvider) CallTool(ctx context.Context, name string, args map
 }
 
 func (p *openRouterProvider) SubmitToolResult(toolCallID, result string) {
-	// No-op: not tracking conversation history
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Look up the function name for this tool call
+	funcName := p.pendingToolCalls[toolCallID]
+	delete(p.pendingToolCalls, toolCallID)
+
+	// Append tool result as a user message (tool role) for proper conversation tracking
+	p.messages = append(p.messages, map[string]interface{}{
+		"role":         "tool",
+		"tool_call_id": toolCallID,
+		"name":         funcName,
+		"content":      result,
+	})
+
+	// Sliding window: keep only the last maxHistoryMessages
+	if len(p.messages) > maxHistoryMessages {
+		p.messages = p.messages[len(p.messages)-maxHistoryMessages:]
+	}
 }
 
 func (p *openRouterProvider) Close() error {
@@ -328,6 +356,7 @@ func (p *openRouterProvider) Reset() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.messages = []map[string]interface{}{}
+	p.pendingToolCalls = make(map[string]string)
 	p.promptTokens = 0
 	p.completionTokens = 0
 	return nil
