@@ -20,7 +20,7 @@ import (
 const defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 const maxRetries = 6
 const retryDelay = 35 * time.Second
-const defaultMaxHistoryMessages = 20
+const defaultMaxHistoryMessages = 45
 
 func getMaxHistoryMessages() int {
 	if val := os.Getenv("MAX_MESSAGE_WINDOW"); val != "" {
