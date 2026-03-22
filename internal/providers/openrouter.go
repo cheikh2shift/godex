@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +20,16 @@ import (
 const defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
 const maxRetries = 6
 const retryDelay = 35 * time.Second
-const maxHistoryMessages = 20
+const defaultMaxHistoryMessages = 20
+
+func getMaxHistoryMessages() int {
+	if val := os.Getenv("MAX_MESSAGE_WINDOW"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxHistoryMessages
+}
 
 type openRouterModelInfo struct {
 	ID            string  `json:"id"`
@@ -141,9 +151,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		"role":    "user",
 		"content": userInput,
 	})
-	// Sliding window: keep only the last maxHistoryMessages
-	if len(p.messages) > maxHistoryMessages {
-		p.messages = p.messages[len(p.messages)-maxHistoryMessages:]
+	// Sliding window: keep only the last N messages
+	maxHistory := getMaxHistoryMessages()
+	if len(p.messages) > maxHistory {
+		p.messages = p.messages[len(p.messages)-maxHistory:]
 	}
 	messages := make([]map[string]interface{}, len(p.messages))
 	copy(messages, p.messages)
@@ -334,9 +345,10 @@ func (p *openRouterProvider) SubmitToolResult(toolCallID, result string) {
 		"content":      result,
 	})
 
-	// Sliding window: keep only the last maxHistoryMessages
-	if len(p.messages) > maxHistoryMessages {
-		p.messages = p.messages[len(p.messages)-maxHistoryMessages:]
+	// Sliding window: keep only the last N messages
+	maxHistory := getMaxHistoryMessages()
+	if len(p.messages) > maxHistory {
+		p.messages = p.messages[len(p.messages)-maxHistory:]
 	}
 }
 
