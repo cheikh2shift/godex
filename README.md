@@ -7,6 +7,8 @@
 
 GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
 
+Orchestration and parallel tasks? open another terminal tab and start a new instance of `godex`.
+
 ## Requirements
 
 - **Go 1.25.7+** - Build from source
