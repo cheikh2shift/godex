@@ -376,9 +376,23 @@ func isRetryableError(errMsg string) bool {
 
 func (m *MCPToolExecutor) Close() error {
 	if m.mcpClient != nil {
-		return m.mcpClient.Close()
+		return m.closeWithTimeout(2 * time.Second)
 	}
 	return nil
+}
+
+func (m *MCPToolExecutor) closeWithTimeout(timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- m.mcpClient.Close()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return nil
+	}
 }
 
 func contains(slice []string, val string) bool {
