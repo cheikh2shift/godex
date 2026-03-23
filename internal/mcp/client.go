@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -32,6 +35,9 @@ type MCPToolExecutor struct {
 	mcpClient  *client.Client
 	tools      []Tool
 	workingDir string
+
+	lastRequestID int64
+	requestIDMu   sync.Mutex
 }
 
 func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MCPToolExecutor, error) {
@@ -248,14 +254,89 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 		return "", fmt.Errorf("failed to ensure client is connected: %w", err)
 	}
 
-	result, err := m.mcpClient.CallTool(ctx, mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name:      name,
-			Arguments: arguments,
-		},
-	})
+	requestID := atomic.AddInt64(&m.lastRequestID, 1)
+
+	result, err := m.callToolWithCancellation(ctx, requestID, name, arguments)
 	if err != nil {
+		if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+			return "", ctx.Err()
+		}
+
+		if isRetryableError(err.Error()) && attempt < maxRetries {
+			_ = m.mcpClient.Close()
+			m.mcpClient = nil
+			if reconnectErr := m.connect(ctx); reconnectErr == nil {
+				return m.callToolWithRetry(ctx, name, arguments, attempt+1)
+			}
+		}
 		return "", err
+	}
+
+	return result, nil
+}
+
+func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]interface{}) (string, error) {
+	t := m.mcpClient.GetTransport()
+
+	request := transport.JSONRPCRequest{
+		JSONRPC: mcp.JSONRPC_VERSION,
+		ID:      mcp.NewRequestId(requestID),
+		Method:  "tools/call",
+		Params: map[string]interface{}{
+			"name":      name,
+			"arguments": arguments,
+		},
+	}
+
+	resultCh := make(chan *transport.JSONRPCResponse, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		response, err := t.SendRequest(ctx, request)
+		if err != nil {
+			errCh <- err
+		} else {
+			resultCh <- response
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		m.sendCancelledNotification(context.Background(), requestID, ctx.Err().Error())
+		return "", ctx.Err()
+	case response := <-resultCh:
+		return m.parseToolResponse(response)
+	case err := <-errCh:
+		return "", err
+	}
+}
+
+func (m *MCPToolExecutor) sendCancelledNotification(ctx context.Context, requestID int64, reason string) {
+	t := m.mcpClient.GetTransport()
+
+	notification := mcp.JSONRPCNotification{
+		JSONRPC: mcp.JSONRPC_VERSION,
+		Notification: mcp.Notification{
+			Method: "notifications/cancelled",
+		},
+	}
+	if notification.Params.AdditionalFields == nil {
+		notification.Params.AdditionalFields = make(map[string]any)
+	}
+	notification.Params.AdditionalFields["requestId"] = requestID
+	notification.Params.AdditionalFields["reason"] = reason
+
+	_ = t.SendNotification(ctx, notification)
+}
+
+func (m *MCPToolExecutor) parseToolResponse(response *transport.JSONRPCResponse) (string, error) {
+	if response.Error != nil {
+		return "", response.Error.AsError()
+	}
+
+	var result mcp.CallToolResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		return "", fmt.Errorf("failed to parse tool result: %w", err)
 	}
 
 	if result.IsError {
@@ -265,15 +346,6 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 				errMsg += textContent.Text
 			}
 		}
-
-		if isRetryableError(errMsg) && attempt < maxRetries {
-			_ = m.mcpClient.Close()
-			m.mcpClient = nil
-			if reconnectErr := m.connect(ctx); reconnectErr == nil {
-				return m.callToolWithRetry(ctx, name, arguments, attempt+1)
-			}
-		}
-
 		return "", fmt.Errorf("tool error: %s", errMsg)
 	}
 
