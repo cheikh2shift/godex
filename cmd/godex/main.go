@@ -367,7 +367,7 @@ BASH TOOL LIMITATIONS:
 - Use kill_command with the PID to stop background processes when done
 
 To call tools, respond with one or more JSON objects, each in its own markdown code block.
-You can call multiple tools at once to be more efficient.
+You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
 
 Example:
 `+"```json"+`
@@ -1169,7 +1169,7 @@ BASH TOOL LIMITATIONS:
 - Use kill_command with the PID to stop background processes when done
 
 To call tools, respond with one or more JSON objects, each in its own markdown code block.
-You can call multiple tools at once to be more efficient.
+You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
 
 Example:
 `+"```json"+`
