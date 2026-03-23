@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -513,65 +514,70 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 			}
 			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 			var toolResults []string
-			hasError := false
-			for _, tc := range toolCalls {
-				toolName := tc["name"].(string)
-				args := tc["arguments"].(map[string]interface{})
+			var toolExecError bool
 
-				// Get tool description
-				toolDesc := getToolDescription(servers, toolName)
-				if toolDesc != "" {
-					fmt.Print("\033[90m")
-					fmt.Printf("  %s\n", toolDesc)
-					fmt.Print("\033[0m")
-				}
+			if len(toolCalls) > 1 && llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
+				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, true)
 
-				var argsStr string
-				for k, v := range args {
-					if argsStr != "" {
-						argsStr += ", "
+			} else {
+				hasError := false
+				for _, tc := range toolCalls {
+					toolName := tc["name"].(string)
+					args := tc["arguments"].(map[string]interface{})
+
+					toolDesc := getToolDescription(servers, toolName)
+					if toolDesc != "" {
+						fmt.Print("\033[90m")
+						fmt.Printf("  %s\n", toolDesc)
+						fmt.Print("\033[0m")
 					}
-					argsStr += fmt.Sprintf("%s=%v", k, v)
-				}
 
-				if raw, ok := args["_raw"]; ok {
-					log.Printf("_raw found, unwrapping: type=%T", raw)
-					if rawStr, ok := raw.(string); ok {
-						log.Printf("_raw is string, length=%d", len(rawStr))
-						var rawMap map[string]interface{}
-						if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
-							log.Printf("_raw unwrapped successfully: %+v", rawMap)
-							args = rawMap
-						} else {
-							log.Printf("_raw json unmarshal failed: %v", err)
+					var argsStr string
+					for k, v := range args {
+						if argsStr != "" {
+							argsStr += ", "
+						}
+						argsStr += fmt.Sprintf("%s=%v", k, v)
+					}
+
+					if raw, ok := args["_raw"]; ok {
+						log.Printf("_raw found, unwrapping: type=%T", raw)
+						if rawStr, ok := raw.(string); ok {
+							log.Printf("_raw is string, length=%d", len(rawStr))
+							var rawMap map[string]interface{}
+							if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
+								log.Printf("_raw unwrapped successfully: %+v", rawMap)
+								args = rawMap
+							} else {
+								log.Printf("_raw json unmarshal failed: %v", err)
+							}
 						}
 					}
-				}
 
-				fmt.Printf("[%s] %s\n", toolName, argsStr)
+					fmt.Printf("[%s] %s\n", toolName, argsStr)
 
-				// Sanitize command args for providers with native tool calls (OpenRouter returns :/path instead of cd /path)
-				if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
-					if cmd, ok := args["command"].(string); ok {
-						// Replace :/<path> with cd /<path> at the start of commands
-						cmd = fixDriveLetterPath(cmd)
-						args["command"] = cmd
+					if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
+						if cmd, ok := args["command"].(string); ok {
+							cmd = fixDriveLetterPath(cmd)
+							args["command"] = cmd
+						}
+					}
+
+					result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
+					if errors.Is(err, ErrUserAborted) {
+						fmt.Println("\nUser aborted.")
+						goto promptLoop
+					}
+					if err != nil {
+						errMsg := fmt.Sprintf("ERROR: %v", err)
+						fmt.Printf("  Error: %v\n", err)
+						toolResults = append(toolResults, errMsg)
+						hasError = true
+					} else {
+						toolResults = append(toolResults, truncate(result, 2500))
 					}
 				}
-
-				result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
-				if errors.Is(err, ErrUserAborted) {
-					fmt.Println("\nUser aborted.")
-					goto promptLoop
-				}
-				if err != nil {
-					errMsg := fmt.Sprintf("ERROR: %v", err)
-					fmt.Printf("  Error: %v\n", err)
-					toolResults = append(toolResults, errMsg)
-					hasError = true
-				} else {
-					toolResults = append(toolResults, truncate(result, 2500))
-				}
+				toolExecError = hasError
 			}
 
 			if hasFinal {
@@ -586,8 +592,7 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 				break
 			}
 
-			// Continue even if there were errors - send results to LLM
-			if hasError {
+			if toolExecError {
 				fmt.Printf("\n[Some tools had errors, asking LLM to handle...]\n")
 			}
 
@@ -1240,59 +1245,64 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		}
 		fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 		var toolResults []string
-		hasError := false
-		for _, tc := range toolCalls {
-			toolName := tc["name"].(string)
-			args := tc["arguments"].(map[string]interface{})
+		var toolExecError bool
 
-			// Get tool description
-			toolDesc := getToolDescription(servers, toolName)
-			if toolDesc != "" {
-				fmt.Print("\033[90m")
-				fmt.Printf("  %s\n", toolDesc)
-				fmt.Print("\033[0m")
-			}
+		if len(toolCalls) > 1 && llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
+			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, true)
+		} else {
+			hasError := false
+			for _, tc := range toolCalls {
+				toolName := tc["name"].(string)
+				args := tc["arguments"].(map[string]interface{})
 
-			if raw, ok := args["_raw"]; ok {
-				log.Printf("_raw found, unwrapping: type=%T", raw)
-				if rawStr, ok := raw.(string); ok {
-					log.Printf("_raw is string, length=%d", len(rawStr))
-					var rawMap map[string]interface{}
-					if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
-						log.Printf("_raw unwrapped successfully: %+v", rawMap)
-						args = rawMap
-					} else {
-						log.Printf("_raw json unmarshal failed: %v", err)
+				toolDesc := getToolDescription(servers, toolName)
+				if toolDesc != "" {
+					fmt.Print("\033[90m")
+					fmt.Printf("  %s\n", toolDesc)
+					fmt.Print("\033[0m")
+				}
+
+				if raw, ok := args["_raw"]; ok {
+					log.Printf("_raw found, unwrapping: type=%T", raw)
+					if rawStr, ok := raw.(string); ok {
+						log.Printf("_raw is string, length=%d", len(rawStr))
+						var rawMap map[string]interface{}
+						if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
+							log.Printf("_raw unwrapped successfully: %+v", rawMap)
+							args = rawMap
+						} else {
+							log.Printf("_raw json unmarshal failed: %v", err)
+						}
 					}
 				}
-			}
 
-			var argsStr string
-			for k, v := range args {
-				if argsStr != "" {
-					argsStr += ", "
+				var argsStr string
+				for k, v := range args {
+					if argsStr != "" {
+						argsStr += ", "
+					}
+					argsStr += fmt.Sprintf("%s=%v", k, v)
 				}
-				argsStr += fmt.Sprintf("%s=%v", k, v)
-			}
-			fmt.Printf("[%s] %s\n", toolName, argsStr)
+				fmt.Printf("[%s] %s\n", toolName, argsStr)
 
-			// Sanitize command args for providers with native tool calls (OpenRouter returns :/path instead of cd /path)
-			if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
-				if cmd, ok := args["command"].(string); ok {
-					cmd = fixDriveLetterPath(cmd)
-					args["command"] = cmd
+				if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
+					if cmd, ok := args["command"].(string); ok {
+						cmd = fixDriveLetterPath(cmd)
+						args["command"] = cmd
+					}
+				}
+
+				result, err := callTool(ctx, servers, toolName, args, toolTimeout)
+				if err != nil {
+					errMsg := fmt.Sprintf("ERROR: %v", err)
+					fmt.Printf("  Error: %v\n", err)
+					toolResults = append(toolResults, errMsg)
+					hasError = true
+				} else {
+					toolResults = append(toolResults, truncate(result, 2500))
 				}
 			}
-
-			result, err := callTool(ctx, servers, toolName, args, toolTimeout)
-			if err != nil {
-				errMsg := fmt.Sprintf("ERROR: %v", err)
-				fmt.Printf("  Error: %v\n", err)
-				toolResults = append(toolResults, errMsg)
-				hasError = true
-			} else {
-				toolResults = append(toolResults, truncate(result, 2500))
-			}
+			toolExecError = hasError
 		}
 
 		if hasFinal {
@@ -1303,7 +1313,7 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		}
 
 		// Continue even if there were errors - send results to LLM
-		if hasError {
+		if toolExecError {
 			fmt.Printf("\n[Some tools had errors, asking LLM to handle...]\n")
 		}
 
@@ -1547,6 +1557,151 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 		}
 	}
 	return "", fmt.Errorf("tool %s not found", name)
+}
+
+func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool) ([]string, bool) {
+	if len(toolCalls) == 0 {
+		return nil, false
+	}
+
+	cyan := "\033[1;36m"
+	green := "\033[1;32m"
+	yellow := "\033[1;33m"
+	red := "\033[1;31m"
+	reset := "\033[0m"
+
+	fmt.Printf("\n")
+	fmt.Printf("  %s╔═══════════════════════════════════════════════════╗%s\n", cyan, reset)
+	fmt.Printf("  %s║%s  %s🚀 LAUNCHING %d TOOLS IN PARALLEL%s          %s║%s\n", cyan, reset, green, len(toolCalls), reset, cyan, reset)
+	fmt.Printf("  %s║%s  %s%-35s %s║%s\n", cyan, reset, yellow, fmt.Sprintf("Timeout: %ds per tool", timeoutSecs), cyan, reset)
+	fmt.Printf("  %s╚═══════════════════════════════════════════════════╝%s\n", cyan, reset)
+
+	for i, tc := range toolCalls {
+		toolName := tc["name"].(string)
+		args := tc["arguments"].(map[string]interface{})
+		var argsStr []string
+		for k, v := range args {
+			argsStr = append(argsStr, fmt.Sprintf("%s=%v", k, v))
+		}
+		toolDesc := getToolDescription(servers, toolName)
+		if toolDesc != "" {
+			fmt.Printf("  %s➤ [%d]%s %s%s%s %s%s%s\n",
+				green, i+1, reset, cyan, toolName, reset, yellow, toolDesc, reset)
+		} else {
+			fmt.Printf("  %s➤ [%d]%s %s%s%s\n",
+				green, i+1, reset, cyan, toolName, reset)
+		}
+		if len(argsStr) > 0 {
+			fmt.Printf("     %s%s%s\n", yellow, strings.Join(argsStr, ", "), reset)
+		}
+	}
+	fmt.Println()
+
+	var wg sync.WaitGroup
+	results := make([]string, len(toolCalls))
+	resultCh := make(chan struct {
+		index  int
+		result string
+		err    error
+	}, len(toolCalls))
+
+	startTime := time.Now()
+
+	for i, tc := range toolCalls {
+		wg.Add(1)
+		go func(index int, call map[string]interface{}) {
+			defer wg.Done()
+
+			toolName := call["name"].(string)
+			args := call["arguments"].(map[string]interface{})
+
+			if supportsNativeToolCalls && toolName == "run_command" {
+				if cmd, ok := args["command"].(string); ok {
+					cmd = fixDriveLetterPath(cmd)
+					args["command"] = cmd
+				}
+			}
+
+			select {
+			case <-ctx.Done():
+				resultCh <- struct {
+					index  int
+					result string
+					err    error
+				}{index, "", ctx.Err()}
+				return
+			default:
+			}
+
+			result, err := callTool(ctx, servers, toolName, args, timeoutSecs)
+
+			select {
+			case resultCh <- struct {
+				index  int
+				result string
+				err    error
+			}{index, result, err}:
+			default:
+			}
+		}(i, tc)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	hasError := false
+	for result := range resultCh {
+		if result.err != nil {
+			if errors.Is(result.err, ErrUserAborted) {
+				fmt.Println("\nUser aborted.")
+				return nil, true
+			}
+			results[result.index] = fmt.Sprintf("ERROR: %v", result.err)
+			hasError = true
+		} else {
+			results[result.index] = truncate(result.result, 2500)
+		}
+	}
+
+	elapsed := time.Since(startTime)
+
+	fmt.Printf("\n")
+	fmt.Printf("  %s╔═══════════════════════════════════════════════════╗%s\n", cyan, reset)
+	fmt.Printf("  %s║%s  %s✓ COMPLETED IN %v%s                     %s║%s\n", cyan, reset, green, elapsed, reset, cyan, reset)
+	fmt.Printf("  %s╚═══════════════════════════════════════════════════╝%s\n", cyan, reset)
+
+	for i, resp := range results {
+		name := toolCalls[i]["name"].(string)
+		if len(name) > 30 {
+			name = name[:30] + "..."
+		}
+
+		statusColor := green
+		statusIcon := "✓"
+		if strings.HasPrefix(resp, "ERROR:") {
+			statusColor = red
+			statusIcon = "✗"
+		}
+
+		preview := resp
+		if len(preview) > 50 {
+			preview = preview[:50] + "..."
+		}
+
+		fmt.Printf("  %s%s [%d]%s %s%-30s%s %s%s%s\n",
+			statusIcon, cyan, i+1, reset,
+			statusColor, name, reset,
+			yellow, preview, reset)
+	}
+	fmt.Println()
+
+	if ctx.Err() != nil {
+		fmt.Printf("  %s⚠️  %s%s\n", yellow, ctx.Err(), reset)
+	}
+
+	return results, hasError
 }
 
 func isPathRestrictionError(err error) bool {
