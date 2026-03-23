@@ -1654,14 +1654,15 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 	fmt.Printf("  %s✓ Completed in %v%s\n", green, elapsed, reset)
 
-	for i := range toolCalls {
+	for i, tc := range toolCalls {
 		statusIcon := "✓"
 		statusColor := green
 		if strings.HasPrefix(results[i], "ERROR:") {
 			statusColor = red
 			statusIcon = "✗"
 		}
-		fmt.Printf("  %s%s [%d]%s\n", statusIcon, statusColor, i+1, reset)
+		toolName := tc["name"].(string)
+		fmt.Printf("  %s%s [%d]%s %s\n", statusIcon, statusColor, i+1, reset, toolName)
 	}
 	fmt.Println()
 
