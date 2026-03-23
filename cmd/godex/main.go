@@ -766,6 +766,7 @@ func initMCPServers(ctx context.Context, provider *config.Provider, autoConfirm 
 				continue
 			}
 			server = executor
+			agent.RegisterMCPExecutor(provider, executor)
 		}
 
 		servers = append(servers, server)

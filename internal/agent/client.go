@@ -86,6 +86,14 @@ func CancelPrompt(provider *config.Provider) {
 		return
 	}
 	p.Cancel()
+
+	mcpExecutorsMu.Lock()
+	key := cacheKey(provider)
+	if executor, ok := mcpExecutors[key]; ok {
+		delete(mcpExecutors, key)
+		executor.Close()
+	}
+	mcpExecutorsMu.Unlock()
 }
 
 // CallTool executes an MCP tool call.
@@ -134,6 +142,16 @@ func SubmitProviderToolResult(provider *config.Provider, toolCallID, result stri
 	if pt, ok := p.(interface{ SubmitToolResult(string, string) }); ok {
 		pt.SubmitToolResult(toolCallID, result)
 	}
+}
+
+func RegisterMCPExecutor(provider *config.Provider, executor *mcp.MCPToolExecutor) {
+	if provider == nil || executor == nil {
+		return
+	}
+	key := cacheKey(provider)
+	mcpExecutorsMu.Lock()
+	mcpExecutors[key] = executor
+	mcpExecutorsMu.Unlock()
 }
 
 func CloseProvider(cfg *config.Provider) {
