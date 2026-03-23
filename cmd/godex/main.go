@@ -516,8 +516,8 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 			var toolResults []string
 			var toolExecError bool
 
-			if len(toolCalls) > 1 && llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
-				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, true)
+			if len(toolCalls) > 1 && llmProvider != nil {
+				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls())
 
 			} else {
 				hasError := false
@@ -1247,8 +1247,8 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		var toolResults []string
 		var toolExecError bool
 
-		if len(toolCalls) > 1 && llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
-			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, true)
+		if len(toolCalls) > 1 && llmProvider != nil {
+			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls())
 		} else {
 			hasError := false
 			for _, tc := range toolCalls {
@@ -1564,17 +1564,12 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 		return nil, false
 	}
 
-	cyan := "\033[1;36m"
 	green := "\033[1;32m"
-	yellow := "\033[1;33m"
 	red := "\033[1;31m"
 	reset := "\033[0m"
 
 	fmt.Printf("\n")
-	fmt.Printf("  %s╔═══════════════════════════════════════════════════╗%s\n", cyan, reset)
-	fmt.Printf("  %s║%s  %s🚀 LAUNCHING %d TOOLS IN PARALLEL%s          %s║%s\n", cyan, reset, green, len(toolCalls), reset, cyan, reset)
-	fmt.Printf("  %s║%s  %s%-35s %s║%s\n", cyan, reset, yellow, fmt.Sprintf("Timeout: %ds per tool", timeoutSecs), cyan, reset)
-	fmt.Printf("  %s╚═══════════════════════════════════════════════════╝%s\n", cyan, reset)
+	fmt.Printf("  %s🚀 Launching %d tools in parallel%s\n", green, len(toolCalls), reset)
 
 	for i, tc := range toolCalls {
 		toolName := tc["name"].(string)
@@ -1583,17 +1578,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 		for k, v := range args {
 			argsStr = append(argsStr, fmt.Sprintf("%s=%v", k, v))
 		}
-		toolDesc := getToolDescription(servers, toolName)
-		if toolDesc != "" {
-			fmt.Printf("  %s➤ [%d]%s %s%s%s %s%s%s\n",
-				green, i+1, reset, cyan, toolName, reset, yellow, toolDesc, reset)
-		} else {
-			fmt.Printf("  %s➤ [%d]%s %s%s%s\n",
-				green, i+1, reset, cyan, toolName, reset)
-		}
-		if len(argsStr) > 0 {
-			fmt.Printf("     %s%s%s\n", yellow, strings.Join(argsStr, ", "), reset)
-		}
+		fmt.Printf("  %s[%d]%s %s %s\n", green, i+1, reset, toolName, strings.Join(argsStr, ", "))
 	}
 	fmt.Println()
 
@@ -1667,38 +1652,21 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 	elapsed := time.Since(startTime)
 
-	fmt.Printf("\n")
-	fmt.Printf("  %s╔═══════════════════════════════════════════════════╗%s\n", cyan, reset)
-	fmt.Printf("  %s║%s  %s✓ COMPLETED IN %v%s                     %s║%s\n", cyan, reset, green, elapsed, reset, cyan, reset)
-	fmt.Printf("  %s╚═══════════════════════════════════════════════════╝%s\n", cyan, reset)
+	fmt.Printf("  %s✓ Completed in %v%s\n", green, elapsed, reset)
 
-	for i, resp := range results {
-		name := toolCalls[i]["name"].(string)
-		if len(name) > 30 {
-			name = name[:30] + "..."
-		}
-
-		statusColor := green
+	for i := range toolCalls {
 		statusIcon := "✓"
-		if strings.HasPrefix(resp, "ERROR:") {
+		statusColor := green
+		if strings.HasPrefix(results[i], "ERROR:") {
 			statusColor = red
 			statusIcon = "✗"
 		}
-
-		preview := resp
-		if len(preview) > 50 {
-			preview = preview[:50] + "..."
-		}
-
-		fmt.Printf("  %s%s [%d]%s %s%-30s%s %s%s%s\n",
-			statusIcon, cyan, i+1, reset,
-			statusColor, name, reset,
-			yellow, preview, reset)
+		fmt.Printf("  %s%s [%d]%s\n", statusIcon, statusColor, i+1, reset)
 	}
 	fmt.Println()
 
 	if ctx.Err() != nil {
-		fmt.Printf("  %s⚠️  %s%s\n", yellow, ctx.Err(), reset)
+		fmt.Printf("  ⚠ %s\n", ctx.Err())
 	}
 
 	return results, hasError
