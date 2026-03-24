@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -26,6 +27,7 @@ type BashServer struct {
 	tools          []Tool
 	backgroundPIDs []bgProcess
 	autoConfirm    bool
+	cmdMu          sync.Mutex
 }
 
 type bgProcess struct {
@@ -82,6 +84,8 @@ func (s *BashServer) Tools() []Tool {
 func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
 	switch name {
 	case "run_command":
+		s.cmdMu.Lock()
+		defer s.cmdMu.Unlock()
 		return s.runCommand(ctx, arguments)
 	case "kill_command":
 		return s.killCommand(arguments)
