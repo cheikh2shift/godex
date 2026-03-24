@@ -12,6 +12,18 @@ import (
 	"strings"
 )
 
+func getIntArg(args map[string]interface{}, key, alias string) (float64, bool) {
+	if v, ok := args[key].(float64); ok {
+		return v, true
+	}
+	if alias != "" {
+		if v, ok := args[alias].(float64); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
 type FileSystemServer struct {
 	allowedPaths []string
 	tools        []Tool
@@ -64,12 +76,12 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 			{
 				Name:        "read_file_line_range",
 				Description: "Read a specific range of lines from a file",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"}},"required":["path","start","end"]}`),
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end"]}`),
 			},
 			{
 				Name:        "delete_line_range",
 				Description: "Delete a range of lines from a file",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"}},"required":["path","start","end"]}`),
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end"]}`),
 			},
 			{
 				Name:        "insert_at_line",
@@ -358,11 +370,11 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 	}
 
 	lines := strings.Split(string(content), "\n")
-	start, ok := args["start"].(float64)
+	start, ok := getIntArg(args, "start", "start_line")
 	if !ok {
 		return "", fmt.Errorf("start is required")
 	}
-	end, ok := args["end"].(float64)
+	end, ok := getIntArg(args, "end", "end_line")
 	if !ok {
 		return "", fmt.Errorf("end is required")
 	}
@@ -396,11 +408,11 @@ func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string,
 	}
 
 	lines := strings.Split(string(content), "\n")
-	start, ok := args["start"].(float64)
+	start, ok := getIntArg(args, "start", "start_line")
 	if !ok {
 		return "", fmt.Errorf("start is required")
 	}
-	end, ok := args["end"].(float64)
+	end, ok := getIntArg(args, "end", "end_line")
 	if !ok {
 		return "", fmt.Errorf("end is required")
 	}
