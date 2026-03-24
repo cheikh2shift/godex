@@ -59,7 +59,6 @@ var (
 	muted        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	debugMode    bool
 	pathPromptMu sync.Mutex
-	runCmdMu     sync.Mutex
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -1603,8 +1602,6 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 			toolName := call["name"].(string)
 			args := call["arguments"].(map[string]interface{})
-			var result string
-			var err error
 
 			if supportsNativeToolCalls && toolName == "run_command" {
 				if cmd, ok := args["command"].(string); ok {
@@ -1624,13 +1621,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 			default:
 			}
 
-			if toolName == "run_command" {
-				runCmdMu.Lock()
-				result, err = callTool(ctx, servers, toolName, args, timeoutSecs)
-				runCmdMu.Unlock()
-			} else {
-				result, err = callTool(ctx, servers, toolName, args, timeoutSecs)
-			}
+			result, err := callTool(ctx, servers, toolName, args, timeoutSecs)
 
 			select {
 			case resultCh <- struct {

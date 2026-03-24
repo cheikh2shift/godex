@@ -22,12 +22,13 @@ func GetWorkingDir() (string, error) {
 	return os.Getwd()
 }
 
+var runCmdMu sync.Mutex
+
 type BashServer struct {
 	allowedPaths   []string
 	tools          []Tool
 	backgroundPIDs []bgProcess
 	autoConfirm    bool
-	cmdMu          sync.Mutex
 }
 
 type bgProcess struct {
@@ -84,8 +85,8 @@ func (s *BashServer) Tools() []Tool {
 func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
 	switch name {
 	case "run_command":
-		s.cmdMu.Lock()
-		defer s.cmdMu.Unlock()
+		runCmdMu.Lock()
+		defer runCmdMu.Unlock()
 		return s.runCommand(ctx, arguments)
 	case "kill_command":
 		return s.killCommand(arguments)
