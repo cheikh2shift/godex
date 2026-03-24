@@ -54,10 +54,11 @@ type MCPServer interface {
 var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var (
-	greenOrb  = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
-	orangeOrb = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
-	muted     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	debugMode bool
+	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
+	orangeOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
+	muted        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	debugMode    bool
+	pathPromptMu sync.Mutex
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -1528,7 +1529,9 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 				if isPathRestrictionError(err) {
 					path := extractPathFromError(err)
 					allowedPaths := server.AllowedPaths()
+					pathPromptMu.Lock()
 					selected := showPathRestrictionPrompt(path, allowedPaths)
+					pathPromptMu.Unlock()
 					switch selected {
 					case 0:
 						server.AddPath(ctx, path)
