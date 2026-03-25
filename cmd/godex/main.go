@@ -369,6 +369,7 @@ BASH TOOL LIMITATIONS:
 
 To call tools, respond with one or more JSON objects, each in its own markdown code block.
 You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
+When planning parallel tool calls, ensure there is no conflict - tools that modify the same resource (file, directory, process, etc.) should NOT be called in parallel; run them sequentially instead.
 
 Example:
 `+"```json"+`
@@ -1171,6 +1172,7 @@ BASH TOOL LIMITATIONS:
 
 To call tools, respond with one or more JSON objects, each in its own markdown code block.
 You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
+When planning parallel tool calls, ensure there is no conflict - tools that modify the same resource (file, directory, process, etc.) should NOT be called in parallel; run them sequentially instead.
 
 Example:
 `+"```json"+`
