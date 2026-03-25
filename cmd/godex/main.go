@@ -26,6 +26,7 @@ import (
 	"github.com/cheikh-seck/godex/internal/agent"
 	"github.com/cheikh-seck/godex/internal/config"
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
+	"github.com/cheikh-seck/godex/internal/history"
 	"github.com/cheikh-seck/godex/internal/mcp"
 	"github.com/cheikh-seck/godex/internal/providers"
 	"github.com/cheikh-seck/godex/internal/wizard"
@@ -34,6 +35,7 @@ import (
 const (
 	defaultConfigFile = "providers.yaml"
 	sessionFileName   = "session.txt"
+	historyFileName   = "history.db"
 )
 
 var ErrUserAborted = errors.New("user aborted")
@@ -217,6 +219,15 @@ func main() {
 	// Get working directory for session files
 	wd, _ := os.Getwd()
 
+	// Initialize history database (stored in tmp directory)
+	var historyDB *history.HistoryDB
+	historyDB, err = history.NewDefault()
+	if err != nil {
+		fmt.Printf("Warning: Could not initialize history database: %v\n", err)
+	} else {
+		fmt.Println(muted.Render("[History] Command history loaded"))
+	}
+
 	// Load previous session summary from ./.godex
 	prevSession := loadPreviousSession(wd)
 	if prevSession != "" {
@@ -235,6 +246,14 @@ func main() {
 	var sessionEntries []sessionEntry
 	var history []string
 
+	// Load history from database (newest first, reverse for navigation)
+	if historyDB != nil {
+		dbHistory, _ := historyDB.GetByWD(wd, 200)
+		for i := len(dbHistory) - 1; i >= 0; i-- {
+			history = append(history, dbHistory[i])
+		}
+	}
+
 promptLoop:
 	for {
 		// Show prompt with background process count
@@ -247,7 +266,7 @@ promptLoop:
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
 
-		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit)
+		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
@@ -263,6 +282,11 @@ promptLoop:
 		}
 
 		history = appendHistory(history, input)
+
+		// Save to history database
+		if historyDB != nil {
+			historyDB.AddToWD(wd, input)
+		}
 
 		if input == "/exit" || input == "/quit" || input == "/q" {
 			break
@@ -658,6 +682,9 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 
 	cancel()
 	cleanup(servers)
+	if historyDB != nil {
+		historyDB.Close()
+	}
 	fmt.Println("Goodbye!")
 }
 
@@ -1088,6 +1115,7 @@ Commands:
 Tips:
   - Paste multiline text - waits for more input automatically
   - Up/Down arrows for command history
+  - Ctrl+R to search past prompts
   - Tab to autocomplete / commands
 
 Available MCP tools:
@@ -2241,6 +2269,7 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Tips:"),
 		"  Ctrl+C - Cancel prompt",
 		"  Up/Down - Command history",
+		"  Ctrl+R - Search history",
 		"  Tab - Autocomplete",
 		"  Multiline: paste with newlines",
 		"  Enter on empty line to submit",
