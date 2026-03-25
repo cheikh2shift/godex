@@ -22,6 +22,9 @@ curl -fsSL "${GITHUB_REPO}/Dockerfile" -o Dockerfile
 echo "Downloading docker-compose.yml..."
 curl -fsSL "${GITHUB_REPO}/docker-compose.yml" -o docker-compose.yml
 
+echo "Downloading nginx.conf..."
+curl -fsSL "${GITHUB_REPO}/nginx.conf" -o nginx.conf
+
 echo ""
 echo "Setup complete!"
 echo ""

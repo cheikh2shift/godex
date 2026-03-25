@@ -340,6 +340,7 @@ The sandbox includes:
 - Root filesystem is read-only
 - `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
 - Process and file limits enforced
+- Network isolated via nginx proxy (Ollama accessible at localhost:11434)
 - Provider credentials are stored in the `godex-config` volume
 - Use `docker compose down -v` to completely remove all data
 

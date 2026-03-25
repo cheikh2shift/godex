@@ -1,4 +1,17 @@
 services:
+  ollama-proxy:
+    image: nginx:alpine
+    container_name: ollama-proxy
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - godex-network
+    depends_on:
+      - godex
+
   godex:
     build:
       context: .
@@ -14,9 +27,12 @@ services:
     stdin_open: true
     tty: true
     restart: "no"
+    networks:
+      - godex-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     security_opt:
       - no-new-privileges:true
-    read_only: true
     tmpfs:
       - /tmp
       - /run
@@ -32,5 +48,6 @@ services:
         soft: 256
         hard: 256
 
-volumes:
-  godex-config:
+networks:
+  godex-network:
+    driver: bridge
