@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cheikh-seck/godex/internal/history"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -56,9 +57,15 @@ type promptModel struct {
 	modelName       string
 	contextUsage    int
 	contextLimit    int
+	historyDB       *history.HistoryDB
+	wd              string
+	searchMode      bool
+	searchInput     textinput.Model
+	searchIndex     int
+	searchResults   []string
 }
 
-func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int) promptModel {
+func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string) promptModel {
 	ti := textinput.New()
 	ti.Prompt = prompt
 	ti.Placeholder = "Press ↵ Enter to submit"
@@ -75,11 +82,13 @@ func newPromptModel(prompt string, history []string, modelName string, contextUs
 		modelName:    modelName,
 		contextUsage: contextUsage,
 		contextLimit: contextLimit,
+		historyDB:    historyDB,
+		wd:           wd,
 	}
 }
 
-func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int) (string, error) {
-	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit)
+func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string) (string, error) {
+	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit, historyDB, wd)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -103,14 +112,36 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
+			if m.searchMode {
+				m.exitSearchMode()
+				return m, nil
+			}
 			m.aborted = true
 			return m, tea.Quit
+		}
+		if msg.Type == tea.KeyCtrlR {
+			if m.searchMode {
+				m.searchNext()
+			} else {
+				m.enterSearchMode()
+			}
+			return m, nil
+		}
+		if msg.Type == tea.KeyEsc {
+			if m.searchMode {
+				m.exitSearchMode()
+				return m, nil
+			}
 		}
 		if msg.Type == tea.KeyTab {
 			m.handleTab()
 			return m, nil
 		}
 		if msg.Type == tea.KeyEnter {
+			if m.searchMode {
+				m.selectSearchResult()
+				return m, nil
+			}
 			if !m.multiline && len(m.lines) == 0 {
 				m.submitted = true
 				return m, tea.Quit
@@ -134,9 +165,15 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete {
 			m.resetCompletion()
+			if m.searchMode {
+				var cmd tea.Cmd
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				m.performSearch()
+				return m, cmd
+			}
 		}
 
-		if !m.multiline && len(m.lines) == 0 {
+		if !m.multiline && len(m.lines) == 0 && !m.searchMode {
 			switch msg.Type {
 			case tea.KeyUp:
 				m.historyUp()
@@ -147,6 +184,17 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.historyDown()
 				m.updatePrompt()
 				m.resetCompletion()
+				return m, nil
+			}
+		}
+
+		if m.searchMode {
+			switch msg.Type {
+			case tea.KeyUp:
+				m.searchPrev()
+				return m, nil
+			case tea.KeyDown:
+				m.searchNext()
 				return m, nil
 			}
 		}
@@ -242,6 +290,29 @@ func (m promptModel) View() string {
 		}
 		b.WriteByte('\n')
 		b.WriteString(strings.Join(display, "\n"))
+	}
+	if m.searchMode {
+		b.WriteByte('\n')
+		searchPrompt := lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true).Render("(reverse-i-search)`': ")
+		b.WriteString(boxStyle.Width(max(0, m.width-4)).Render(searchPrompt + m.searchInput.View()))
+		b.WriteByte('\n')
+		if len(m.searchResults) > 0 {
+			searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+			selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+			for i, result := range m.searchResults {
+				prefix := "  "
+				if i == m.searchIndex {
+					prefix = " > "
+					b.WriteString(selectedStyle.Render(prefix + result))
+				} else {
+					b.WriteString(searchStyle.Render(prefix + result))
+				}
+				b.WriteByte('\n')
+			}
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  ↑↓ navigate  ↵ select  esc cancel"))
+		} else if m.searchInput.Value() != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  No matches found"))
+		}
 	}
 	return b.String()
 }
@@ -380,6 +451,78 @@ func (m *promptModel) handleTab() {
 		return
 	}
 	m.showCompletions = true
+}
+
+func (m *promptModel) enterSearchMode() {
+	m.searchMode = true
+	m.searchIndex = 0
+	m.searchResults = nil
+	m.historyDraft = m.input.Value()
+
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Focus()
+	ti.CharLimit = 0
+	m.searchInput = ti
+}
+
+func (m *promptModel) exitSearchMode() {
+	m.searchMode = false
+	m.searchResults = nil
+	m.searchIndex = 0
+	m.searchInput = textinput.Model{}
+	m.input.SetValue(m.historyDraft)
+	m.input.SetCursor(len([]rune(m.historyDraft)))
+}
+
+func (m *promptModel) performSearch() {
+	query := m.searchInput.Value()
+	if m.historyDB == nil || query == "" {
+		m.searchResults = nil
+		return
+	}
+
+	results, err := m.historyDB.Search(m.wd, query, 5)
+	if err != nil {
+		m.searchResults = nil
+		return
+	}
+
+	m.searchResults = results
+	if m.searchIndex >= len(m.searchResults) {
+		m.searchIndex = 0
+	}
+}
+
+func (m *promptModel) searchNext() {
+	if len(m.searchResults) == 0 {
+		return
+	}
+	m.searchIndex++
+	if m.searchIndex >= len(m.searchResults) {
+		m.searchIndex = 0
+	}
+}
+
+func (m *promptModel) searchPrev() {
+	if len(m.searchResults) == 0 {
+		return
+	}
+	m.searchIndex--
+	if m.searchIndex < 0 {
+		m.searchIndex = len(m.searchResults) - 1
+	}
+}
+
+func (m *promptModel) selectSearchResult() {
+	if len(m.searchResults) > 0 && m.searchIndex < len(m.searchResults) {
+		m.input.SetValue(m.searchResults[m.searchIndex])
+		m.input.SetCursor(len([]rune(m.searchResults[m.searchIndex])))
+	}
+	m.searchMode = false
+	m.searchResults = nil
+	m.searchIndex = 0
+	m.searchInput = textinput.Model{}
 }
 
 func appendHistory(history []string, item string) []string {
