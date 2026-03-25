@@ -3,6 +3,7 @@
 set -e
 
 GITHUB_REPO="https://raw.githubusercontent.com/cheikh2shift/godex/main"
+IMAGE_NAME="godex-sandbox:latest"
 
 echo "GoDex Docker Sandbox Installer"
 echo "=============================="
@@ -26,18 +27,21 @@ echo "Downloading nginx.conf..."
 curl -fsSL "${GITHUB_REPO}/nginx.conf" -o nginx.conf
 
 echo ""
+echo "Building Docker image (this may take a few minutes)..."
+docker build -t "${IMAGE_NAME}" .
+
+echo ""
 echo "Setup complete!"
 echo ""
 echo "To run GoDex in your project directory:"
 echo ""
-echo "  docker compose -f $INSTALL_DIR/docker-compose.yml up"
+echo "  # Add this alias to ~/.bashrc or ~/.zshrc:"
+echo "  alias godex='docker compose -f ${INSTALL_DIR}/docker-compose.yml up'"
 echo ""
-echo "Or add this alias to your shell (~/.bashrc or ~/.zshrc):"
-echo ""
-echo "  alias godex='docker compose -f $INSTALL_DIR/docker-compose.yml up'"
+echo "  # Then run from any directory:"
+echo "  godex"
 echo ""
 echo "This will:"
-echo "  - Build the GoDex container with Python, Node.js, Go, Rust, and more"
 echo "  - Mount your current directory as the working directory"
 echo "  - Store config in a Docker volume"
 echo ""
