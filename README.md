@@ -268,6 +268,81 @@ go build -o godex ./cmd/godex
 ./godex
 ```
 
+## Running Securely with Docker
+
+GoDex can be run in an isolated Docker container with a pre-configured sandbox environment containing common tools (Python, Node.js, Go, Rust, etc.).
+
+### Quick Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install-docker.sh | bash
+```
+
+### Why Use Docker?
+
+Running GoDex in Docker provides:
+- **Isolation** - GoDex operates only within the mounted workspace directory
+- **No host pollution** - Tools and changes stay contained
+- **Consistent environment** - Same tools available regardless of host system
+- **Safety** - Test configurations without risking your host system
+
+### Manual Setup
+
+```bash
+# Download files
+curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/Dockerfile -o Dockerfile
+curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/docker-compose.yml -o docker-compose.yml
+
+# Create workspace directory
+mkdir -p workspace
+
+# Run
+docker compose up
+```
+
+### Usage
+
+1. **First run** - The container will launch the wizard to configure your provider:
+   ```bash
+   docker compose up
+   ```
+   Configure your Ollama/OpenRouter/etc. settings when prompted.
+
+2. **Subsequent runs** - Your config is persisted in a Docker volume:
+   ```bash
+   docker compose up
+   ```
+
+3. **Access your workspace** - The `./workspace` directory in your project is mounted at `/workspace` inside the container. Create or edit files there before running godex.
+
+4. **Custom provider config** - If you have an existing `~/.godex/providers.yaml`, copy it to the workspace:
+   ```bash
+   cp ~/.godex/providers.yaml ./workspace/providers.yaml
+   docker compose run --rm godex godex --config /workspace/providers.yaml
+   ```
+
+### Included Tools
+
+The sandbox includes:
+- Python 3, pip, pytest, black, flake8
+- Node.js, npm
+- Go, Rust (rustc, cargo)
+- Git, curl, wget
+- Build tools: make, cmake, gcc, g++
+- Utilities: htop, tree, jq, ripgrep, fd, fzf, vim, nano
+
+### Security Notes
+
+- GoDex can only access files within the `./workspace` directory (read-write)
+- Container runs as non-root user (UID 1000)
+- Most Linux capabilities dropped; only `NET_RAW` and `NET_BIND_SERVICE` allowed
+- No new privileges allowed
+- Root filesystem is read-only
+- `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
+- Process and file limits enforced
+- Provider credentials are stored in the `godex-config` volume
+- Use `docker compose down -v` to completely remove all data
+
 ## Troubleshooting
 
 ### Ollama Model Not Found

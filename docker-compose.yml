@@ -1,0 +1,36 @@
+services:
+  godex:
+    build:
+      context: .
+      platform: linux/amd64
+    image: godex-sandbox
+    container_name: godex
+    environment:
+      - HOME=/godex-home
+    volumes:
+      - .:/workspace
+      - godex-config:/godex-home/.godex
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+      - NET_BIND_SERVICE
+    ulimits:
+      nproc: 512
+      nofile:
+        soft: 256
+        hard: 256
+
+volumes:
+  godex-config:
