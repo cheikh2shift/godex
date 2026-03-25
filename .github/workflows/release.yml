@@ -76,7 +76,7 @@ jobs:
           CGO_ENABLED: 0
           TAG: ${{ steps.get_tag.outputs.TAG }}
         run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-amd64 ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-arm64 ./cmd/godex
 
       - name: Build Windows AMD64
         env:
