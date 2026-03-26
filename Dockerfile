@@ -27,8 +27,9 @@ RUN apk add --no-cache \
     g++ \
     musl-dev \
     go \
-    rustc \
-    cargo
+    rustup
+
+RUN rustup default stable
 
 RUN pip3 install --no-cache-dir pip --upgrade && \
     pip3 install --no-cache-dir black flake8 pytest
