@@ -66,3 +66,4 @@ echo "  docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex $
 echo "  docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex ${IMAGE_NAME} -lc 'vi /godex-home/.godex/providers.yaml'"
 echo "  docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex ${IMAGE_NAME} -lc 'vim /godex-home/.godex/providers.yaml'"
 echo ""
+echo -e "\033[0;32mInstall complete.\033[0m"
