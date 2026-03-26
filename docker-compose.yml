@@ -3,8 +3,6 @@ services:
     image: nginx:alpine
     container_name: ollama-proxy
     restart: unless-stopped
-    ports:
-      - "11435:11434"
     command: ["nginx", "-g", "daemon off;"]
     environment:
       - NGINX_ENTRYPOINT_QUIET_LOGS=1
