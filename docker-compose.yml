@@ -11,6 +11,8 @@ services:
       - godex-network
     depends_on:
       - godex
+    logging:
+      driver: "none"
 
   godex:
     build:
@@ -25,7 +27,7 @@ services:
     working_dir: /workspace
     stdin_open: true
     tty: true
-    restart: "no"
+    restart: unless-stopped
     networks:
       - godex-network
     extra_hosts:
