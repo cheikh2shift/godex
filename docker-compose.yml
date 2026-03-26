@@ -24,6 +24,8 @@ services:
     container_name: godex
     environment:
       - HOME=/godex-home
+      # Optional: set to auto-select provider after wizard creates config
+      # - CODEX_PROVIDER_NAME=my-local-identifier
     volumes:
       - .:/workspace
       - godex-config:/godex-home/.godex
