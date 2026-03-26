@@ -17,7 +17,7 @@ services:
   godex:
     build:
       context: .
-    image: godex-sandbox
+    image: godex-sandbox:latest
     container_name: godex
     environment:
       - HOME=/godex-home
