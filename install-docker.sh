@@ -62,22 +62,15 @@ fi
 BINARY_URL="https://github.com/cheikh2shift/godex/releases/download/v${LATEST_VERSION}/${BINARY_NAME}"
 
 echo "Downloading ${BINARY_NAME} v${LATEST_VERSION}..."
-curl -fsSL "$BINARY_URL" -o godex || {
-    echo "Warning: Failed to download binary, will build from source"
-}
-
-if [ ! -f godex ] || [ ! -x godex ]; then
-    echo ""
-    echo "Building godex from source..."
-    if command -v go &> /dev/null; then
-        GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 go build -ldflags="-s -w" -o godex ./cmd/godex
-    else
-        echo "Error: Go is not installed and binary download failed"
-        exit 1
-    fi
+if curl -fsSL "$BINARY_URL" -o godex && [ -s godex ]; then
+    chmod +x godex
+    echo "Binary downloaded successfully"
+else
+    rm -f godex
+    echo "Error: Failed to download godex binary from releases"
+    echo "Please ensure the release v${LATEST_VERSION} exists or build from source"
+    exit 1
 fi
-
-chmod +x godex
 
 echo ""
 echo "Building Docker image (this may take a few minutes)..."

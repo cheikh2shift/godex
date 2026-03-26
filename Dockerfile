@@ -42,4 +42,3 @@ RUN chmod +x /usr/local/bin/godex
 WORKDIR /workspace
 
 ENTRYPOINT ["godex"]
-CMD ["--wizard"]
