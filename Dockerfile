@@ -25,12 +25,14 @@ RUN apk add --no-cache \
     cmake \
     gcc \
     g++ \
-    musl-dev \
-    go
+    musl-dev
 
+RUN curl -fsSL https://go.dev/dl/go1.25.7.linux-amd64.tar.gz -o /tmp/go.tar.gz && \
+    rm -rf /usr/local/go && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
 
-ENV HOME=/root
-ENV PATH=$HOME/go/bin:$PATH
+ENV PATH=/usr/local/go/bin:$PATH
 
 RUN git clone https://github.com/cheikh2shift/godex.git /tmp/godex && \
     cd /tmp/godex && \
@@ -42,3 +44,4 @@ RUN chmod +x /usr/local/bin/godex
 WORKDIR /workspace
 
 ENTRYPOINT ["godex"]
+CMD ["--wizard"]
