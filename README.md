@@ -14,6 +14,34 @@ Orchestration and parallel tasks? open another terminal tab and start a new inst
 - **Go 1.25.7+** - Build from source
 - **Ollama** - For the default LLM backend (or use Gemini, Hugging Face, or OpenRouter)
 
+
+## Installation
+
+### Quick Install (Linux/macOS)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+```
+
+### Quick Install (Docker)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install-docker.sh | bash
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/cheikh2shift/godex.git
+cd godex
+go build -o godex ./cmd/godex
+sudo mv godex /usr/local/bin/
+```
+
+-------------------------------------------------------------
+
+## Setting up providers
+
 ### Ollama Setup
 
 1. **Install Ollama**: Follow instructions at https://github.com/ollama/ollama
@@ -54,28 +82,6 @@ Orchestration and parallel tasks? open another terminal tab and start a new inst
 
 GoDex reads provider configuration from `~/.godex/providers.yaml`.
 
-## Installation
-
-### Build from Source
-
-```bash
-git clone https://github.com/cheikh2shift/godex.git
-cd godex
-go build -o godex ./cmd/godex
-sudo mv godex /usr/local/bin/
-```
-
-### Quick Install (Linux/macOS)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
-```
-
-### Quick Install (Docker)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install-docker.sh | bash
-```
 
 ### Manual Download
 
