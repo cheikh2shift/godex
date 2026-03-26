@@ -34,6 +34,11 @@ RUN curl -fsSL https://go.dev/dl/go1.25.7.linux-amd64.tar.gz -o /tmp/go.tar.gz &
 
 ENV PATH=/usr/local/go/bin:$PATH
 
+RUN addgroup -g 10001 godex && \
+    adduser -D -u 10001 -G godex -h /godex-home godex && \
+    mkdir -p /godex-home/.godex && \
+    chown -R godex:godex /godex-home
+
 RUN git clone https://github.com/cheikh2shift/godex.git /tmp/godex && \
     cd /tmp/godex && \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/godex ./cmd/godex && \
@@ -41,7 +46,11 @@ RUN git clone https://github.com/cheikh2shift/godex.git /tmp/godex && \
 
 RUN chmod +x /usr/local/bin/godex
 
+ENV HOME=/godex-home
+
 WORKDIR /workspace
+
+USER godex
 
 ENTRYPOINT ["godex"]
 CMD ["--wizard"]
