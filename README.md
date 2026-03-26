@@ -299,7 +299,8 @@ curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/docker-comp
 mkdir -p workspace
 
 # Run
-docker compose up
+docker compose up -d
+docker attach godex
 ```
 
 ### Usage
@@ -310,6 +311,7 @@ docker compose up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
    If the screen looks empty after attaching, press any letter key to trigger TUI redraw.
+   If using Ollama on the host with the nginx proxy, make sure Ollama listens on `0.0.0.0:11434` (not just `127.0.0.1`), e.g. `OLLAMA_HOST=0.0.0.0:11434 ollama serve`.
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
    ```bash
