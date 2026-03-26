@@ -310,8 +310,22 @@ docker attach godex
    docker compose up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
-   If the screen looks empty after attaching, press any letter key to trigger TUI redraw.
+   If the screen looks empty after attaching, press enter key to trigger TUI redraw.
    If using Ollama on the host with the nginx proxy, make sure Ollama listens on `0.0.0.0:11434` (not just `127.0.0.1`), e.g. `OLLAMA_HOST=0.0.0.0:11434 ollama serve`.
+
+#### Ollama Host Firewall (Optional)
+
+If you want Ollama bound to `0.0.0.0` but still blocked from external traffic, use:
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+
+```
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
    ```bash
