@@ -244,7 +244,28 @@ func (h *huggingfaceProvider) SetMessages(messages []Message) error {
 func (h *huggingfaceProvider) AppendMessages(messages []Message) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.messages = append(h.messages, messages...)
+	seen := make(map[string]struct{}, len(h.messages))
+	for _, msg := range h.messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		seen[role+"\x00"+content] = struct{}{}
+	}
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		key := role + "\x00" + content
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		h.messages = append(h.messages, msg)
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 

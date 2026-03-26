@@ -404,16 +404,31 @@ func (p *openRouterProvider) AppendMessages(messages []Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	seen := make(map[string]struct{}, len(p.messages))
+	for _, msg := range p.messages {
+		role, _ := msg["role"].(string)
+		content, _ := msg["content"].(string)
+		if role == "" || content == "" {
+			continue
+		}
+		seen[role+"\x00"+content] = struct{}{}
+	}
+
 	for _, msg := range messages {
 		role := strings.TrimSpace(msg.Role)
 		content := msg.Content
 		if role == "" || content == "" {
 			continue
 		}
+		key := role + "\x00" + content
+		if _, ok := seen[key]; ok {
+			continue
+		}
 		p.messages = append(p.messages, map[string]interface{}{
 			"role":    role,
 			"content": content,
 		})
+		seen[key] = struct{}{}
 	}
 	maxHistory := getMaxHistoryMessages()
 	if len(p.messages) > maxHistory {

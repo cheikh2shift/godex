@@ -237,7 +237,28 @@ func (g *geminiProvider) SetMessages(messages []Message) error {
 func (g *geminiProvider) AppendMessages(messages []Message) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.messages = append(g.messages, messages...)
+	seen := make(map[string]struct{}, len(g.messages))
+	for _, msg := range g.messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		seen[role+"\x00"+content] = struct{}{}
+	}
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		key := role + "\x00" + content
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		g.messages = append(g.messages, msg)
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 
