@@ -35,6 +35,8 @@ services:
     restart: unless-stopped
     networks:
       - godex-network
+    logging:
+      driver: "none"
     security_opt:
       - no-new-privileges:true
     tmpfs:

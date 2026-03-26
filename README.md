@@ -310,7 +310,7 @@ docker attach godex
    WORKSPACE_DIR="$PWD" docker compose up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
-   If the screen looks empty after attaching, press enter key to trigger TUI redraw.
+   If the screen looks empty after attaching, press Enter to trigger TUI redraw.
    If using Ollama on the host with the nginx proxy, make sure Ollama listens on `0.0.0.0:11434` (not just `127.0.0.1`), e.g. `OLLAMA_HOST=0.0.0.0:11434 ollama serve`.
 
 #### Ollama Host Firewall (Optional)
@@ -325,6 +325,9 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
 
+sudo iptables -A INPUT -p tcp --dport 11434 -s 127.0.0.1 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 11434 -s 172.17.0.0/16 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 11434 -j DROP
 ```
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
@@ -364,13 +367,12 @@ The sandbox includes:
 ### Security Notes
 
 - GoDex can only access files within the `./workspace` directory (read-write)
-- Container runs as non-root user (UID 1000)
+- Container runs as non-root user (UID 10001)
 - Most Linux capabilities dropped; only `NET_RAW` and `NET_BIND_SERVICE` allowed
 - No new privileges allowed
-- Root filesystem is read-only
 - `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
 - Process and file limits enforced
-- Network isolated via nginx proxy (Ollama accessible at localhost:11435, forwards to host:11434)
+- Network isolated via nginx proxy (host port `11435` forwards to `ollama-proxy:11434`, which proxies to host `11434`)
 - Provider credentials are stored in the `godex-config` volume
 - Use `docker compose down -v` to completely remove all data
 
