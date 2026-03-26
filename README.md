@@ -267,7 +267,7 @@ After sourcing, pressing Tab will show:
 - Up/Down arrows - Command history
 - Tab - Autocomplete `/` commands
 
-GoDex includes CVC (Chat Version Control) for saving and restoring conversation state. See `CVC.md`.
+GoDex includes CVC (Chat Version Control) for saving and restoring conversation state. See [CVC.md](CVC.md).
 
 ### Example Session
 
