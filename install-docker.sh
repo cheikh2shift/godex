@@ -25,7 +25,7 @@ curl -fsSL "${GITHUB_REPO}/nginx.conf" -o nginx.conf
 
 echo ""
 echo "Building Docker image (this may take a few minutes)..."
-docker build -t "${IMAGE_NAME}" .
+(cd "$INSTALL_DIR" && docker build -t "${IMAGE_NAME}" .)
 
 echo ""
 echo "Setup complete!"
