@@ -3,7 +3,7 @@
 set -e
 
 GITHUB_REPO="https://raw.githubusercontent.com/cheikh2shift/godex/main"
-IMAGE_NAME="odex-sandbox:latest"
+IMAGE_NAME="godex-sandbox:latest"
 
 echo "GoDex Docker Sandbox Installer"
 echo "=============================="
