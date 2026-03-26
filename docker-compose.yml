@@ -27,7 +27,7 @@ services:
       # Optional: set to auto-select provider after wizard creates config
       # - CODEX_PROVIDER_NAME=my-local-identifier
     volumes:
-      - .:/workspace
+      - ${WORKSPACE_DIR:-.}:/workspace
       - godex-config:/godex-home/.godex
     working_dir: /workspace
     stdin_open: true

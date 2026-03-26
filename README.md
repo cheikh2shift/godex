@@ -299,7 +299,7 @@ curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/docker-comp
 mkdir -p workspace
 
 # Run
-docker compose up -d
+WORKSPACE_DIR="$PWD" docker compose up -d
 docker attach godex
 ```
 
@@ -307,7 +307,7 @@ docker attach godex
 
 1. **First run** - The container will launch the wizard to configure your provider:
    ```bash
-   docker compose up
+   WORKSPACE_DIR="$PWD" docker compose up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
    If the screen looks empty after attaching, press enter key to trigger TUI redraw.
@@ -329,8 +329,10 @@ sudo systemctl restart ollama
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
    ```bash
-   docker compose up
+   WORKSPACE_DIR="$PWD" docker compose up
    ```
+
+**Note:** `WORKSPACE_DIR` controls which host directory is mounted at `/workspace` in the container. Set it to the directory you want GoDex to operate in (defaults to the compose file directory if unset).
 
 3. **Edit provider config in the Docker volume**:
    The volume is explicitly named `godex-config` so it’s shared across projects.
