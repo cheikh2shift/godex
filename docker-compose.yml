@@ -5,8 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "11435:11434"
-    entrypoint: ["/bin/sh", "-c"]
-    command: "nginx -g 'daemon off;' >/dev/null 2>&1"
+    command: ["nginx", "-g", "daemon off;"]
+    environment:
+      - NGINX_ENTRYPOINT_QUIET_LOGS=1
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
@@ -15,8 +16,6 @@ services:
       - godex
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    logging:
-      driver: "none"
 
   godex:
     build:

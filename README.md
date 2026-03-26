@@ -132,6 +132,8 @@ providers:
 default_provider: ollama
 ```
 
+Docker note: from inside the GoDex container, use `http://ollama-proxy:11434` to reach the nginx proxy, or `http://host.docker.internal:11434` to reach a host Ollama instance.
+
 ### Configuration Options
 
 | Field | Description |

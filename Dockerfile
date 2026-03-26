@@ -46,10 +46,27 @@ RUN git clone https://github.com/cheikh2shift/godex.git /tmp/godex && \
 
 RUN chmod +x /usr/local/bin/godex
 
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  '' \
+  'CONFIG_PATH="${CODEX_CONFIG_PATH:-/godex-home/.godex/providers.yaml}"' \
+  'PROVIDER_NAME="${CODEX_PROVIDER_NAME:-}"' \
+  '' \
+  'if [ -f "$CONFIG_PATH" ]; then' \
+  '  if [ -n "$PROVIDER_NAME" ]; then' \
+  '    exec godex --config "$CONFIG_PATH" --provider "$PROVIDER_NAME"' \
+  '  fi' \
+  '  exec godex --config "$CONFIG_PATH"' \
+  'fi' \
+  '' \
+  'exec godex --wizard' \
+  > /usr/local/bin/godex-entrypoint.sh && chmod +x /usr/local/bin/godex-entrypoint.sh
+
 ENV HOME=/godex-home
 
 WORKDIR /workspace
 
 USER godex
 
-CMD ["godex", "--wizard"]
+ENTRYPOINT ["/usr/local/bin/godex-entrypoint.sh"]
