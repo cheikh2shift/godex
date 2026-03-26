@@ -327,20 +327,18 @@ sudo systemctl restart ollama
 
 ```
 
-2. **Subsequent runs** - Your config is persisted in a Docker volume:
+2. **Subsequent runs** - Your config is persisted in `$HOME/.godex`:
    ```bash
    WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up
    ```
 
 **Note:** `WORKSPACE_DIR` controls which host directory is mounted at `/workspace` in the container. Set it to the directory you want GoDex to operate in (defaults to the compose file directory if unset).
 
-3. **Edit provider config in the Docker volume**:
-   The volume is explicitly named `godex-config` so it’s shared across projects.
+3. **Edit provider config in `$HOME/.godex`**:
    ```bash
-   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'ls -la /godex-home/.godex'
-   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'nano /godex-home/.godex/providers.yaml'
-   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'vi /godex-home/.godex/providers.yaml'
-   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'vim /godex-home/.godex/providers.yaml'
+   nano $HOME/.godex/providers.yaml
+   vi $HOME/.godex/providers.yaml
+   vim $HOME/.godex/providers.yaml
    ```
 
 3. **Access your workspace** - The `./workspace` directory in your project is mounted at `/workspace` inside the container. Create or edit files there before running godex.
@@ -370,7 +368,7 @@ The sandbox includes:
 - `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
 - No explicit process/file limits (inherits host defaults)
 - Network isolated via nginx proxy (host port `11435` forwards to `ollama-proxy:11434`, which proxies to host `11434`)
-- Provider credentials are stored in the `godex-config` volume
+- Provider credentials are stored in `$HOME/.godex`
 - Use `docker compose -f $HOME/godex/docker-compose.yml down -v` to completely remove all data
 
 ## Troubleshooting
