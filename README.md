@@ -368,7 +368,7 @@ The sandbox includes:
 - Most Linux capabilities dropped; only `NET_RAW` and `NET_BIND_SERVICE` allowed
 - No new privileges allowed
 - `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
-- Process and file limits enforced
+- No explicit process/file limits (inherits host defaults)
 - Network isolated via nginx proxy (host port `11435` forwards to `ollama-proxy:11434`, which proxies to host `11434`)
 - Provider credentials are stored in the `godex-config` volume
 - Use `docker compose -f $HOME/godex/docker-compose.yml down -v` to completely remove all data
