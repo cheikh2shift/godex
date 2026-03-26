@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -53,7 +55,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var (
 	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -245,6 +247,8 @@ func main() {
 	// Track session for summary
 	var sessionEntries []sessionEntry
 	var history []string
+	var commitContextPath string
+	var commitContextRef string
 
 	// Load history from database (newest first, reverse for navigation)
 	if historyDB != nil {
@@ -315,6 +319,92 @@ promptLoop:
 			printHelp()
 			continue
 		}
+		if strings.HasPrefix(input, "/commit") {
+			switch {
+			case strings.HasPrefix(input, "/commit-pull"):
+				if historyDB == nil {
+					fmt.Println("[Commit] History database not available")
+					continue
+				}
+				ref := strings.TrimSpace(strings.TrimPrefix(input, "/commit-pull"))
+				if ref == "" {
+					fmt.Println("[Commit] Usage: /commit-pull <commit-ref>")
+					printCommitList(historyDB, wd, "")
+					continue
+				}
+				commit, matches, err := resolveCommitRef(historyDB, wd, ref)
+				if err != nil {
+					fmt.Printf("[Commit] %v\n", err)
+					continue
+				}
+				if commit == nil {
+					if len(matches) > 1 {
+						fmt.Printf("[Commit] Multiple matches for ref: %s\n", ref)
+						printCommitListFrom(matches)
+						continue
+					}
+					fmt.Printf("[Commit] No commit found for ref: %s\n", ref)
+					continue
+				}
+				path, err := commitFilePath(historyDB, wd, commit.Ref)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to resolve commit file path: %v\n", err)
+					continue
+				}
+				entries, err := loadCommitEntries(path)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to load commit file: %v\n", err)
+					continue
+				}
+				sessionEntries = entries
+				commitContextPath = path
+				commitContextRef = commit.Ref
+				fmt.Printf("[Commit] Restored %s (%s)\n", commit.Ref, formatCommitDate(commit.CreatedAt))
+				continue
+			case strings.HasPrefix(input, "/commit-search"):
+				if historyDB == nil {
+					fmt.Println("[Commit] History database not available")
+					continue
+				}
+				query := strings.TrimSpace(strings.TrimPrefix(input, "/commit-search"))
+				printCommitList(historyDB, wd, query)
+				continue
+			case strings.HasPrefix(input, "/commit "):
+				if historyDB == nil {
+					fmt.Println("[Commit] History database not available")
+					continue
+				}
+				message := strings.TrimSpace(strings.TrimPrefix(input, "/commit"))
+				if message == "" {
+					fmt.Println("[Commit] Usage: /commit <message>")
+					continue
+				}
+				if len(sessionEntries) == 0 {
+					fmt.Println("[Commit] No chat history to commit")
+					continue
+				}
+				ref, data, err := buildCommitRef(sessionEntries)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to build commit: %v\n", err)
+					continue
+				}
+				path, err := commitFilePath(historyDB, wd, ref)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to resolve commit file path: %v\n", err)
+					continue
+				}
+				if err := writeCommitFile(path, data); err != nil {
+					fmt.Printf("[Commit] Failed to write commit file: %v\n", err)
+					continue
+				}
+				if err := historyDB.AddCommit(wd, ref, message, time.Now()); err != nil {
+					fmt.Printf("[Commit] Failed to store commit: %v\n", err)
+					continue
+				}
+				fmt.Printf("[Commit] Saved %s\n", ref)
+				continue
+			}
+		}
 		if strings.HasPrefix(input, "/add-path") {
 			handleAddPath(servers, input, ctx)
 			continue
@@ -352,6 +442,9 @@ promptLoop:
 		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
 		if prevSession != "" {
 			sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
+		}
+		if commitContextPath != "" {
+			sessionContext += fmt.Sprintf("\n\nCommitted history restored (%s): %s\nYou can read this file if you need restored context.\n", commitContextRef, commitContextPath)
 		}
 		if agentsContext != "" {
 			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
@@ -1103,6 +1196,9 @@ Commands:
                                     url <url>      - Remove from web scraper
   /paths            - Show current allowed paths
   /tools            - Show available MCP tools
+  /commit <message> - Commit current chat history
+  /commit-pull <ref> - Restore committed chat history
+  /commit-search <query> - Search commits by ref or message
   /clear-context    - Reset context counter and LLM client
   /save, /save-exit - Save session and exit
   /kill <pid>       - Kill a background process by PID
@@ -2251,6 +2347,137 @@ func saveSessionSync(cwd string, entries []sessionEntry, provider *config.Provid
 	}
 }
 
+type commitEntry struct {
+	Prompt   string `json:"prompt"`
+	Response string `json:"response"`
+}
+
+type commitFile struct {
+	Entries []commitEntry `json:"entries"`
+}
+
+func buildCommitRef(entries []sessionEntry) (string, []byte, error) {
+	commitEntries := make([]commitEntry, 0, len(entries))
+	for _, e := range entries {
+		commitEntries = append(commitEntries, commitEntry{
+			Prompt:   e.Prompt,
+			Response: e.Response,
+		})
+	}
+	payload, err := json.Marshal(commitFile{Entries: commitEntries})
+	if err != nil {
+		return "", nil, err
+	}
+	hash := sha256.Sum256(payload)
+	return hex.EncodeToString(hash[:]), payload, nil
+}
+
+func writeCommitFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func loadCommitEntries(path string) ([]sessionEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cf commitFile
+	if err := json.Unmarshal(data, &cf); err != nil {
+		return nil, err
+	}
+	entries := make([]sessionEntry, 0, len(cf.Entries))
+	for _, e := range cf.Entries {
+		entries = append(entries, sessionEntry{
+			Prompt:   e.Prompt,
+			Response: e.Response,
+		})
+	}
+	return entries, nil
+}
+
+func formatCommitDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
+}
+
+func printCommitList(db *history.HistoryDB, wd, query string) {
+	commits, err := db.SearchCommits(wd, query, 5)
+	if err != nil {
+		fmt.Printf("[Commit] Failed to search commits: %v\n", err)
+		return
+	}
+	printCommitListFrom(commits)
+}
+
+func printCommitListFrom(commits []history.Commit) {
+	if len(commits) == 0 {
+		fmt.Println("[Commit] No commits found")
+		return
+	}
+	for _, c := range commits {
+		msg := truncateRunes(c.Message, 129)
+		date := formatCommitDate(c.CreatedAt)
+		fmt.Printf("[Commit] %s  %s  %s\n", c.Ref, date, msg)
+	}
+}
+
+func resolveCommitRef(db *history.HistoryDB, wd, ref string) (*history.Commit, []history.Commit, error) {
+	if db == nil {
+		return nil, nil, errors.New("history database not available")
+	}
+	commit, err := db.GetCommitByRef(wd, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	if commit != nil {
+		return commit, nil, nil
+	}
+	matches, err := db.FindCommitsByRefPrefix(wd, ref, 5)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(matches) == 1 {
+		return &matches[0], nil, nil
+	}
+	if len(matches) > 1 {
+		return nil, matches, nil
+	}
+	return nil, nil, nil
+}
+
+func commitFilePath(db *history.HistoryDB, wd, ref string) (string, error) {
+	if db == nil {
+		return "", errors.New("history database not available")
+	}
+	dir, err := db.CommitDir(wd)
+	if err != nil {
+		return "", err
+	}
+	if dir == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, ref), nil
+}
+
 func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string) {
 	leftContent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("  GoDex  ") + "\n"
 
@@ -2263,6 +2490,9 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		"  /add-path <path> - Add path",
 		"  /remove-path <path> - Remove",
 		"  /tools - Show available tools",
+		"  /commit <message> - Commit chat history",
+		"  /commit-pull <ref> - Restore committed history",
+		"  /commit-search <query> - Search commits",
 		"  /clear-context - Reset context",
 		"  /help - Show all commands",
 		"",
