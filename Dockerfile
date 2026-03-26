@@ -26,8 +26,10 @@ RUN apk add --no-cache \
     gcc \
     g++ \
     musl-dev \
-    go \
-    rustup
+    go
+
+RUN pip3 install --no-cache-dir pip --upgrade && \
+    pip3 install --no-cache-dir black flake8 pytest
 
 ENV HOME=/root
 ENV PATH=$HOME/go/bin:$PATH
@@ -38,3 +40,4 @@ RUN chmod +x /usr/local/bin/godex
 WORKDIR /workspace
 
 ENTRYPOINT ["godex"]
+CMD ["--wizard"]
