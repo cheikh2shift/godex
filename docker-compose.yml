@@ -17,7 +17,6 @@ services:
   godex:
     build:
       context: .
-      platform: linux/amd64
     image: godex-sandbox
     container_name: godex
     environment:
