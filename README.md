@@ -309,10 +309,20 @@ docker compose up
    docker compose up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
+   If the screen looks empty after attaching, press any letter key to trigger TUI redraw.
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
    ```bash
    docker compose up
+   ```
+
+3. **Edit provider config in the Docker volume**:
+   The volume is explicitly named `godex-config` so it’s shared across projects.
+   ```bash
+   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'ls -la /godex-home/.godex'
+   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'nano /godex-home/.godex/providers.yaml'
+   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'vi /godex-home/.godex/providers.yaml'
+   docker run --rm -it --entrypoint sh -v godex-config:/godex-home/.godex godex-sandbox:latest -lc 'vim /godex-home/.godex/providers.yaml'
    ```
 
 3. **Access your workspace** - The `./workspace` directory in your project is mounted at `/workspace` inside the container. Create or edit files there before running godex.
