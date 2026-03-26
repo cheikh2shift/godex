@@ -46,11 +46,15 @@ func New(dbPath string) (*HistoryDB, error) {
 }
 
 func getDefaultDBPath() string {
-	tmpDir := os.TempDir()
 	if runtime.GOOS == "windows" {
 		return filepath.Join(os.Getenv("LOCALAPPDATA"), "godex", "history.db")
 	}
-	return filepath.Join(tmpDir, "godex-history.db")
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		tmpDir := os.TempDir()
+		return filepath.Join(tmpDir, "godex-history.db")
+	}
+	return filepath.Join(homeDir, ".godex", "history.db")
 }
 
 func NewDefault() (*HistoryDB, error) {
