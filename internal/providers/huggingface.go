@@ -26,6 +26,8 @@ type huggingfaceProvider struct {
 	cancelMu    sync.Mutex
 	cancelFunc  context.CancelFunc
 	cancelGen   uint64
+	messages    []Message
+	mu          sync.Mutex
 }
 
 func init() {
@@ -60,6 +62,10 @@ func newHuggingFaceProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (h *huggingfaceProvider) Send(ctx context.Context, prompt string) (string, error) {
+	h.mu.Lock()
+	history := append([]Message(nil), h.messages...)
+	h.mu.Unlock()
+
 	h.cancelMu.Lock()
 	ctx, cancel := context.WithCancel(ctx)
 	h.cancelGen++
@@ -77,9 +83,13 @@ func (h *huggingfaceProvider) Send(ctx context.Context, prompt string) (string, 
 	endpoint := buildHFEndpoint(h.baseURL)
 	reqBody := map[string]any{
 		"model": h.model,
-		"messages": []map[string]string{
+	}
+	if len(history) > 0 {
+		reqBody["messages"] = buildHFMessages(history, prompt)
+	} else {
+		reqBody["messages"] = []map[string]string{
 			{"role": "user", "content": prompt},
-		},
+		}
 	}
 	if h.temperature != nil {
 		reqBody["temperature"] = *h.temperature
@@ -218,9 +228,46 @@ func (h *huggingfaceProvider) TokenUsage() (input int, output int) {
 }
 
 func (h *huggingfaceProvider) Reset() error {
+	h.mu.Lock()
+	h.messages = nil
+	h.mu.Unlock()
+	return nil
+}
+
+func (h *huggingfaceProvider) SetMessages(messages []Message) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append([]Message(nil), messages...)
+	return nil
+}
+
+func (h *huggingfaceProvider) AppendMessages(messages []Message) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messages = append(h.messages, messages...)
 	return nil
 }
 
 func (h *huggingfaceProvider) SupportsNativeToolCalls() bool {
 	return false
+}
+
+func buildHFMessages(messages []Message, prompt string) []map[string]string {
+	payload := make([]map[string]string, 0, len(messages)+1)
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := strings.TrimSpace(msg.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		payload = append(payload, map[string]string{
+			"role":    role,
+			"content": content,
+		})
+	}
+	payload = append(payload, map[string]string{
+		"role":    "user",
+		"content": prompt,
+	})
+	return payload
 }

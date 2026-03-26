@@ -15,6 +15,11 @@ type Tool struct {
 	InputSchema map[string]interface{}
 }
 
+type Message struct {
+	Role    string
+	Content string
+}
+
 // Provider defines a pluggable LLM provider implementation.
 type Provider interface {
 	Send(ctx context.Context, prompt string) (string, error)
@@ -26,6 +31,8 @@ type Provider interface {
 	ContextLimit() int
 	TokenUsage() (input int, output int)
 	Reset() error
+	SetMessages(messages []Message) error
+	AppendMessages(messages []Message) error
 	SupportsNativeToolCalls() bool
 }
 

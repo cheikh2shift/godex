@@ -432,6 +432,43 @@ func (o *ollamaProvider) Reset() error {
 	return nil
 }
 
+func (o *ollamaProvider) SetMessages(messages []Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.messages = make([]map[string]string, 0, len(messages))
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		o.messages = append(o.messages, map[string]string{
+			"role":    role,
+			"content": content,
+		})
+	}
+	return nil
+}
+
+func (o *ollamaProvider) AppendMessages(messages []Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		o.messages = append(o.messages, map[string]string{
+			"role":    role,
+			"content": content,
+		})
+	}
+	return nil
+}
+
 func (o *ollamaProvider) SupportsNativeToolCalls() bool {
 	return false
 }

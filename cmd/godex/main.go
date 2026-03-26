@@ -55,7 +55,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
 
 var (
 	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -247,8 +247,6 @@ func main() {
 	// Track session for summary
 	var sessionEntries []sessionEntry
 	var history []string
-	var commitContextPath string
-	var commitContextRef string
 
 	// Load history from database (newest first, reverse for navigation)
 	if historyDB != nil {
@@ -356,10 +354,46 @@ promptLoop:
 					fmt.Printf("[Commit] Failed to load commit file: %v\n", err)
 					continue
 				}
-				sessionEntries = entries
-				commitContextPath = path
-				commitContextRef = commit.Ref
+				applyCommitRestore(llmProvider, entries)
 				fmt.Printf("[Commit] Restored %s (%s)\n", commit.Ref, formatCommitDate(commit.CreatedAt))
+				continue
+			case strings.HasPrefix(input, "/commit-merge"):
+				if historyDB == nil {
+					fmt.Println("[Commit] History database not available")
+					continue
+				}
+				ref := strings.TrimSpace(strings.TrimPrefix(input, "/commit-merge"))
+				if ref == "" {
+					fmt.Println("[Commit] Usage: /commit-merge <commit-ref>")
+					printCommitList(historyDB, wd, "")
+					continue
+				}
+				commit, matches, err := resolveCommitRef(historyDB, wd, ref)
+				if err != nil {
+					fmt.Printf("[Commit] %v\n", err)
+					continue
+				}
+				if commit == nil {
+					if len(matches) > 1 {
+						fmt.Printf("[Commit] Multiple matches for ref: %s\n", ref)
+						printCommitListFrom(matches)
+						continue
+					}
+					fmt.Printf("[Commit] No commit found for ref: %s\n", ref)
+					continue
+				}
+				path, err := commitFilePath(historyDB, wd, commit.Ref)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to resolve commit file path: %v\n", err)
+					continue
+				}
+				entries, err := loadCommitEntries(path)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to load commit file: %v\n", err)
+					continue
+				}
+				appendCommitMessages(llmProvider, entries)
+				fmt.Printf("[Commit] Merged %s (%s)\n", commit.Ref, formatCommitDate(commit.CreatedAt))
 				continue
 			case strings.HasPrefix(input, "/commit-search"):
 				if historyDB == nil {
@@ -367,7 +401,40 @@ promptLoop:
 					continue
 				}
 				query := strings.TrimSpace(strings.TrimPrefix(input, "/commit-search"))
-				printCommitList(historyDB, wd, query)
+				commits, err := historyDB.SearchCommits(wd, query, 5)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to search commits: %v\n", err)
+					continue
+				}
+				if len(commits) == 0 {
+					fmt.Println("[Commit] No commits found")
+					continue
+				}
+				rows := make([]commitRow, 0, len(commits))
+				for _, c := range commits {
+					msg := truncateRunes(c.Message, 129)
+					date := formatCommitDate(c.CreatedAt)
+					primary := fmt.Sprintf("%s  %s", date, msg)
+					rows = append(rows, commitRow{primary: primary, secondary: c.Ref})
+				}
+				selected := commitSelectPrompt(rows)
+				if selected < 0 || selected >= len(commits) {
+					fmt.Println("[Commit] Cancelled")
+					continue
+				}
+				commit := commits[selected]
+				path, err := commitFilePath(historyDB, wd, commit.Ref)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to resolve commit file path: %v\n", err)
+					continue
+				}
+				entries, err := loadCommitEntries(path)
+				if err != nil {
+					fmt.Printf("[Commit] Failed to load commit file: %v\n", err)
+					continue
+				}
+				applyCommitRestore(llmProvider, entries)
+				fmt.Printf("[Commit] Restored %s (%s)\n", commit.Ref, formatCommitDate(commit.CreatedAt))
 				continue
 			case strings.HasPrefix(input, "/commit "):
 				if historyDB == nil {
@@ -442,9 +509,6 @@ promptLoop:
 		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
 		if prevSession != "" {
 			sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
-		}
-		if commitContextPath != "" {
-			sessionContext += fmt.Sprintf("\n\nCommitted history restored (%s): %s\nYou can read this file if you need restored context.\n", commitContextRef, commitContextPath)
 		}
 		if agentsContext != "" {
 			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
@@ -1198,6 +1262,7 @@ Commands:
   /tools            - Show available MCP tools
   /commit <message> - Commit current chat history
   /commit-pull <ref> - Restore committed chat history
+  /commit-merge <ref> - Merge committed history into current state
   /commit-search <query> - Search commits by ref or message
   /clear-context    - Reset context counter and LLM client
   /save, /save-exit - Save session and exit
@@ -2440,6 +2505,59 @@ func printCommitListFrom(commits []history.Commit) {
 	}
 }
 
+func applyCommitRestore(provider providers.Provider, entries []sessionEntry) {
+	if provider == nil {
+		fmt.Println("[Commit] Warning: provider not available for restore")
+		return
+	}
+	if err := provider.Reset(); err != nil {
+		fmt.Println("[Commit] Warning: failed to reset provider context")
+	}
+	messages := make([]providers.Message, 0, len(entries)*2)
+	for _, e := range entries {
+		if strings.TrimSpace(e.Prompt) != "" {
+			messages = append(messages, providers.Message{
+				Role:    "user",
+				Content: e.Prompt,
+			})
+		}
+		if strings.TrimSpace(e.Response) != "" {
+			messages = append(messages, providers.Message{
+				Role:    "assistant",
+				Content: e.Response,
+			})
+		}
+	}
+	if err := provider.SetMessages(messages); err != nil {
+		fmt.Println("[Commit] Warning: failed to set provider messages")
+	}
+}
+
+func appendCommitMessages(provider providers.Provider, entries []sessionEntry) {
+	if provider == nil {
+		fmt.Println("[Commit] Warning: provider not available for merge")
+		return
+	}
+	messages := make([]providers.Message, 0, len(entries)*2)
+	for _, e := range entries {
+		if strings.TrimSpace(e.Prompt) != "" {
+			messages = append(messages, providers.Message{
+				Role:    "user",
+				Content: e.Prompt,
+			})
+		}
+		if strings.TrimSpace(e.Response) != "" {
+			messages = append(messages, providers.Message{
+				Role:    "assistant",
+				Content: e.Response,
+			})
+		}
+	}
+	if err := provider.AppendMessages(messages); err != nil {
+		fmt.Println("[Commit] Warning: failed to append provider messages")
+	}
+}
+
 func resolveCommitRef(db *history.HistoryDB, wd, ref string) (*history.Commit, []history.Commit, error) {
 	if db == nil {
 		return nil, nil, errors.New("history database not available")
@@ -2478,6 +2596,7 @@ func commitFilePath(db *history.HistoryDB, wd, ref string) (string, error) {
 	return filepath.Join(dir, ref), nil
 }
 
+
 func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string) {
 	leftContent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("  GoDex  ") + "\n"
 
@@ -2492,6 +2611,7 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		"  /tools - Show available tools",
 		"  /commit <message> - Commit chat history",
 		"  /commit-pull <ref> - Restore committed history",
+		"  /commit-merge <ref> - Merge committed history",
 		"  /commit-search <query> - Search commits",
 		"  /clear-context - Reset context",
 		"  /help - Show all commands",
@@ -2512,8 +2632,17 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("252")).
-		Padding(1, 2).
-		Width(40)
+		Padding(1, 2)
+
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		target := int(float64(w) * 0.8)
+		if target < 40 {
+			target = 40
+		}
+		panel = panel.Width(target)
+	} else {
+		panel = panel.Width(40)
+	}
 
 	fmt.Println(panel.Render(leftContent))
 

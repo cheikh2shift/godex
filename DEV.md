@@ -165,14 +165,62 @@ func (p *myProvider) Cancel() {
 		p.cancelFunc()
 	}
 }
+
+func (p *myProvider) SetMessages(messages []Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.messages = []map[string]string{}
+	for _, msg := range messages {
+		if msg.Role == "" || msg.Content == "" {
+			continue
+		}
+		p.messages = append(p.messages, map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
+	return nil
+}
+
+func (p *myProvider) AppendMessages(messages []Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, msg := range messages {
+		if msg.Role == "" || msg.Content == "" {
+			continue
+		}
+		p.messages = append(p.messages, map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
+	return nil
+}
 ```
 
 ### 2. Implement Required Interface
 
 ```go
 type Provider interface {
-	Name() string
 	Send(ctx context.Context, prompt string) (string, error)
+	SetThinkCallback(func(string))
+	Cancel()
+	Tools() []Tool
+	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
+	Close() error
+	ContextLimit() int
+	TokenUsage() (input int, output int)
+	Reset() error
+	SetMessages(messages []Message) error
+	AppendMessages(messages []Message) error
+	SupportsNativeToolCalls() bool
+}
+```
+
+```go
+type Message struct {
+	Role    string
+	Content string
 }
 ```
 

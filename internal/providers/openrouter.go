@@ -374,6 +374,54 @@ func (p *openRouterProvider) Reset() error {
 	return nil
 }
 
+func (p *openRouterProvider) SetMessages(messages []Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.messages = make([]map[string]interface{}, 0, len(messages))
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		p.messages = append(p.messages, map[string]interface{}{
+			"role":    role,
+			"content": content,
+		})
+	}
+	maxHistory := getMaxHistoryMessages()
+	if len(p.messages) > maxHistory {
+		p.messages = p.messages[len(p.messages)-maxHistory:]
+	}
+	p.pendingToolCalls = make(map[string]string)
+	p.promptTokens = 0
+	p.completionTokens = 0
+	return nil
+}
+
+func (p *openRouterProvider) AppendMessages(messages []Message) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		p.messages = append(p.messages, map[string]interface{}{
+			"role":    role,
+			"content": content,
+		})
+	}
+	maxHistory := getMaxHistoryMessages()
+	if len(p.messages) > maxHistory {
+		p.messages = p.messages[len(p.messages)-maxHistory:]
+	}
+	return nil
+}
+
 func (p *openRouterProvider) SupportsNativeToolCalls() bool {
 	return true
 }

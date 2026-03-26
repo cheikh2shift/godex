@@ -39,6 +39,7 @@ var commandTips = map[string]string{
 	"/help":          "Show help for commands",
 	"/commit":        "Commit chat history: /commit <message>",
 	"/commit-pull":   "Restore committed history: /commit-pull <commit-ref>",
+	"/commit-merge":  "Merge committed history: /commit-merge <commit-ref>",
 	"/commit-search": "Search commits by ref/message: /commit-search <query>",
 }
 
@@ -730,5 +731,94 @@ func selectOptionPrompt(title string, options []selectOption) int {
 		return -1
 	}
 	result := finalModel.(selectModel)
+	return result.result
+}
+
+type commitRow struct {
+	primary string
+	secondary string
+}
+
+type commitSelectModel struct {
+	rows   []commitRow
+	cursor int
+	done   bool
+	result int
+}
+
+func newCommitSelectModel(rows []commitRow) commitSelectModel {
+	return commitSelectModel{
+		rows:   rows,
+		cursor: 0,
+		done:   false,
+		result: -1,
+	}
+}
+
+func (m commitSelectModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m commitSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.KeyDown:
+			if m.cursor < len(m.rows)-1 {
+				m.cursor++
+			}
+		case tea.KeyEnter:
+			m.result = m.cursor
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.result = -1
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m commitSelectModel) View() string {
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(m.rows) > 0 {
+		searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+		subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		for i, row := range m.rows {
+			prefix := "  "
+			if i == m.cursor {
+				prefix = " > "
+				b.WriteString(selectedStyle.Render(prefix + row.primary))
+			} else {
+				b.WriteString(searchStyle.Render(prefix + row.primary))
+			}
+			b.WriteByte('\n')
+			if row.secondary != "" {
+				b.WriteString(subStyle.Render("    " + row.secondary))
+				b.WriteByte('\n')
+			}
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  ↑↓ navigate  ↵ restore  esc cancel"))
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  No matches found"))
+	}
+	return b.String()
+}
+
+func commitSelectPrompt(rows []commitRow) int {
+	m := newCommitSelectModel(rows)
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return -1
+	}
+	result := finalModel.(commitSelectModel)
 	return result.result
 }
