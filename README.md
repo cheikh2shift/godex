@@ -122,7 +122,7 @@ sudo mv godex /usr/local/bin/
 
 Run the wizard to generate the config:
 ```bash
-go run ./cmd/godex --wizard
+godex --wizard
 ```
 
 ### Manual Configuration
