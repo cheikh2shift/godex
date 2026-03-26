@@ -299,7 +299,7 @@ curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/docker-comp
 mkdir -p workspace
 
 # Run
-WORKSPACE_DIR="$PWD" docker compose up -d
+WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up -d
 docker attach godex
 ```
 
@@ -307,7 +307,7 @@ docker attach godex
 
 1. **First run** - The container will launch the wizard to configure your provider:
    ```bash
-   WORKSPACE_DIR="$PWD" docker compose up
+   WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up
    ```
    Configure your Ollama/OpenRouter/etc. settings when prompted.
    If the screen looks empty after attaching, press Enter to trigger TUI redraw.
@@ -329,7 +329,7 @@ sudo systemctl restart ollama
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
    ```bash
-   WORKSPACE_DIR="$PWD" docker compose up
+   WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up
    ```
 
 **Note:** `WORKSPACE_DIR` controls which host directory is mounted at `/workspace` in the container. Set it to the directory you want GoDex to operate in (defaults to the compose file directory if unset).
@@ -348,15 +348,15 @@ sudo systemctl restart ollama
 4. **Custom provider config** - If you have an existing `~/.godex/providers.yaml`, copy it to the workspace:
    ```bash
    cp ~/.godex/providers.yaml ./workspace/providers.yaml
-   docker compose run --rm godex godex --config /workspace/providers.yaml
+   docker compose -f $HOME/godex/docker-compose.yml run --rm godex godex --config /workspace/providers.yaml
    ```
 
-### Included Tools
+### Included Tools in Docker
 
 The sandbox includes:
 - Python 3, pip, pytest, black, flake8
 - Node.js, npm
-- Go, Rust (rustc, cargo)
+- Go, Rust
 - Git, curl, wget
 - Build tools: make, cmake, gcc, g++
 - Utilities: htop, tree, jq, ripgrep, fd, fzf, vim, nano
@@ -371,7 +371,7 @@ The sandbox includes:
 - Process and file limits enforced
 - Network isolated via nginx proxy (host port `11435` forwards to `ollama-proxy:11434`, which proxies to host `11434`)
 - Provider credentials are stored in the `godex-config` volume
-- Use `docker compose down -v` to completely remove all data
+- Use `docker compose -f $HOME/godex/docker-compose.yml down -v` to completely remove all data
 
 ## Troubleshooting
 
