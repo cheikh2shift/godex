@@ -325,9 +325,6 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
 
-sudo iptables -A INPUT -p tcp --dport 11434 -s 127.0.0.1 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 11434 -s 172.17.0.0/16 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 11434 -j DROP
 ```
 
 2. **Subsequent runs** - Your config is persisted in a Docker volume:
