@@ -52,5 +52,4 @@ WORKDIR /workspace
 
 USER godex
 
-ENTRYPOINT ["godex"]
-CMD ["--wizard"]
+CMD ["godex", "--wizard"]
