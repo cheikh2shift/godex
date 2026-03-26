@@ -296,20 +296,6 @@ Running GoDex in Docker provides:
 - **Consistent environment** - Same tools available regardless of host system
 - **Safety** - Test configurations without risking your host system
 
-### Manual Setup
-
-```bash
-# Download files
-curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/Dockerfile -o Dockerfile
-curl -fsSL https://raw.githubusercontent.com/cheikh2shift/godex/main/docker-compose.yml -o docker-compose.yml
-
-# Create workspace directory
-mkdir -p workspace
-
-# Run
-WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up -d
-docker attach godex
-```
 
 ### Usage
 
@@ -323,7 +309,7 @@ docker attach godex
 
 #### Ollama Host Firewall (Optional)
 
-If you want Ollama bound to `0.0.0.0` but still blocked from external traffic, use:
+If you want Ollama bound to `0.0.0.0` use:
 ```bash
 sudo mkdir -p /etc/systemd/system/ollama.service.d
 sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<'EOF'
@@ -337,7 +323,7 @@ sudo systemctl restart ollama
 
 2. **Subsequent runs** - Your config is persisted in `$HOME/.godex`:
    ```bash
-   WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up
+   WORKSPACE_DIR="$PWD" docker compose -f $HOME/godex/docker-compose.yml up -d && docket attach godex
    ```
 
 **Note:** `WORKSPACE_DIR` controls which host directory is mounted at `/workspace` in the container. Set it to the directory you want GoDex to operate in (defaults to the compose file directory if unset).
@@ -347,14 +333,6 @@ sudo systemctl restart ollama
    nano $HOME/.godex/providers.yaml
    vi $HOME/.godex/providers.yaml
    vim $HOME/.godex/providers.yaml
-   ```
-
-3. **Access your workspace** - The `./workspace` directory in your project is mounted at `/workspace` inside the container. Create or edit files there before running godex.
-
-4. **Custom provider config** - If you have an existing `~/.godex/providers.yaml`, copy it to the workspace:
-   ```bash
-   cp ~/.godex/providers.yaml ./workspace/providers.yaml
-   docker compose -f $HOME/godex/docker-compose.yml run --rm godex godex --config /workspace/providers.yaml
    ```
 
 ### Included Tools in Docker
