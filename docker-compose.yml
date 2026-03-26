@@ -1,12 +1,10 @@
-version: "3.8"
-
 services:
   ollama-proxy:
     image: nginx:alpine
     container_name: ollama-proxy
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "11435:11434"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     networks:
@@ -52,3 +50,6 @@ services:
 networks:
   godex-network:
     driver: bridge
+
+volumes:
+  godex-config:
