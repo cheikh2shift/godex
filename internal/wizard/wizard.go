@@ -116,6 +116,7 @@ func RunWizard(destination string) error {
 		provider.Params = map[string]string{}
 	}
 	provider.Params["backend"] = backend
+	skipApiKeyPrompt := false
 
 	if provider.Type == "huggingface" {
 		provider.Endpoint = prompt(reader, "Hugging Face base URL", getDefault("endpoint", "https://router.huggingface.co/v1"))
@@ -127,6 +128,9 @@ func RunWizard(destination string) error {
 			provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "OPENROUTER_API_KEY"))
 		} else if storeApiKey == "file" {
 			provider.APIKey = prompt(reader, "API key (kept in YAML, not recommended)", "")
+		} else if storeApiKey == "skip" {
+			// Use OPENROUTER_API_KEY at runtime without storing anything in config.
+			skipApiKeyPrompt = true
 		}
 	} else if backend == "ollama" || provider.Type == "ollama" {
 		provider.Endpoint = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
@@ -137,7 +141,7 @@ func RunWizard(destination string) error {
 		provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "GEMINI_API_KEY"))
 	}
 
-	if provider.APIKeyEnv == "" {
+	if provider.APIKeyEnv == "" && !skipApiKeyPrompt {
 		provider.APIKey = prompt(reader, "API key (kept in YAML, not recommended)", "")
 	}
 
