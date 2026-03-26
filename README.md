@@ -364,7 +364,7 @@ The sandbox includes:
 ### Security Notes
 
 - GoDex can only access files within the `./workspace` directory (read-write)
-- Container runs as non-root user (UID 10001)
+- Container runs as non-root user (set via `USER_ID`/`GROUP_ID`, defaults to `1000:1000`)
 - Most Linux capabilities dropped; only `NET_RAW` and `NET_BIND_SERVICE` allowed
 - No new privileges allowed
 - `/tmp` and `/run` use tmpfs (memory-only, non-persistent)
