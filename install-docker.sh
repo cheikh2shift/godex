@@ -23,6 +23,9 @@ curl -fsSL "${GITHUB_REPO}/docker-compose.yml" -o docker-compose.yml
 echo "Downloading nginx.conf..."
 curl -fsSL "${GITHUB_REPO}/nginx.conf" -o nginx.conf
 
+echo "Downloading Dockerfile..."
+curl -fsSL "${GITHUB_REPO}/Dockerfile" -o Dockerfile
+
 echo ""
 echo "Building Docker image (this may take a few minutes)..."
 docker build -t "${IMAGE_NAME}" -f "${INSTALL_DIR}/Dockerfile" .
