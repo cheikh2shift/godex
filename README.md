@@ -71,6 +71,12 @@ sudo mv godex /usr/local/bin/
 curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
 ```
 
+### Quick Install (Docker)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install-docker.sh | bash
+```
+
 ### Manual Download
 
 Download from [GitHub Releases](https://github.com/cheikh2shift/godex/releases):
@@ -275,10 +281,6 @@ go build -o godex ./cmd/godex
 GoDex can be run in an isolated Docker container with a pre-configured sandbox environment containing common tools (Python, Node.js, Go, Rust, etc.).
 
 ### Quick Install
-
-```bash
-curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install-docker.sh | bash
-```
 
 ### Why Use Docker?
 
