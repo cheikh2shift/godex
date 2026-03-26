@@ -27,6 +27,7 @@ type geminiProvider struct {
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
+	messages         []Message
 }
 
 func init() {
@@ -108,6 +109,10 @@ func (g *geminiProvider) fetchModelInfo() error {
 }
 
 func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error) {
+	g.mu.Lock()
+	history := append([]Message(nil), g.messages...)
+	g.mu.Unlock()
+
 	var config *genai.GenerateContentConfig
 	if g.temperature != nil {
 		config = &genai.GenerateContentConfig{
@@ -130,7 +135,11 @@ func (g *geminiProvider) Send(ctx context.Context, prompt string) (string, error
 		g.cancelMu.Unlock()
 	}()
 
-	resp, err := g.client.Models.GenerateContent(ctx, g.model, genai.Text(prompt), config)
+	finalPrompt := prompt
+	if len(history) > 0 {
+		finalPrompt = buildMessageTranscript(history, prompt)
+	}
+	resp, err := g.client.Models.GenerateContent(ctx, g.model, genai.Text(finalPrompt), config)
 	if err != nil {
 		return "", err
 	}
@@ -214,11 +223,68 @@ func (g *geminiProvider) Reset() error {
 	g.client = client
 	g.promptTokens = 0
 	g.completionTokens = 0
+	g.messages = nil
+	return nil
+}
+
+func (g *geminiProvider) SetMessages(messages []Message) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.messages = append([]Message(nil), messages...)
+	return nil
+}
+
+func (g *geminiProvider) AppendMessages(messages []Message) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	seen := make(map[string]struct{}, len(g.messages))
+	for _, msg := range g.messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		seen[role+"\x00"+content] = struct{}{}
+	}
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		key := role + "\x00" + content
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		g.messages = append(g.messages, msg)
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 
 func (g *geminiProvider) SupportsNativeToolCalls() bool {
 	return false
+}
+
+func buildMessageTranscript(messages []Message, prompt string) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := strings.TrimSpace(msg.Content)
+		if role == "" || content == "" {
+			continue
+		}
+		if role == "assistant" {
+			b.WriteString("Assistant: ")
+		} else {
+			b.WriteString("User: ")
+		}
+		b.WriteString(content)
+		b.WriteByte('\n')
+	}
+	b.WriteString("User: ")
+	b.WriteString(prompt)
+	return b.String()
 }
 
 func extractText(resp *genai.GenerateContentResponse) string {

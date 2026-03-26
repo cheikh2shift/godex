@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -36,6 +37,10 @@ var commandTips = map[string]string{
 	"/bg":            "List background processes",
 	"/clear":         "Clear the screen",
 	"/help":          "Show help for commands",
+	"/commit":        "Commit chat history: /commit <message>",
+	"/commit-pull":   "Restore committed history: /commit-pull <commit-ref>",
+	"/commit-merge":  "Merge committed history: /commit-merge <commit-ref>",
+	"/commit-search": "Search commits by ref/message: /commit-search <query>",
 }
 
 type promptModel struct {
@@ -429,6 +434,11 @@ func (m *promptModel) historyDown() {
 
 func (m *promptModel) handleTab() {
 	value := m.input.Value()
+	if strings.HasPrefix(value, "/commit-pull") {
+		if m.handleCommitPullTab(value) {
+			return
+		}
+	}
 	if value != "" && !strings.HasPrefix(value, "/") {
 		return
 	}
@@ -448,6 +458,17 @@ func (m *promptModel) handleTab() {
 		m.showCompletions = false
 		return
 	}
+	common := commonPrefix(m.completions)
+	if common != "" && common != value {
+		m.input.SetValue(common)
+		m.input.SetCursor(len([]rune(common)))
+		if len(m.completions) == 1 {
+			m.resetCompletion()
+			return
+		}
+		m.showCompletions = true
+		return
+	}
 	if len(m.completions) == 1 && value != "" && value != m.completions[0] {
 		m.input.SetValue(m.completions[0])
 		m.input.SetCursor(len([]rune(m.completions[0])))
@@ -455,6 +476,88 @@ func (m *promptModel) handleTab() {
 		return
 	}
 	m.showCompletions = true
+}
+
+func (m *promptModel) handleCommitPullTab(value string) bool {
+	if m.historyDB == nil {
+		return false
+	}
+	prefix := strings.TrimSpace(strings.TrimPrefix(value, "/commit-pull"))
+	if strings.Contains(value, " ") || value == "/commit-pull" {
+		commits, err := m.historyDB.FindCommitsByRefPrefix(m.wd, prefix, 5)
+		if err != nil || len(commits) == 0 {
+			return false
+		}
+		if len(commits) == 1 && prefix != "" {
+			m.input.SetValue("/commit-pull " + commits[0].Ref)
+			m.input.SetCursor(len([]rune(m.input.Value())))
+			m.resetCompletion()
+			return true
+		}
+		options := make([]selectOption, 0, len(commits))
+		for _, c := range commits {
+			label := fmt.Sprintf("%s  %s", c.Ref, promptFormatCommitDate(c.CreatedAt))
+			desc := promptTruncateRunes(c.Message, 129)
+			options = append(options, selectOption{label: label, desc: desc})
+		}
+		selected := selectOptionPrompt("Select commit", options)
+		if selected >= 0 && selected < len(commits) {
+			m.input.SetValue("/commit-pull " + commits[selected].Ref)
+			m.input.SetCursor(len([]rune(m.input.Value())))
+			m.resetCompletion()
+		}
+		return true
+	}
+	return false
+}
+
+func promptTruncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
+}
+
+func promptFormatCommitDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+func commonPrefix(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	prefix := values[0]
+	for _, v := range values[1:] {
+		prefix = commonPrefixPair(prefix, v)
+		if prefix == "" {
+			return ""
+		}
+	}
+	return prefix
+}
+
+func commonPrefixPair(a, b string) string {
+	ar := []rune(a)
+	br := []rune(b)
+	n := len(ar)
+	if len(br) < n {
+		n = len(br)
+	}
+	i := 0
+	for i < n && ar[i] == br[i] {
+		i++
+	}
+	return string(ar[:i])
 }
 
 func (m *promptModel) enterSearchMode() {
@@ -628,5 +731,94 @@ func selectOptionPrompt(title string, options []selectOption) int {
 		return -1
 	}
 	result := finalModel.(selectModel)
+	return result.result
+}
+
+type commitRow struct {
+	primary string
+	secondary string
+}
+
+type commitSelectModel struct {
+	rows   []commitRow
+	cursor int
+	done   bool
+	result int
+}
+
+func newCommitSelectModel(rows []commitRow) commitSelectModel {
+	return commitSelectModel{
+		rows:   rows,
+		cursor: 0,
+		done:   false,
+		result: -1,
+	}
+}
+
+func (m commitSelectModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m commitSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.KeyDown:
+			if m.cursor < len(m.rows)-1 {
+				m.cursor++
+			}
+		case tea.KeyEnter:
+			m.result = m.cursor
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			m.result = -1
+			m.done = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m commitSelectModel) View() string {
+	var b strings.Builder
+	b.WriteString("\n")
+	if len(m.rows) > 0 {
+		searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
+		subStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		for i, row := range m.rows {
+			prefix := "  "
+			if i == m.cursor {
+				prefix = " > "
+				b.WriteString(selectedStyle.Render(prefix + row.primary))
+			} else {
+				b.WriteString(searchStyle.Render(prefix + row.primary))
+			}
+			b.WriteByte('\n')
+			if row.secondary != "" {
+				b.WriteString(subStyle.Render("    " + row.secondary))
+				b.WriteByte('\n')
+			}
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  ↑↓ navigate  ↵ restore  esc cancel"))
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  No matches found"))
+	}
+	return b.String()
+}
+
+func commitSelectPrompt(rows []commitRow) int {
+	m := newCommitSelectModel(rows)
+	p := tea.NewProgram(m)
+	finalModel, err := p.Run()
+	if err != nil {
+		return -1
+	}
+	result := finalModel.(commitSelectModel)
 	return result.result
 }

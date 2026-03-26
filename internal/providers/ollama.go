@@ -432,6 +432,58 @@ func (o *ollamaProvider) Reset() error {
 	return nil
 }
 
+func (o *ollamaProvider) SetMessages(messages []Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	o.messages = make([]map[string]string, 0, len(messages))
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		o.messages = append(o.messages, map[string]string{
+			"role":    role,
+			"content": content,
+		})
+	}
+	return nil
+}
+
+func (o *ollamaProvider) AppendMessages(messages []Message) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	seen := make(map[string]struct{}, len(o.messages))
+	for _, msg := range o.messages {
+		role := msg["role"]
+		content := msg["content"]
+		if role == "" || content == "" {
+			continue
+		}
+		seen[role+"\x00"+content] = struct{}{}
+	}
+
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		content := msg.Content
+		if role == "" || content == "" {
+			continue
+		}
+		key := role + "\x00" + content
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		o.messages = append(o.messages, map[string]string{
+			"role":    role,
+			"content": content,
+		})
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
 func (o *ollamaProvider) SupportsNativeToolCalls() bool {
 	return false
 }

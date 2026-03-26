@@ -259,9 +259,15 @@ After sourcing, pressing Tab will show:
 - `/paths` - Show allowed MCP paths
 - `/add-path <filesys|url> <path>` - Add allowed path
 - `/tools` - Show available MCP tools
+- `/commit <message>` - Save current chat history (CVC)
+- `/commit-search <query>` - Search commits (CVC)
+- `/commit-pull <ref>` - Restore a commit (CVC)
+- `/commit-merge <ref>` - Merge a commit into current state (CVC)
 - `/exit` or `/quit` - Exit
 - Up/Down arrows - Command history
 - Tab - Autocomplete `/` commands
+
+GoDex includes CVC (Chat Version Control) for saving and restoring conversation state. See `CVC.md`.
 
 ### Example Session
 

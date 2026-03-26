@@ -1,7 +1,9 @@
 package history
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,7 +14,8 @@ import (
 )
 
 type HistoryDB struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 type Entry struct {
@@ -20,6 +23,14 @@ type Entry struct {
 	WD        string
 	Command   string
 	Timestamp time.Time
+}
+
+type Commit struct {
+	ID        int64
+	WD        string
+	Ref       string
+	Message   string
+	CreatedAt time.Time
 }
 
 func New(dbPath string) (*HistoryDB, error) {
@@ -37,7 +48,7 @@ func New(dbPath string) (*HistoryDB, error) {
 		return nil, err
 	}
 
-	h := &HistoryDB{db: db}
+	h := &HistoryDB{db: db, path: dbPath}
 	if err := h.initSchema(); err != nil {
 		return nil, err
 	}
@@ -71,6 +82,15 @@ func (h *HistoryDB) initSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_history_wd ON history(wd);
 	CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp);
+	CREATE TABLE IF NOT EXISTS commits (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		wd TEXT NOT NULL,
+		ref TEXT NOT NULL,
+		message TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_commits_wd_ref ON commits(wd, ref);
+	CREATE INDEX IF NOT EXISTS idx_commits_wd_created_at ON commits(wd, created_at);
 	`
 	_, err := h.db.Exec(schema)
 	return err
@@ -193,6 +213,170 @@ func (h *HistoryDB) Clear(wd string) error {
 
 func (h *HistoryDB) Close() error {
 	return h.db.Close()
+}
+
+func (h *HistoryDB) BaseDir() string {
+	if h == nil || h.path == "" {
+		return ""
+	}
+	return filepath.Dir(h.path)
+}
+
+func (h *HistoryDB) CommitDir(wd string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return "", nil
+	}
+	baseDir := filepath.Join(homeDir, ".godex")
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(normalizedWD))
+	return filepath.Join(baseDir, "commits", hex.EncodeToString(sum[:])), nil
+}
+
+func (h *HistoryDB) AddCommit(wd, ref, message string, createdAt time.Time) error {
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return err
+	}
+	ref = strings.TrimSpace(ref)
+	message = strings.TrimSpace(message)
+	if ref == "" || message == "" {
+		return nil
+	}
+	_, err = h.db.Exec(
+		"INSERT OR IGNORE INTO commits (wd, ref, message, created_at) VALUES (?, ?, ?, ?)",
+		normalizedWD, ref, message, createdAt,
+	)
+	return err
+}
+
+func (h *HistoryDB) ListCommits(wd string, limit int) ([]Commit, error) {
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := h.db.Query(
+		"SELECT id, wd, ref, message, created_at FROM commits WHERE wd = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+		normalizedWD, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var commits []Commit
+	for rows.Next() {
+		var c Commit
+		if err := rows.Scan(&c.ID, &c.WD, &c.Ref, &c.Message, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		commits = append(commits, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return commits, nil
+}
+
+func (h *HistoryDB) SearchCommits(wd, query string, limit int) ([]Commit, error) {
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return h.ListCommits(normalizedWD, limit)
+	}
+	searchPattern := "%" + query + "%"
+	rows, err := h.db.Query(
+		"SELECT id, wd, ref, message, created_at FROM commits WHERE wd = ? AND (ref LIKE ? OR message LIKE ?) ORDER BY created_at DESC, id DESC LIMIT ?",
+		normalizedWD, searchPattern, searchPattern, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var commits []Commit
+	for rows.Next() {
+		var c Commit
+		if err := rows.Scan(&c.ID, &c.WD, &c.Ref, &c.Message, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		commits = append(commits, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return commits, nil
+}
+
+func (h *HistoryDB) FindCommitsByRefPrefix(wd, prefix string, limit int) ([]Commit, error) {
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return h.ListCommits(normalizedWD, limit)
+	}
+	searchPattern := prefix + "%"
+	rows, err := h.db.Query(
+		"SELECT id, wd, ref, message, created_at FROM commits WHERE wd = ? AND ref LIKE ? ORDER BY created_at DESC, id DESC LIMIT ?",
+		normalizedWD, searchPattern, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var commits []Commit
+	for rows.Next() {
+		var c Commit
+		if err := rows.Scan(&c.ID, &c.WD, &c.Ref, &c.Message, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		commits = append(commits, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return commits, nil
+}
+
+func (h *HistoryDB) GetCommitByRef(wd, ref string) (*Commit, error) {
+	normalizedWD, err := normalizeWD(wd)
+	if err != nil {
+		return nil, err
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, nil
+	}
+	row := h.db.QueryRow(
+		"SELECT id, wd, ref, message, created_at FROM commits WHERE wd = ? AND ref = ? LIMIT 1",
+		normalizedWD, ref,
+	)
+	var c Commit
+	if err := row.Scan(&c.ID, &c.WD, &c.Ref, &c.Message, &c.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
 }
 
 func normalizeWD(wd string) (string, error) {
