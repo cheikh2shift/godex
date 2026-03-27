@@ -91,7 +91,7 @@ Returns information about each instance:
 
 ## Security
 
-- Workers only accept connections with the correct `HIVE_CODE`
+- Workers only accept connections with the correct hive code.
 - Communication happens over localhost WebSocket connections
 - Each instance maintains its own allowed paths and permissions
 
