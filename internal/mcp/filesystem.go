@@ -385,8 +385,11 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 	if startIdx < 0 || startIdx >= len(lines) {
 		return "", fmt.Errorf("start line out of range")
 	}
-	if endIdx < startIdx || endIdx > len(lines) {
-		return "", fmt.Errorf("end line out of range")
+	if endIdx < startIdx {
+		return "", fmt.Errorf("end line must be greater than or equal to start line")
+	}
+	if endIdx > len(lines) {
+		endIdx = len(lines)
 	}
 
 	return strings.Join(lines[startIdx:endIdx], "\n"), nil
@@ -423,8 +426,11 @@ func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string,
 	if startIdx < 0 || startIdx >= len(lines) {
 		return "", fmt.Errorf("start line out of range")
 	}
-	if endIdx < startIdx || endIdx > len(lines) {
-		return "", fmt.Errorf("end line out of range")
+	if endIdx < startIdx {
+		return "", fmt.Errorf("end line must be greater than or equal to start line")
+	}
+	if endIdx > len(lines) {
+		endIdx = len(lines)
 	}
 
 	lines = append(lines[:startIdx], lines[endIdx:]...)
