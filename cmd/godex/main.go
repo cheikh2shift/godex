@@ -1997,6 +1997,11 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 					continue
 				}
 			}
+			// Try to parse the block as a JSON array of tool calls
+			if arrayCalls := extractToolCallsFromJSONArray(content); len(arrayCalls) > 0 {
+				results = append(results, arrayCalls...)
+				continue
+			}
 			// If not a single object, try sanitizing multi-line strings
 			sanitized := sanitizeMultilineJson(content)
 			var sanitizedData map[string]interface{}
@@ -2005,6 +2010,10 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 					results = append(results, processToolData(sanitizedData))
 					continue
 				}
+			}
+			if arrayCalls := extractToolCallsFromJSONArray(sanitized); len(arrayCalls) > 0 {
+				results = append(results, arrayCalls...)
+				continue
 			}
 			// Fall back to extracting individual JSON objects
 			extracted := extractJsonObjects(sanitized)
@@ -2016,6 +2025,9 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 		// If no tools found in code blocks, search the whole text for { ... } blobs
 		if len(results) == 0 {
 			results = append(results, extractJsonObjects(candidate)...)
+		}
+		if len(results) == 0 {
+			results = append(results, extractToolCallsFromJSONArray(candidate)...)
 		}
 
 		// Safety fallback for the specific [TOOL_CALL] format
@@ -2051,6 +2063,40 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 		}
 	}
 
+	return results
+}
+
+func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil
+	}
+	var items []map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+		return nil
+	}
+	var results []map[string]interface{}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, ok := item["name"].(string); ok {
+			results = append(results, processToolData(item))
+			continue
+		}
+		if tool, ok := item["tool"].(string); ok {
+			args := parseToolArgs(item)
+			if len(args) == 0 {
+				if params, ok := item["parameters"].(map[string]interface{}); ok {
+					args = params
+				}
+			}
+			results = append(results, map[string]interface{}{
+				"name":      tool,
+				"arguments": args,
+			})
+		}
+	}
 	return results
 }
 

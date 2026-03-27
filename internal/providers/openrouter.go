@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -48,6 +47,19 @@ type toolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+}
+
+type responseToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+type reasoningDetail struct {
+	Type   string `json:"type"`
+	Text   string `json:"text"`
+	Format string `json:"format"`
+	Index  int    `json:"index"`
 }
 
 type openRouterProvider struct {
@@ -146,7 +158,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	userInput := extractUserInput(prompt)
 
 	p.mu.Lock()
-	// Append user message with just the extracted user input (not full prompt)
+	// Track only the user input in history
 	p.messages = append(p.messages, map[string]interface{}{
 		"role":    "user",
 		"content": userInput,
@@ -160,9 +172,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	copy(messages, p.messages)
 	p.mu.Unlock()
 
+
 	reqBody := map[string]interface{}{
-		"model":    p.model,
-		"messages": messages,
+		"model": p.model,
+		"input": buildResponsesInput(messages),
 	}
 
 	if len(p.tools) > 0 {
@@ -193,7 +206,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			fmt.Printf("\n[OPENROUTER] Retrying request (attempt %d/%d)...\n", attempt, maxRetries)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(body))
 		if err != nil {
 			return "", fmt.Errorf("failed to create request: %w", err)
 		}
@@ -224,8 +237,9 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		var response struct {
 			Choices []struct {
 				Message struct {
-					Content   string     `json:"content"`
-					ToolCalls []toolCall `json:"tool_calls,omitempty"`
+					Content          string `json:"content"`
+					Reasoning        string `json:"reasoning"`
+					ReasoningDetails []reasoningDetail `json:"reasoning_details,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
@@ -235,43 +249,51 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			} `json:"usage"`
 		}
 
-		if err := json.Unmarshal(bodyBytes, &response); err != nil {
-			return "", fmt.Errorf("failed to decode response: %w", err)
-		}
+		content, toolCalls, usage, ok := parseResponsesOutput(bodyBytes)
+		if !ok {
+			if err := json.Unmarshal(bodyBytes, &response); err != nil {
+				return "", fmt.Errorf("failed to decode response: %w", err)
+			}
 
-		if len(response.Choices) == 0 {
-			return "", fmt.Errorf("no choices in response")
-		}
+			if len(response.Choices) == 0 {
+				return "", fmt.Errorf("no choices in response")
+			}
 
-		choice := response.Choices[0]
+			choice := response.Choices[0]
+			content = pickMessageContent(choice.Message.Content, choice.Message.Reasoning, choice.Message.ReasoningDetails)
+		}
 		p.mu.Lock()
-		p.promptTokens = response.Usage.PromptTokens
-		p.completionTokens = response.Usage.CompletionTokens
+		if ok {
+			p.promptTokens = usage.InputTokens
+			p.completionTokens = usage.OutputTokens
+		} else {
+			p.promptTokens = response.Usage.PromptTokens
+			p.completionTokens = response.Usage.CompletionTokens
+		}
 
 		// Track assistant response in history
-		if len(choice.Message.ToolCalls) > 0 {
+		if len(toolCalls) > 0 {
 			assistantContent := ""
-			for _, tc := range choice.Message.ToolCalls {
-				log.Println(tc.Function.Arguments)
-				assistantContent += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Function.Name, tc.Function.Arguments)
-				// Track pending tool call for later result submission
-				p.pendingToolCalls[tc.ID] = tc.Function.Name
+			for _, tc := range toolCalls {
+				assistantContent += fmt.Sprintf("\n[TOOL_CALL: %s | %s]", tc.Name, tc.Arguments)
+				if tc.ID != "" {
+					p.pendingToolCalls[tc.ID] = tc.Name
+				}
 			}
 			p.messages = append(p.messages, map[string]interface{}{
 				"role":       "assistant",
 				"content":    assistantContent,
-				"tool_calls": choice.Message.ToolCalls,
 			})
 			p.mu.Unlock()
-			return assistantContent, nil
+			return renderToolCalls(toolCalls), nil
 		}
 		p.messages = append(p.messages, map[string]interface{}{
 			"role":    "assistant",
-			"content": choice.Message.Content,
+			"content": content,
 		})
 		p.mu.Unlock()
 
-		return choice.Message.Content, nil
+		return content, nil
 	}
 
 	return "", lastErr
@@ -291,6 +313,35 @@ func extractUserInput(prompt string) string {
 	// Fall back to returning the whole prompt if markers not found
 	return prompt
 }
+
+func buildResponsesInput(messages []map[string]interface{}) []map[string]interface{} {
+	input := make([]map[string]interface{}, 0, len(messages))
+	for _, msg := range messages {
+		role, _ := msg["role"].(string)
+		content, _ := msg["content"].(string)
+		role = strings.TrimSpace(role)
+		content = strings.TrimSpace(content)
+		if role == "" || content == "" {
+			continue
+		}
+		contentType := "input_text"
+		if role == "assistant" {
+			contentType = "output_text"
+		}
+		input = append(input, map[string]interface{}{
+			"type": "message",
+			"role": role,
+			"content": []map[string]interface{}{
+				{
+					"type": contentType,
+					"text": content,
+				},
+			},
+		})
+	}
+	return input
+}
+
 
 func (p *openRouterProvider) SetThinkCallback(fn func(string)) {
 	p.OnThink = fn
@@ -315,12 +366,10 @@ func (p *openRouterProvider) SetTools(tools []Tool) {
 	p.tools = make([]map[string]interface{}, len(tools))
 	for i, t := range tools {
 		p.tools[i] = map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        t.Name,
-				"description": t.Description,
-				"parameters":  t.InputSchema,
-			},
+			"type":        "function",
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  t.InputSchema,
 		}
 	}
 }
@@ -439,4 +488,172 @@ func (p *openRouterProvider) AppendMessages(messages []Message) error {
 
 func (p *openRouterProvider) SupportsNativeToolCalls() bool {
 	return true
+}
+
+func pickMessageContent(content, reasoning string, details []reasoningDetail) string {
+	candidates := []string{
+		content,
+		reasoning,
+	}
+	for _, detail := range details {
+		if strings.TrimSpace(detail.Text) != "" {
+			candidates = append(candidates, detail.Text)
+		}
+	}
+	for _, candidate := range candidates {
+		parsed := parseMaybeJSON(candidate)
+		if parsed != "" {
+			return parsed
+		}
+	}
+	return ""
+}
+
+func parseMaybeJSON(input string) string {
+	text := strings.TrimSpace(input)
+	if text == "" {
+		return ""
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &obj); err == nil {
+		if message, ok := obj["message"].(string); ok && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
+		}
+		if summary, ok := obj["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+			return strings.TrimSpace(summary)
+		}
+		if reasoning, ok := obj["reasoning"].(string); ok && strings.TrimSpace(reasoning) != "" {
+			return strings.TrimSpace(reasoning)
+		}
+		if thought, ok := obj["thought"].(string); ok && strings.TrimSpace(thought) != "" {
+			return strings.TrimSpace(thought)
+		}
+		if status, ok := obj["status"].(string); ok && strings.TrimSpace(status) != "" {
+			return strings.TrimSpace(status)
+		}
+		pretty, err := json.MarshalIndent(obj, "", "  ")
+		if err == nil {
+			return strings.TrimSpace(string(pretty))
+		}
+	}
+	return text
+}
+
+type responsesUsage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+}
+
+func parseResponsesOutput(body []byte) (string, []responseToolCall, responsesUsage, bool) {
+	var resp struct {
+		Output []map[string]interface{} `json:"output"`
+		Usage  struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+			TotalTokens  int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", nil, responsesUsage{}, false
+	}
+	if len(resp.Output) == 0 {
+		return "", nil, responsesUsage{}, false
+	}
+	var textParts []string
+	var toolCalls []responseToolCall
+
+	for _, item := range resp.Output {
+		typ, _ := item["type"].(string)
+		switch typ {
+		case "message":
+			if content, ok := item["content"].([]interface{}); ok {
+				for _, c := range content {
+					ci, ok := c.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					ct, _ := ci["type"].(string)
+					if ct == "output_text" || ct == "text" || ct == "input_text" {
+						if txt, ok := ci["text"].(string); ok && strings.TrimSpace(txt) != "" {
+							textParts = append(textParts, strings.TrimSpace(txt))
+						}
+					}
+				}
+			}
+		case "output_text":
+			if txt, ok := item["text"].(string); ok && strings.TrimSpace(txt) != "" {
+				textParts = append(textParts, strings.TrimSpace(txt))
+			}
+		case "function_call":
+			name, _ := item["name"].(string)
+			id, _ := item["id"].(string)
+			argsRaw, _ := item["arguments"]
+			argsStr := ""
+			switch v := argsRaw.(type) {
+			case string:
+				argsStr = v
+			case map[string]interface{}:
+				if b, err := json.Marshal(v); err == nil {
+					argsStr = string(b)
+				}
+			}
+			if strings.TrimSpace(name) != "" {
+				toolCalls = append(toolCalls, responseToolCall{
+					ID:        id,
+					Name:      name,
+					Arguments: argsStr,
+				})
+			}
+		}
+	}
+
+	if len(toolCalls) > 0 {
+		return "", toolCalls, responsesUsage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+			TotalTokens:  resp.Usage.TotalTokens,
+		}, true
+	}
+	if len(textParts) > 0 {
+		joined := strings.TrimSpace(strings.Join(textParts, "\n"))
+		return parseMaybeJSON(joined), nil, responsesUsage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+			TotalTokens:  resp.Usage.TotalTokens,
+		}, true
+	}
+	return "", nil, responsesUsage{
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		TotalTokens:  resp.Usage.TotalTokens,
+	}, true
+}
+
+func renderToolCalls(calls []responseToolCall) string {
+	var b strings.Builder
+	for i, tc := range calls {
+		call := map[string]interface{}{
+			"name": tc.Name,
+		}
+		if strings.TrimSpace(tc.Arguments) != "" {
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
+				call["arguments"] = args
+			} else {
+				call["arguments"] = map[string]interface{}{"_raw": tc.Arguments}
+			}
+		} else {
+			call["arguments"] = map[string]interface{}{}
+		}
+		payload, err := json.Marshal(call)
+		if err != nil {
+			continue
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.Write(payload)
+	}
+	return b.String()
 }
