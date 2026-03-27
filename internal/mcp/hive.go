@@ -30,8 +30,8 @@ func (s *HiveServer) Tools() []Tool {
 		},
 		{
 			Name:        "hive_delegate",
-			Description: "Delegate a task to another hive instance. If target_id is omitted, an instance will be selected automatically.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string"},"target_id":{"type":"string"}},"required":["prompt"]}`),
+			Description: "Delegate a task to another hive instance. If target_id is omitted, selects the instance with the best matching MCP server skills for the task. Specify required_tools to pick an agent with those capabilities.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The task to delegate"},"target_id":{"type":"string","description":"Specific instance ID to delegate to (optional)"},"required_tools":{"type":"array","items":{"type":"string"},"description":"MCP server names required for this task (optional)"}},"required":["prompt"]}`),
 		},
 	}
 }
@@ -53,13 +53,23 @@ func (s *HiveServer) CallTool(ctx context.Context, name string, args map[string]
 		}
 		s.manager.RecordDelegate(prompt)
 		targetID, _ := args["target_id"].(string)
+
+		var requiredTools []string
+		if toolsRaw, ok := args["required_tools"].([]interface{}); ok {
+			for _, t := range toolsRaw {
+				if s, ok := t.(string); ok {
+					requiredTools = append(requiredTools, s)
+				}
+			}
+		}
+
 		instances, err := s.manager.Instances()
 		if err != nil {
 			return "", err
 		}
 		var target hive.Instance
 		if strings.TrimSpace(targetID) == "" {
-			best, ok := pickInstance(instances, s.manager.Instance().ID)
+			best, ok := pickInstance(instances, s.manager.Instance().ID, requiredTools)
 			if !ok {
 				return "", fmt.Errorf("no other hive instances available")
 			}
@@ -121,17 +131,68 @@ func (s *HiveServer) Close() error {
 	return nil
 }
 
-func pickInstance(instances []hive.Instance, selfID string) (hive.Instance, bool) {
-	var best hive.Instance
+func pickInstance(instances []hive.Instance, selfID string, requiredTools []string) (hive.Instance, bool) {
+	hasRequired := len(requiredTools) == 0
+
+	if hasRequired {
+		var best hive.Instance
+		found := false
+		for _, inst := range instances {
+			if inst.ID == selfID {
+				continue
+			}
+			if !found || inst.MaxTokens > best.MaxTokens {
+				best = inst
+				found = true
+			}
+		}
+		return best, found
+	}
+
+	var bestMatch hive.Instance
+	bestMatchCount := -1
 	found := false
+
 	for _, inst := range instances {
 		if inst.ID == selfID {
 			continue
 		}
-		if !found || inst.MaxTokens > best.MaxTokens {
-			best = inst
+		matchCount := countMatchingTools(inst.MCPServers, requiredTools)
+		if matchCount > bestMatchCount {
+			bestMatch = inst
+			bestMatchCount = matchCount
 			found = true
 		}
 	}
-	return best, found
+
+	if found && bestMatchCount > 0 {
+		return bestMatch, true
+	}
+
+	var best hive.Instance
+	bestFound := false
+	for _, inst := range instances {
+		if inst.ID == selfID {
+			continue
+		}
+		if !bestFound || inst.MaxTokens > best.MaxTokens {
+			best = inst
+			bestFound = true
+		}
+	}
+	return best, bestFound
+}
+
+func countMatchingTools(available, required []string) int {
+	count := 0
+	availableSet := make(map[string]bool)
+	for _, s := range available {
+		availableSet[s] = true
+	}
+	for _, s := range required {
+		if availableSet[s] {
+			count++
+		}
+	}
+	return count
 }
