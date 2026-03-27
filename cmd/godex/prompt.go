@@ -68,6 +68,8 @@ type promptModel struct {
 	searchInput     textinput.Model
 	searchIndex     int
 	searchResults   []string
+	statusMessage   string
+	commitList      []string
 }
 
 func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string) promptModel {
@@ -116,6 +118,10 @@ func (m promptModel) Init() tea.Cmd {
 func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if (m.statusMessage != "" || len(m.commitList) > 0) && msg.Type != tea.KeyTab {
+			m.statusMessage = ""
+			m.commitList = nil
+		}
 		if msg.Type == tea.KeyCtrlC {
 			if m.searchMode {
 				m.exitSearchMode()
@@ -323,6 +329,18 @@ func (m promptModel) View() string {
 			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  No matches found"))
 		}
 	}
+	if len(m.commitList) > 0 {
+		b.WriteByte('\n')
+		listStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		for _, line := range m.commitList {
+			b.WriteString(listStyle.Render(line))
+			b.WriteByte('\n')
+		}
+	}
+	if m.statusMessage != "" {
+		b.WriteByte('\n')
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(m.statusMessage))
+	}
 	return b.String()
 }
 
@@ -494,18 +512,16 @@ func (m *promptModel) handleCommitPullTab(value string) bool {
 			m.resetCompletion()
 			return true
 		}
-		options := make([]selectOption, 0, len(commits))
+		m.commitList = nil
 		for _, c := range commits {
-			label := fmt.Sprintf("%s  %s", c.Ref, promptFormatCommitDate(c.CreatedAt))
-			desc := promptTruncateRunes(c.Message, 129)
-			options = append(options, selectOption{label: label, desc: desc})
+			ref := c.Ref
+			if len(ref) > 15 {
+				ref = ref[:15]
+			}
+			line := fmt.Sprintf("%s  %s", ref, promptTruncateRunes(c.Message, 129))
+			m.commitList = append(m.commitList, line)
 		}
-		selected := selectOptionPrompt("Select commit", options)
-		if selected >= 0 && selected < len(commits) {
-			m.input.SetValue("/commit-pull " + commits[selected].Ref)
-			m.input.SetCursor(len([]rune(m.input.Value())))
-			m.resetCompletion()
-		}
+		m.resetCompletion()
 		return true
 	}
 	return false
