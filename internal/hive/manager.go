@@ -191,7 +191,27 @@ func (m *Manager) WaitClosed() {
 }
 
 func (m *Manager) Instances() ([]Instance, error) {
-	return listInstances(m.instancesDir())
+	instances, err := listInstances(m.instancesDir())
+	if err != nil {
+		return nil, err
+	}
+	m.cleanupDeadInstances(instances)
+	return instances, nil
+}
+
+func (m *Manager) cleanupDeadInstances(instances []Instance) {
+	for _, inst := range instances {
+		if inst.ID == m.instance.ID {
+			continue
+		}
+		addr := fmt.Sprintf("127.0.0.1:%d", inst.Port)
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err != nil {
+			_ = os.Remove(filepath.Join(m.instancesDir(), inst.ID+".json"))
+			continue
+		}
+		conn.Close()
+	}
 }
 
 func (m *Manager) Delegate(ctx context.Context, targetID, prompt string) (string, error) {
