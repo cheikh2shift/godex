@@ -23,30 +23,31 @@ const (
 )
 
 type Instance struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	Port      int       `json:"port"`
-	StartedAt time.Time `json:"started_at"`
-	PID       int       `json:"pid"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Model      string    `json:"model"`
+	MaxTokens  int       `json:"max_tokens"`
+	Port       int       `json:"port"`
+	StartedAt  time.Time `json:"started_at"`
+	PID        int       `json:"pid"`
+	MCPServers []string  `json:"mcp_servers"`
 }
 
 type Manager struct {
-	codeHash   string
-	code       string
-	baseDir    string
-	instance   Instance
-	statusCh   chan<- string
-	handler    func(context.Context, string) (string, error)
-	srv        *http.Server
-	listener   net.Listener
-	closeOnce  sync.Once
-	closed     chan struct{}
-	results    chan HiveResult
-	statsMu    sync.Mutex
-	statsCh    chan HiveStats
-	stats      HiveStats
+	codeHash  string
+	code      string
+	baseDir   string
+	instance  Instance
+	statusCh  chan<- string
+	handler   func(context.Context, string) (string, error)
+	srv       *http.Server
+	listener  net.Listener
+	closeOnce sync.Once
+	closed    chan struct{}
+	results   chan HiveResult
+	statsMu   sync.Mutex
+	statsCh   chan HiveStats
+	stats     HiveStats
 }
 
 type HiveResult struct {
@@ -71,7 +72,7 @@ func (m *Manager) Status(msg string) {
 	}
 }
 
-func NewManager(code string, baseDir string, model string, maxTokens int, statusCh chan<- string, handler func(context.Context, string) (string, error)) (*Manager, error) {
+func NewManager(code string, baseDir string, model string, maxTokens int, mcpServers []string, statusCh chan<- string, handler func(context.Context, string) (string, error)) (*Manager, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil, errors.New("hive code is required")
@@ -94,13 +95,14 @@ func NewManager(code string, baseDir string, model string, maxTokens int, status
 	port := ln.Addr().(*net.TCPAddr).Port
 	codeHash := hashString(code)
 	inst := Instance{
-		ID:        id,
-		Name:      randomHumanName(),
-		Model:     model,
-		MaxTokens: maxTokens,
-		Port:      port,
-		StartedAt: time.Now(),
-		PID:       os.Getpid(),
+		ID:         id,
+		Name:       randomHumanName(),
+		Model:      model,
+		MaxTokens:  maxTokens,
+		Port:       port,
+		StartedAt:  time.Now(),
+		PID:        os.Getpid(),
+		MCPServers: mcpServers,
 	}
 
 	m := &Manager{
@@ -192,7 +194,6 @@ func (m *Manager) Instances() ([]Instance, error) {
 	return listInstances(m.instancesDir())
 }
 
-
 func (m *Manager) Delegate(ctx context.Context, targetID, prompt string) (string, error) {
 	inst, err := findInstance(m.instancesDir(), targetID)
 	if err != nil {
@@ -233,7 +234,7 @@ func (m *Manager) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	go m.handleConn(r.Context(), conn)
+	go m.handleConn(context.Background(), conn)
 }
 
 func (m *Manager) handleConn(ctx context.Context, conn net.Conn) {

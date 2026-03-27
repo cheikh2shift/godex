@@ -225,7 +225,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		if err != nil {
 			lastErr = fmt.Errorf("request failed: %w", err)
 			if attempt < maxRetries {
-				fmt.Printf("[OPENROUTER] retryable error: %v\n", lastErr)
+				fmt.Printf("[OPENROUTER00] retryable error: %v\n", lastErr)
 			}
 			continue
 		}

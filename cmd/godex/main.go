@@ -95,13 +95,13 @@ var (
 
 func main() {
 	var (
-		configPath   string
-		providerName string
-		runWizard    bool
-		prompt       string
-		autoConfirm  bool
+		configPath    string
+		providerName  string
+		runWizard     bool
+		prompt        string
+		autoConfirm   bool
 		modelOverride string
-		hiveCode     string
+		hiveCode      string
 	)
 
 	home, err := os.UserHomeDir()
@@ -255,7 +255,7 @@ func main() {
 		if llmProvider != nil {
 			maxTokens = llmProvider.ContextLimit()
 		}
-		hiveMgr, err = hive.NewManager(hiveCode, baseDir, provider.Model, maxTokens, statusCh, func(ctx context.Context, prompt string) (string, error) {
+		hiveMgr, err = hive.NewManager(hiveCode, baseDir, provider.Model, maxTokens, getServerNames(servers), statusCh, func(ctx context.Context, prompt string) (string, error) {
 			native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
 			toolsDesc := ""
 			if !native {
@@ -1381,6 +1381,14 @@ func uniqueStrings(input []string) []string {
 		}
 	}
 	return result
+}
+
+func getServerNames(servers []MCPServer) []string {
+	names := make([]string, 0, len(servers))
+	for _, s := range servers {
+		names = append(names, s.Name())
+	}
+	return names
 }
 
 func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
@@ -2761,7 +2769,6 @@ func commitFilePath(db *history.HistoryDB, wd, ref string) (string, error) {
 	}
 	return filepath.Join(dir, ref), nil
 }
-
 
 func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string, hiveMgr *hive.Manager) {
 	leftContent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("  GoDex  ") + "\n"
