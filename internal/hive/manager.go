@@ -127,6 +127,10 @@ func NewManager(code string, baseDir string, model string, maxTokens int, mcpSer
 		return nil, err
 	}
 
+	if instances, err := m.Instances(); err == nil {
+		m.cleanupDeadInstances(instances)
+	}
+
 	go func() {
 		_ = m.srv.Serve(ln)
 		close(m.closed)

@@ -271,7 +271,7 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, func(toolName string) {
+			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, func(toolName string) {
 				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
 			})
 		})
@@ -388,7 +388,7 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
 					hiveMgr.Status("Hive: idle")
 					continue
 				}
@@ -966,7 +966,7 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
 					hiveMgr.Status("Hive: idle")
 				}
 			default:
@@ -1487,7 +1487,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, nil)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, nil)
 	if err != nil {
 		return err
 	}
@@ -1556,7 +1556,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 User request: %s`, strings.TrimSpace(base), input)
 }
 
-func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose bool, onToolCall func(string)) (string, error) {
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
 	toolsDesc := ""
 	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
@@ -1585,6 +1585,14 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		}
 		if verbose {
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+		}
+		if debug {
+			for _, tc := range toolCalls {
+				name := tc["name"].(string)
+				args := tc["arguments"]
+				argsJSON, _ := json.Marshal(args)
+				fmt.Printf("[DEBUG] Tool call: %s(%s)\n", name, string(argsJSON))
+			}
 		}
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
