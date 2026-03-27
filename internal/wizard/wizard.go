@@ -84,13 +84,13 @@ func RunWizard(destination string) error {
 	}
 
 	provider.Name = prompt(reader, "Provider name", getDefault("name", "my-local-identifier"))
-	provider.Type = prompt(reader, "Provider type (gemini, ollama, huggingface, or openrouter)", getDefault("type", "ollama"))
+	provider.Type = prompt(reader, "Provider type (gemini, ollama, or openrouter)", getDefault("type", "ollama"))
 
 	modelDefault := providers.DefaultGeminiModel
 	if provider.Type == "ollama" {
 		modelDefault = providers.DefaultOllamaModel
-	} else if provider.Type == "huggingface" {
-		modelDefault = "deepseek-ai/DeepSeek-R1:fastest"
+		//} else if provider.Type == "huggingface" {
+		//	modelDefault = "deepseek-ai/DeepSeek-R1:fastest"
 	} else if provider.Type == "openrouter" {
 		modelDefault = "nvidia/nemotron-3-nano-30b-a3b:free"
 	}
@@ -104,8 +104,8 @@ func RunWizard(destination string) error {
 	backend := ""
 	if provider.Type == "gemini" {
 		backend = prompt(reader, "Backend (gemini or vertex)", getDefault("backend", "gemini"))
-	} else if provider.Type == "huggingface" {
-		backend = "huggingface"
+		//} else if provider.Type == "huggingface" {
+		//	backend = "huggingface"
 	} else if provider.Type == "openrouter" {
 		backend = "openrouter"
 	} else {

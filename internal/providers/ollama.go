@@ -39,6 +39,7 @@ type ollamaProvider struct {
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
+	statusCh         chan<- string
 }
 
 func init() {
@@ -393,6 +394,12 @@ func (o *ollamaProvider) Tools() []Tool {
 
 func (o *ollamaProvider) SetThinkCallback(fn func(string)) {
 	o.OnThink = fn
+}
+
+func (o *ollamaProvider) SetStatusChannel(ch chan<- string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.statusCh = ch
 }
 
 func (o *ollamaProvider) Cancel() {

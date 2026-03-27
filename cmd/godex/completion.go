@@ -22,6 +22,7 @@ PROG="{{.ProgName}}"
     echo "--config:provider configuration YAML"
     echo "--provider:provider name to use"
     echo "--model:override provider model"
+    echo "--hive:enable hive mode with a shared secret"
     echo "--wizard:launch provider configuration wizard"
     echo "--prompt:run a single prompt non-interactively"
     echo "--auto-confirm:auto-run suggested commands"
@@ -187,6 +188,7 @@ func printFlagCompletions() {
 		"--config",
 		"--provider",
 		"--model",
+		"--hive",
 		"--wizard",
 		"--prompt",
 		"--auto-confirm",

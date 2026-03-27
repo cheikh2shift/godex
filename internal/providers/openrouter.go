@@ -79,6 +79,7 @@ type openRouterProvider struct {
 	completionTokens int
 	OnThink          func(string)
 	mu               sync.Mutex
+	statusCh         chan<- string
 }
 
 func init() {
@@ -223,6 +224,9 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		resp, err := p.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("request failed: %w", err)
+			if attempt < maxRetries {
+				fmt.Printf("[OPENROUTER00] retryable error: %v\n", lastErr)
+			}
 			continue
 		}
 
@@ -231,6 +235,9 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 
 		if resp.StatusCode == http.StatusTooManyRequests {
 			lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+			if attempt < maxRetries {
+				fmt.Printf("[OPENROUTER] retryable error: %v\n", lastErr)
+			}
 			continue
 		}
 
@@ -241,8 +248,8 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		var response struct {
 			Choices []struct {
 				Message struct {
-					Content          string `json:"content"`
-					Reasoning        string `json:"reasoning"`
+					Content          string            `json:"content"`
+					Reasoning        string            `json:"reasoning"`
 					ReasoningDetails []reasoningDetail `json:"reasoning_details,omitempty"`
 				} `json:"message"`
 				FinishReason string `json:"finish_reason"`
@@ -285,8 +292,8 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 				}
 			}
 			p.messages = append(p.messages, map[string]interface{}{
-				"role":       "assistant",
-				"content":    assistantContent,
+				"role":    "assistant",
+				"content": assistantContent,
 			})
 			p.mu.Unlock()
 			return renderToolCalls(toolCalls), nil
@@ -377,7 +384,6 @@ func prependSystemMessage(messages []map[string]interface{}, content string) []m
 	out = append(out, messages...)
 	return out
 }
-
 
 func (p *openRouterProvider) SetThinkCallback(fn func(string)) {
 	p.OnThink = fn
@@ -524,6 +530,25 @@ func (p *openRouterProvider) AppendMessages(messages []Message) error {
 
 func (p *openRouterProvider) SupportsNativeToolCalls() bool {
 	return true
+}
+
+func (p *openRouterProvider) SetStatusChannel(ch chan<- string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.statusCh = ch
+}
+
+func (p *openRouterProvider) sendStatus(msg string) {
+	p.mu.Lock()
+	ch := p.statusCh
+	p.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- msg:
+	default:
+	}
 }
 
 func pickMessageContent(content, reasoning string, details []reasoningDetail) string {

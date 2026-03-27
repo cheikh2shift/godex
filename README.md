@@ -5,14 +5,14 @@
 
 ![GoDex Screenshot](screen3.gif)
 
-GoDex is an AI agent that interfaces with Ollama, Gemini, Hugging Face, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
+GoDex is an AI agent that interfaces with Ollama, Gemini, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
 
 Orchestration and parallel tasks? open another terminal tab and start a new instance of `godex`.
 
 ## Requirements
 
 - **Go 1.25.7+** - Build from source
-- **Ollama** - For the default LLM backend (or use Gemini, Hugging Face, or OpenRouter)
+- **Ollama** - For the default LLM backend (or use Gemini or OpenRouter)
 
 
 ## Installation
@@ -151,14 +151,14 @@ Docker note: from inside the GoDex container, use `http://ollama-proxy:11434` to
 | Field | Description |
 |-------|-------------|
 | `name` | Provider identifier |
-| `type` | Provider type: `ollama`, `gemini`, `huggingface`, or `openrouter` |
-| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, Hugging Face: `https://router.huggingface.co/v1`, OpenRouter: `https://openrouter.ai/api/v1`) |
-| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.7:cloud`; Hugging Face supports routing suffixes like `:fastest` or `:provider`) |
+| `type` | Provider type: `ollama`, `gemini` or `openrouter` |
+| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, OpenRouter: `https://openrouter.ai/api/v1`) |
+| `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.7:cloud` |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
 | `max_tool_rounds` | Max tool call rounds (default: 10) |
 | `tool_timeout` | Tool execution timeout in seconds (default: 180) |
-| `api_key_env` | Environment variable for API key (Gemini/Hugging Face/OpenRouter) |
+| `api_key_env` | Environment variable for API key (Gemini/OpenRouter) |
 | `api_key` | Direct API key (not recommended) |
 | `mcp_servers` | List of MCP servers to enable |
 | `context_limit` | Context window size in tokens (auto-detected for OpenRouter) |
@@ -174,6 +174,10 @@ GoDex includes built-in MCP servers:
 | `webscraper` | Fetch URLs with JavaScript rendering, search HTML, extract links |
 
 For detailed MCP configuration including external servers, see [MCP.md](MCP.md).
+
+### Hive Network
+
+GoDex supports a Hive network mode where multiple instances can delegate tasks to each other. See [HIVE.md](HIVE.md) for details.
 
 #### Adding Allowed Paths
 
