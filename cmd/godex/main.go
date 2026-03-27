@@ -792,7 +792,7 @@ promptLoop:
 			var toolExecError bool
 
 			if len(toolCalls) > 1 && llmProvider != nil {
-				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls())
+				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), true)
 
 			} else {
 				hasError := false
@@ -1609,7 +1609,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		var toolResults []string
 		var toolExecError bool
 		if len(toolCalls) > 1 && llmProvider != nil {
-			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls())
+			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), verbose)
 		} else {
 			hasError := false
 			for _, tc := range toolCalls {
@@ -1905,7 +1905,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 	return "", fmt.Errorf("tool %s not found", name)
 }
 
-func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool) ([]string, bool) {
+func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool) ([]string, bool) {
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
@@ -1914,19 +1914,21 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 	red := "\033[1;31m"
 	reset := "\033[0m"
 
-	fmt.Printf("\n")
-	fmt.Printf("  %s🚀 Launching %d tools in parallel%s\n", green, len(toolCalls), reset)
+	if verbose {
+		fmt.Printf("\n")
+		fmt.Printf("  %s🚀 Launching %d tools in parallel%s\n", green, len(toolCalls), reset)
 
-	for i, tc := range toolCalls {
-		toolName := tc["name"].(string)
-		args := tc["arguments"].(map[string]interface{})
-		var argsStr []string
-		for k, v := range args {
-			argsStr = append(argsStr, fmt.Sprintf("%s=%v", k, v))
+		for i, tc := range toolCalls {
+			toolName := tc["name"].(string)
+			args := tc["arguments"].(map[string]interface{})
+			var argsStr []string
+			for k, v := range args {
+				argsStr = append(argsStr, fmt.Sprintf("%s=%v", k, v))
+			}
+			fmt.Printf("  %s[%d]%s %s %s\n", green, i+1, reset, toolName, strings.Join(argsStr, ", "))
 		}
-		fmt.Printf("  %s[%d]%s %s %s\n", green, i+1, reset, toolName, strings.Join(argsStr, ", "))
+		fmt.Println()
 	}
-	fmt.Println()
 
 	var wg sync.WaitGroup
 	results := make([]string, len(toolCalls))
@@ -1998,21 +2000,23 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 	elapsed := time.Since(startTime)
 
-	fmt.Printf("  %s✓ Completed in %v%s\n", green, elapsed, reset)
+	if verbose {
+		fmt.Printf("  %s✓ Completed in %v%s\n", green, elapsed, reset)
 
-	for i, tc := range toolCalls {
-		statusIcon := "✓"
-		statusColor := green
-		if strings.HasPrefix(results[i], "ERROR:") {
-			statusColor = red
-			statusIcon = "✗"
+		for i, tc := range toolCalls {
+			statusIcon := "✓"
+			statusColor := green
+			if strings.HasPrefix(results[i], "ERROR:") {
+				statusColor = red
+				statusIcon = "✗"
+			}
+			toolName := tc["name"].(string)
+			fmt.Printf("  %s%s [%d]%s %s\n", statusIcon, statusColor, i+1, reset, toolName)
 		}
-		toolName := tc["name"].(string)
-		fmt.Printf("  %s%s [%d]%s %s\n", statusIcon, statusColor, i+1, reset, toolName)
+		fmt.Println()
 	}
-	fmt.Println()
 
-	if ctx.Err() != nil {
+	if verbose && ctx.Err() != nil {
 		fmt.Printf("  ⚠ %s\n", ctx.Err())
 	}
 
