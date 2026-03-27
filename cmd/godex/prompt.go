@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cheikh-seck/godex/internal/history"
+	"github.com/cheikh-seck/godex/internal/hive"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -70,9 +71,14 @@ type promptModel struct {
 	searchResults   []string
 	statusMessage   string
 	commitList      []string
+	statusCh        <-chan string
+	delegateCh      <-chan hive.HiveStats
+	delegateCount   int
+	delegateLatest  string
+	statusHidden    bool
 }
 
-func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string) promptModel {
+func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats) promptModel {
 	ti := textinput.New()
 	ti.Prompt = prompt
 	ti.Placeholder = "Press ↵ Enter to submit"
@@ -91,11 +97,13 @@ func newPromptModel(prompt string, history []string, modelName string, contextUs
 		contextLimit: contextLimit,
 		historyDB:    historyDB,
 		wd:           wd,
+		statusCh:     statusCh,
+		delegateCh:   delegateCh,
 	}
 }
 
-func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string) (string, error) {
-	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit, historyDB, wd)
+func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats) (string, error) {
+	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit, historyDB, wd, statusCh, delegateCh)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -112,16 +120,19 @@ func readPrompt(prompt string, history []string, modelName string, contextUsage 
 }
 
 func (m promptModel) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, tea.EnableBracketedPaste)
+	cmds := []tea.Cmd{textinput.Blink, tea.EnableBracketedPaste}
+	if m.statusCh != nil {
+		cmds = append(cmds, waitStatusCmd(m.statusCh))
+	}
+	if m.delegateCh != nil {
+		cmds = append(cmds, waitDelegateCmd(m.delegateCh))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if (m.statusMessage != "" || len(m.commitList) > 0) && msg.Type != tea.KeyTab {
-			m.statusMessage = ""
-			m.commitList = nil
-		}
 		if msg.Type == tea.KeyCtrlC {
 			if m.searchMode {
 				m.exitSearchMode()
@@ -129,6 +140,13 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.aborted = true
 			return m, tea.Quit
+		}
+		if m.statusHidden {
+			return m, nil
+		}
+		if (m.statusMessage != "" || len(m.commitList) > 0) && msg.Type != tea.KeyTab {
+			m.statusMessage = ""
+			m.commitList = nil
 		}
 		if msg.Type == tea.KeyCtrlR {
 			if m.searchMode {
@@ -210,6 +228,15 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
+	if msg, ok := msg.(statusMsg); ok {
+		m.applyStatusMessage(msg)
+		return m, waitStatusCmd(m.statusCh)
+	}
+	if msg, ok := msg.(delegateMsg); ok {
+		m.delegateCount = msg.Count
+		m.delegateLatest = msg.Latest
+		return m, waitDelegateCmd(m.delegateCh)
+	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = size.Width
 	}
@@ -236,7 +263,11 @@ func (m promptModel) View() string {
 	if m.width > 0 {
 		boxStyle = boxStyle.Width(max(0, m.width-4))
 	}
-	b.WriteString(boxStyle.Render(m.input.View()))
+	if m.statusHidden {
+		b.WriteString("\n")
+	} else {
+		b.WriteString(boxStyle.Render(m.input.View()))
+	}
 
 	if m.contextLimit > 0 || m.modelName != "" {
 		b.WriteByte('\n')
@@ -285,6 +316,18 @@ func (m promptModel) View() string {
 		if rightContent != "" {
 			if leftContent != "" {
 				b.WriteString(" ")
+			}
+			delegateInfo := ""
+			if m.delegateCount > 0 || strings.TrimSpace(m.delegateLatest) != "" {
+				latest := promptTruncateRunes(m.delegateLatest, 42)
+				if latest != "" {
+					delegateInfo = fmt.Sprintf("Hive:%d %s", m.delegateCount, latest)
+				} else {
+					delegateInfo = fmt.Sprintf("Hive:%d", m.delegateCount)
+				}
+			}
+			if delegateInfo != "" {
+				rightContent = rightContent + " | " + delegateInfo
 			}
 			b.WriteString(grayStyle.Render(rightContent))
 		}
@@ -677,6 +720,28 @@ type selectOption struct {
 	desc  string
 }
 
+type statusMsg string
+
+type delegateMsg struct {
+	Count  int
+	Latest string
+}
+
+func (m *promptModel) applyStatusMessage(msg statusMsg) {
+	text := string(msg)
+	switch {
+	case strings.HasPrefix(text, hive.StatusHidePrefix):
+		m.statusHidden = true
+		m.statusMessage = strings.TrimPrefix(text, hive.StatusHidePrefix)
+	case strings.HasPrefix(text, hive.StatusShowPrefix):
+		m.statusHidden = false
+		m.statusMessage = strings.TrimPrefix(text, hive.StatusShowPrefix)
+	default:
+		m.statusHidden = false
+		m.statusMessage = text
+	}
+}
+
 type selectModel struct {
 	options []selectOption
 	cursor  int
@@ -748,6 +813,32 @@ func selectOptionPrompt(title string, options []selectOption) int {
 	}
 	result := finalModel.(selectModel)
 	return result.result
+}
+
+func waitStatusCmd(ch <-chan string) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return statusMsg(msg)
+	}
+}
+
+func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return delegateMsg{Count: msg.DelegatedCount, Latest: msg.LatestCommand}
+	}
 }
 
 type commitRow struct {

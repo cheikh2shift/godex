@@ -29,6 +29,7 @@ import (
 	"github.com/cheikh-seck/godex/internal/config"
 	godexcontext "github.com/cheikh-seck/godex/internal/context"
 	"github.com/cheikh-seck/godex/internal/history"
+	"github.com/cheikh-seck/godex/internal/hive"
 	"github.com/cheikh-seck/godex/internal/mcp"
 	"github.com/cheikh-seck/godex/internal/providers"
 	"github.com/cheikh-seck/godex/internal/wizard"
@@ -100,6 +101,7 @@ func main() {
 		prompt       string
 		autoConfirm  bool
 		modelOverride string
+		hiveCode     string
 	)
 
 	home, err := os.UserHomeDir()
@@ -113,6 +115,7 @@ func main() {
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
 	flag.StringVar(&modelOverride, "model", "", "override provider model")
+	flag.StringVar(&hiveCode, "hive", "", "enable hive mode with a shared secret")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
 	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
 	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
@@ -193,6 +196,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
+	statusCh := make(chan string, 8)
 
 	var providerTools []providers.Tool
 	for _, server := range servers {
@@ -209,8 +213,9 @@ func main() {
 		}
 	}
 	agent.SetProviderTools(provider, providerTools)
-
-	printStartupBanner(provider, servers, mcpLogs)
+	if setter, ok := llmProvider.(interface{ SetStatusChannel(chan<- string) }); ok {
+		setter.SetStatusChannel(statusCh)
+	}
 
 	fmt.Println()
 
@@ -235,6 +240,64 @@ func main() {
 		fmt.Println(muted.Render("[History] Command history loaded"))
 	}
 
+	var hiveMgr *hive.Manager
+	if strings.TrimSpace(hiveCode) != "" {
+		baseDir := ""
+		if historyDB != nil {
+			baseDir = historyDB.BaseDir()
+		}
+		if baseDir == "" {
+			if homeDir, err := os.UserHomeDir(); err == nil {
+				baseDir = filepath.Join(homeDir, ".godex")
+			}
+		}
+		maxTokens := 0
+		if llmProvider != nil {
+			maxTokens = llmProvider.ContextLimit()
+		}
+		hiveMgr, err = hive.NewManager(hiveCode, baseDir, provider.Model, maxTokens, statusCh, func(ctx context.Context, prompt string) (string, error) {
+			native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+			toolsDesc := ""
+			if !native {
+				toolsDesc = getToolsDescription(servers)
+			}
+			fullPrompt := buildFullPrompt(native, toolsDesc, "", wd, prompt, "")
+			maxRounds := 10
+			if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+				maxRounds = *provider.MaxToolRounds
+			}
+			toolTimeout := 180
+			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+				toolTimeout = *provider.ToolTimeout
+			}
+			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false)
+		})
+		if err != nil {
+			fmt.Printf("[Hive] Failed to start hive manager: %v\n", err)
+		} else {
+			servers = append(servers, mcp.NewHiveServer(hiveMgr))
+			var providerTools []providers.Tool
+			for _, server := range servers {
+				for _, tool := range server.Tools() {
+					var inputSchema map[string]interface{}
+					if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+						inputSchema = map[string]interface{}{}
+					}
+					providerTools = append(providerTools, providers.Tool{
+						Name:        tool.Name,
+						Description: tool.Description,
+						InputSchema: inputSchema,
+					})
+				}
+			}
+			agent.SetProviderTools(provider, providerTools)
+		}
+	}
+
+	printStartupBanner(provider, servers, mcpLogs, hiveMgr)
+
+	fmt.Println()
+
 	// Load previous session summary from ./.godex
 	prevSession := loadPreviousSession(wd)
 	if prevSession != "" {
@@ -247,6 +310,48 @@ func main() {
 	if agentsContext != "" {
 		fmt.Println()
 		fmt.Println(muted.Render("[Agents] Loaded AGENTS.md"))
+	}
+
+	var commitContextPath string
+	var commitContextRef string
+
+	if hiveMgr != nil {
+		go func() {
+			for res := range hiveMgr.Results() {
+				workerLabel := res.FromName
+				if strings.TrimSpace(workerLabel) == "" {
+					workerLabel = res.FromID
+				}
+				if res.Error != "" {
+					hiveMgr.Status(fmt.Sprintf("Hive: result error from %s", workerLabel))
+				} else {
+					hiveMgr.Status(fmt.Sprintf("Hive: received result from %s", workerLabel))
+				}
+
+				payload := res.Result
+				if res.Error != "" {
+					payload = res.Error
+				}
+				userPrompt := fmt.Sprintf("Hive worker %s said:\n%s", workerLabel, payload)
+				sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
+				native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+				toolsDesc := ""
+				if !native {
+					toolsDesc = getToolsDescription(servers)
+				}
+				fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, userPrompt, "")
+				maxRounds := 10
+				if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+					maxRounds = *provider.MaxToolRounds
+				}
+				toolTimeout := 180
+				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+					toolTimeout = *provider.ToolTimeout
+				}
+				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, userPrompt, maxRounds, toolTimeout, llmProvider, false)
+				hiveMgr.Status("Hive: idle")
+			}
+		}()
 	}
 
 	// Track session for summary
@@ -273,7 +378,11 @@ promptLoop:
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
 
-		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd)
+		var delegateCh <-chan hive.HiveStats
+		if hiveMgr != nil {
+			delegateCh = hiveMgr.Stats()
+		}
+		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd, statusCh, delegateCh)
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")
@@ -320,6 +429,14 @@ promptLoop:
 		}
 		if input == "/help" {
 			printHelp()
+			continue
+		}
+		if strings.EqualFold(input, "who's at work") || strings.EqualFold(input, "whos at work") {
+			if hiveMgr == nil {
+				fmt.Println("[Hive] No hive instances (hive disabled)")
+			} else {
+				printHiveInstances(hiveMgr)
+			}
 			continue
 		}
 		if strings.HasPrefix(input, "/commit") {
@@ -510,67 +627,9 @@ promptLoop:
 			toolsSection = fmt.Sprintf("\nYou have access to these tools:\n%s\n", getToolsDescription(servers))
 		}
 
-		sessionContext := ""
-		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
-		if prevSession != "" {
-			sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
-		}
-		if agentsContext != "" {
-			sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
-		}
+		sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
 
-		var fullPrompt string
-		if nativeToolCalls {
-			fullPrompt = fmt.Sprintf(`%s
-
-CRITICAL INFORMATION:
-- Operating System: %s (%s)
-- Current working directory: %s
-Use this path when the user asks about "this folder", "current directory", or similar.
-
-IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-
-User request: %s`, sessionContext, runtime.GOOS, runtime.GOARCH, wd, input)
-		} else {
-			fullPrompt = fmt.Sprintf(`You have access to these tools:
-%s%s
-
-CRITICAL INFORMATION:
-- Operating System: %s (%s)
-- Current working directory: %s
-Use this path when the user asks about "this folder", "current directory", or similar.
-
-IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
-Do NOT use example paths like "/path/to/directory" - use the actual path: %s
-
-BASH TOOL LIMITATIONS:
-- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
-- Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
-- Shell aliases are NOT expanded - use full command names
-- NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
-- ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
-- ALWAYS use background: true when starting a webserver or a long-running background task
-- After starting a background process, use sleep before making requests to it
-- Use kill_command with the PID to stop background processes when done
-
-To call tools, respond with one or more JSON objects, each in its own markdown code block.
-You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
-When planning parallel tool calls, ensure there is no conflict - tools that modify the same resource (file, directory, process, etc.) should NOT be called in parallel; run them sequentially instead.
-
-Example:
-`+"```json"+`
-{
-  "name": "read_file",
-  "arguments": {
-    "path": "/absolute/path/to/file"
-  }
-}
-`+"```"+`
-
-IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-
-User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, wd, wd, input)
-		}
+		fullPrompt := buildFullPrompt(nativeToolCalls, toolsSection, sessionContext, wd, input, "")
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -844,6 +903,9 @@ User request: %s`, toolsSection, sessionContext, runtime.GOOS, runtime.GOARCH, w
 
 	cancel()
 	cleanup(servers)
+	if hiveMgr != nil {
+		hiveMgr.Close()
+	}
 	if historyDB != nil {
 		historyDB.Close()
 	}
@@ -1328,28 +1390,51 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	llmProvider, _ := agent.GetProvider(provider)
 	nativeToolCalls := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
 
-	var fullPrompt string
-	if nativeToolCalls {
-		fullPrompt = fmt.Sprintf(`CRITICAL INFORMATION:
+	toolsDesc := ""
+	if !nativeToolCalls {
+		toolsDesc = getToolsDescription(servers)
+	}
+	fullPrompt := buildFullPrompt(nativeToolCalls, toolsDesc, "", wd, prompt, tree)
+
+	// Get tool settings
+	maxToolRounds := 10
+	if provider.MaxToolRounds != nil {
+		maxToolRounds = *provider.MaxToolRounds
+	}
+	toolTimeout := 180
+	if provider.ToolTimeout != nil {
+		toolTimeout = *provider.ToolTimeout
+	}
+
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(output) != "" {
+		fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
+	}
+
+	return nil
+}
+
+func buildFullPrompt(nativeToolCalls bool, toolsSection, sessionContext, wd, input, tree string) string {
+	base := ""
+	if sessionContext != "" {
+		base = sessionContext + "\n\n"
+	}
+	base += fmt.Sprintf(`CRITICAL INFORMATION:
 - Operating System: %s (%s)
 - Current working directory: %s
 Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+`, runtime.GOOS, runtime.GOARCH, wd)
 
-Project tree:
+	if !nativeToolCalls {
+		base = fmt.Sprintf(`You have access to these tools:
 %s
 
-User request: %s`, runtime.GOOS, runtime.GOARCH, wd, tree, prompt)
-	} else {
-		toolsDesc := getToolsDescription(servers)
-		fullPrompt = fmt.Sprintf(`You have access to these tools:
 %s
-
-CRITICAL INFORMATION:
-- Operating System: %s (%s)
-- Current working directory: %s
-Use this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
@@ -1379,71 +1464,69 @@ Example:
 `+"```"+`
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-
-Project tree:
-%s
-
-User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt)
+`, toolsSection, base, wd)
 	}
 
-	// Get tool settings
-	maxToolRounds := 10
-	if provider.MaxToolRounds != nil {
-		maxToolRounds = *provider.MaxToolRounds
-	}
-	toolTimeout := 180
-	if provider.ToolTimeout != nil {
-		toolTimeout = *provider.ToolTimeout
+	if strings.TrimSpace(tree) != "" {
+		base += fmt.Sprintf("\nProject tree:\n%s\n", tree)
 	}
 
-	input := prompt
+	return fmt.Sprintf(`%s
+User request: %s`, strings.TrimSpace(base), input)
+}
 
-	// Track tool calls across rounds to detect infinite loops
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose bool) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
+	toolsDesc := ""
+	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
+		toolsDesc = getToolsDescription(servers)
+	}
 
 	for round := 0; round < maxToolRounds; round++ {
-		resp, err := agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
-			fmt.Print(think)
-		})
+		var resp string
+		var err error
+		if verbose {
+			resp, err = agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
+				fmt.Print(think)
+			})
+		} else {
+			resp, err = agent.SendPrompt(ctx, provider, fullPrompt)
+		}
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		preResp, finalResp, hasFinal := splitFinalAnswer(resp)
-
-		// Only execute tool calls if response is primarily tool calls (JSON format)
 		toolCalls, isToolCallResponse := shouldExecuteToolCall(preResp)
 		toolCalls, missingTools := filterToolCallsByAvailability(servers, toolCalls)
-		if len(missingTools) > 0 {
+		if verbose && len(missingTools) > 0 {
 			fmt.Printf("\n[Ignored unknown tool(s): %s]\n", strings.Join(missingTools, ", "))
 		}
-
-		fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+		if verbose {
+			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+		}
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
-			// No tool calls - print final response and stop
 			output := resp
 			if hasFinal {
 				output = finalResp
 			}
-			if strings.TrimSpace(output) != "" {
-				fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
-			}
-			break
+			return output, nil
 		}
 
-		// Execute all tool calls
-		fmt.Printf("\n")
-		if round == 0 {
-			fmt.Print("\033[90m")
-			fmt.Printf("> %s\n", input)
-			fmt.Printf("%s\n", resp)
-			fmt.Print("\033[0m")
+		if verbose {
+			fmt.Printf("\n")
+			if round == 0 {
+				fmt.Print("\033[90m")
+				fmt.Printf("> %s\n", input)
+				fmt.Printf("%s\n", resp)
+				fmt.Print("\033[0m")
+			}
+			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 		}
-		fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
+
 		var toolResults []string
 		var toolExecError bool
-
 		if len(toolCalls) > 1 && llmProvider != nil {
 			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls())
 		} else {
@@ -1452,37 +1535,25 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				toolName := tc["name"].(string)
 				args := tc["arguments"].(map[string]interface{})
 
-				toolDesc := getToolDescription(servers, toolName)
-				if toolDesc != "" {
-					fmt.Print("\033[90m")
-					fmt.Printf("  %s\n", toolDesc)
-					fmt.Print("\033[0m")
+				if verbose {
+					toolDesc := getToolDescription(servers, toolName)
+					if toolDesc != "" {
+						fmt.Print("\033[90m")
+						fmt.Printf("  %s\n", toolDesc)
+						fmt.Print("\033[0m")
+					}
 				}
 
 				if raw, ok := args["_raw"]; ok {
-					log.Printf("_raw found, unwrapping: type=%T", raw)
 					if rawStr, ok := raw.(string); ok {
-						log.Printf("_raw is string, length=%d", len(rawStr))
 						var rawMap map[string]interface{}
 						if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
-							log.Printf("_raw unwrapped successfully: %+v", rawMap)
 							args = rawMap
-						} else {
-							log.Printf("_raw json unmarshal failed: %v", err)
 						}
 					}
 				}
 
-				var argsStr string
-				for k, v := range args {
-					if argsStr != "" {
-						argsStr += ", "
-					}
-					argsStr += fmt.Sprintf("%s=%v", k, v)
-				}
-				fmt.Printf("[%s] %s\n", toolName, argsStr)
-
-				if llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
+				if llmProvider != nil && llmProvider.SupportsNativeToolCalls() && toolName == "run_command" {
 					if cmd, ok := args["command"].(string); ok {
 						cmd = fixDriveLetterPath(cmd)
 						args["command"] = cmd
@@ -1492,7 +1563,9 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 				result, err := callTool(ctx, servers, toolName, args, toolTimeout)
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
-					fmt.Printf("  Error: %v\n", err)
+					if verbose {
+						fmt.Printf("  Error: %v\n", err)
+					}
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
@@ -1503,20 +1576,13 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 		}
 
 		if hasFinal {
-			if strings.TrimSpace(finalResp) != "" {
-				fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(finalResp))
-			}
-			break
+			return finalResp, nil
 		}
 
-		// Continue even if there were errors - send results to LLM
-		if toolExecError {
+		if toolExecError && verbose {
 			fmt.Printf("\n[Some tools had errors, asking LLM to handle...]\n")
 		}
 
-		// Ask for final answer with all tool results (including errors)
-		// Include tools description so model knows available tools for follow-up (only if not using native tool calls)
-		// Check for repeated tool calls across rounds to prevent infinite loops
 		currentToolCalls := make(map[string]bool)
 		for _, tc := range toolCalls {
 			name := tc["name"].(string)
@@ -1526,7 +1592,6 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 			currentToolCalls[sig] = true
 		}
 
-		// Check if these tool calls were also called in the previous round
 		hasRepeatedCalls := false
 		for sig := range currentToolCalls {
 			if prevRoundToolCalls[sig] {
@@ -1540,10 +1605,8 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 			duplicateWarning = "\n\nWARNING: You are calling the same tool(s) with the same arguments as the previous round. These tools are not producing new results. Do NOT call them again. Provide your FINAL_ANSWER based on the information you already have."
 		}
 
-		// Update previous round tool calls for next iteration
 		prevRoundToolCalls = currentToolCalls
 
-		// Add urgency based on round number
 		roundUrgency := ""
 		if round >= 10 {
 			roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now based on the tool results you have. Do NOT call any more tools."
@@ -1551,16 +1614,15 @@ User request: %s`, toolsDesc, runtime.GOOS, runtime.GOARCH, wd, wd, tree, prompt
 			roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary to complete the task."
 		}
 
-		if llmProvider.SupportsNativeToolCalls() {
+		if llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
 			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 		} else {
-			toolsDesc := getToolsDescription(servers)
 			toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
 			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
 		}
 	}
 
-	return nil
+	return "Max tool rounds reached", nil
 }
 
 func getToolsDescription(servers []MCPServer) string {
@@ -2425,6 +2487,21 @@ func loadAgentsFile(cwd string) string {
 	return strings.TrimSpace(string(data))
 }
 
+func buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd string) string {
+	sessionContext := ""
+	if strings.TrimSpace(prevSession) != "" {
+		sessionPath := filepath.Join(wd, ".godex", sessionFileName)
+		sessionContext = fmt.Sprintf("\n\nPrevious session available at: %s\nYou can read this file if you need context from previous sessions.\n", sessionPath)
+	}
+	if strings.TrimSpace(commitContextPath) != "" {
+		sessionContext += fmt.Sprintf("\n\nCommitted history restored (%s): %s\nYou can read this file if you need restored context.\n", commitContextRef, commitContextPath)
+	}
+	if strings.TrimSpace(agentsContext) != "" {
+		sessionContext += fmt.Sprintf("\n\nAGENTS.md instructions:\n%s\n", agentsContext)
+	}
+	return sessionContext
+}
+
 func playSound() {
 	var cmd *exec.Cmd
 	// Try different sound playback methods based on OS
@@ -2656,6 +2733,21 @@ func resolveCommitRef(db *history.HistoryDB, wd, ref string) (*history.Commit, [
 	return nil, nil, nil
 }
 
+func printHiveInstances(mgr *hive.Manager) {
+	instances, err := mgr.Instances()
+	if err != nil {
+		fmt.Printf("[Hive] Failed to list instances: %v\n", err)
+		return
+	}
+	if len(instances) == 0 {
+		fmt.Println("[Hive] No instances found")
+		return
+	}
+	for _, inst := range instances {
+		fmt.Printf("[Hive] %s  model=%s  max_tokens=%d  port=%d\n", inst.ID, inst.Model, inst.MaxTokens, inst.Port)
+	}
+}
+
 func commitFilePath(db *history.HistoryDB, wd, ref string) (string, error) {
 	if db == nil {
 		return "", errors.New("history database not available")
@@ -2671,12 +2763,18 @@ func commitFilePath(db *history.HistoryDB, wd, ref string) (string, error) {
 }
 
 
-func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string) {
+func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs string, hiveMgr *hive.Manager) {
 	leftContent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("  GoDex  ") + "\n"
 
 	info := []string{
 		fmt.Sprintf("Provider: %s (%s)", provider.Name, provider.Model),
 		fmt.Sprintf("MCP Servers: %d", len(servers)),
+	}
+	if hiveMgr != nil {
+		inst := hiveMgr.Instance()
+		info = append(info, fmt.Sprintf("Hive: enabled (%s)", inst.Name))
+	}
+	info = append(info,
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Commands:"),
 		"  /commit <message> - Commit chat history",
@@ -2691,7 +2789,7 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		"  Tab - Autocomplete",
 		"  Multiline: paste with newlines",
 		"  Enter on empty line to submit",
-	}
+	)
 
 	for _, line := range info {
 		leftContent += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)

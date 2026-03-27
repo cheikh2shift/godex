@@ -28,6 +28,7 @@ type geminiProvider struct {
 	promptTokens     int
 	completionTokens int
 	messages         []Message
+	statusCh         chan<- string
 }
 
 func init() {
@@ -225,6 +226,12 @@ func (g *geminiProvider) Reset() error {
 	g.completionTokens = 0
 	g.messages = nil
 	return nil
+}
+
+func (g *geminiProvider) SetStatusChannel(ch chan<- string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.statusCh = ch
 }
 
 func (g *geminiProvider) SetMessages(messages []Message) error {

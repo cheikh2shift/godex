@@ -28,6 +28,7 @@ type huggingfaceProvider struct {
 	cancelGen   uint64
 	messages    []Message
 	mu          sync.Mutex
+	statusCh    chan<- string
 }
 
 func init() {
@@ -155,6 +156,12 @@ func (h *huggingfaceProvider) Cancel() {
 
 func (h *huggingfaceProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
 	return "", fmt.Errorf("huggingface provider does not support direct tool calls")
+}
+
+func (h *huggingfaceProvider) SetStatusChannel(ch chan<- string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.statusCh = ch
 }
 
 func buildHFEndpoint(base string) string {
