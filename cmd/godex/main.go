@@ -182,6 +182,9 @@ func main() {
 			log.Fatalf("provider %q not found. Available: %v", providerName, available)
 		}
 	}
+	if strings.TrimSpace(modelOverride) != "" {
+		provider.Model = strings.TrimSpace(modelOverride)
+	}
 	llmProvider, err := agent.GetProvider(provider)
 	if err != nil {
 		log.Fatalf("failed to create provider: %v", err)
@@ -189,9 +192,6 @@ func main() {
 
 	if provider == nil {
 		log.Fatalf("no provider configured; use --wizard to create one")
-	}
-	if strings.TrimSpace(modelOverride) != "" {
-		provider.Model = strings.TrimSpace(modelOverride)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
