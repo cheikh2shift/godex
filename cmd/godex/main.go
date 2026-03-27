@@ -2280,12 +2280,7 @@ func splitFinalAnswer(text string) (string, string, bool) {
 
 func processToolData(data map[string]interface{}) map[string]interface{} {
 	name, _ := data["name"].(string)
-	args := make(map[string]interface{})
-	if a, ok := data["arguments"].(map[string]interface{}); ok {
-		args = a
-	} else if a, ok := data["args"].(map[string]interface{}); ok {
-		args = a
-	}
+	args := parseToolArgs(data)
 
 	// Clean up string arguments
 	for k, v := range args {
@@ -2297,6 +2292,34 @@ func processToolData(data map[string]interface{}) map[string]interface{} {
 		}
 	}
 	return map[string]interface{}{"name": name, "arguments": args}
+}
+
+func parseToolArgs(data map[string]interface{}) map[string]interface{} {
+	if a, ok := data["arguments"].(map[string]interface{}); ok {
+		return a
+	}
+	if a, ok := data["args"].(map[string]interface{}); ok {
+		return a
+	}
+	if a, ok := data["parameters"].(map[string]interface{}); ok {
+		return a
+	}
+	if a, ok := data["params"].(map[string]interface{}); ok {
+		return a
+	}
+	if raw, ok := data["parameters"].(string); ok && strings.TrimSpace(raw) != "" {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+			return parsed
+		}
+	}
+	if raw, ok := data["arguments"].(string); ok && strings.TrimSpace(raw) != "" {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
+			return parsed
+		}
+	}
+	return make(map[string]interface{})
 }
 
 func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
