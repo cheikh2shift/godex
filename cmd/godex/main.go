@@ -99,6 +99,7 @@ func main() {
 		runWizard    bool
 		prompt       string
 		autoConfirm  bool
+		modelOverride string
 	)
 
 	home, err := os.UserHomeDir()
@@ -111,6 +112,7 @@ func main() {
 	flag.BoolVar(&runWizard, "wizard", false, "launch the provider configuration wizard")
 	flag.StringVar(&prompt, "prompt", "", "run a single prompt non-interactively")
 	flag.BoolVar(&autoConfirm, "auto-confirm", false, "auto-run suggested commands in non-interactive mode")
+	flag.StringVar(&modelOverride, "model", "", "override provider model")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
 	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
 	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
@@ -183,6 +185,9 @@ func main() {
 
 	if provider == nil {
 		log.Fatalf("no provider configured; use --wizard to create one")
+	}
+	if strings.TrimSpace(modelOverride) != "" {
+		provider.Model = strings.TrimSpace(modelOverride)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
