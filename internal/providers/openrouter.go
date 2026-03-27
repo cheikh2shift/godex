@@ -172,6 +172,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	copy(messages, p.messages)
 	p.mu.Unlock()
 
+	systemMsg := buildSystemWorkingDirMessage(prompt)
+	if systemMsg != "" {
+		messages = prependSystemMessage(messages, systemMsg)
+	}
 
 	reqBody := map[string]interface{}{
 		"model": p.model,
@@ -340,6 +344,38 @@ func buildResponsesInput(messages []map[string]interface{}) []map[string]interfa
 		})
 	}
 	return input
+}
+
+func buildSystemWorkingDirMessage(prompt string) string {
+	marker := "- Current working directory:"
+	idx := strings.Index(prompt, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := prompt[idx+len(marker):]
+	line := rest
+	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+		line = rest[:nl]
+	}
+	wd := strings.TrimSpace(line)
+	if wd == "" {
+		return ""
+	}
+	return fmt.Sprintf("You are operating in this working directory: %s", wd)
+}
+
+func prependSystemMessage(messages []map[string]interface{}, content string) []map[string]interface{} {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return messages
+	}
+	out := make([]map[string]interface{}, 0, len(messages)+1)
+	out = append(out, map[string]interface{}{
+		"role":    "system",
+		"content": content,
+	})
+	out = append(out, messages...)
+	return out
 }
 
 
