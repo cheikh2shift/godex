@@ -350,57 +350,10 @@ func main() {
 
 promptLoop:
 	for {
-		// Process pending hive results immediately (before waiting for input)
-		if hiveMgr != nil {
-			select {
-			case <-hiveResultReady:
-				hiveResultMu.Lock()
-				res := pendingHiveResult
-				pendingHiveResult = nil
-				hiveResultMu.Unlock()
-				if res != nil {
-					workerLabel := res.FromName
-					if strings.TrimSpace(workerLabel) == "" {
-						workerLabel = res.FromID
-					}
-					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
-					if res.Error != "" {
-						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
-					}
-					fmt.Printf("%s %s\n\n", purpleOrb, muted.Render("Sending output to LLM..."))
-					payload := res.Result
-					if res.Error != "" {
-						payload = res.Error
-					}
-					completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
-					sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
-					native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
-					toolsDesc := ""
-					if !native {
-						toolsDesc = getToolsDescription(servers)
-					}
-					fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
-					maxRounds := 10
-					if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
-						maxRounds = *provider.MaxToolRounds
-					}
-					toolTimeout := 180
-					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
-						toolTimeout = *provider.ToolTimeout
-					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
-					hiveMgr.Status("Hive: idle")
-					continue
-				}
-			default:
-			}
-		}
-
-		// Show prompt with background process count
 		bgCount := getBgCount(servers)
-		prompt := "> "
+		promptStr := "> "
 		if bgCount > 0 {
-			prompt = fmt.Sprintf("[%d bg] >", bgCount)
+			promptStr = fmt.Sprintf("[%d bg] >", bgCount)
 		}
 
 		contextLimit := llmProvider.ContextLimit()
@@ -410,7 +363,67 @@ promptLoop:
 		if hiveMgr != nil {
 			delegateCh = hiveMgr.Stats()
 		}
-		input, err := readPrompt(prompt, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd, statusCh, delegateCh)
+
+		type promptResult struct {
+			input string
+			err   error
+		}
+		promptCancelCh := make(chan struct{}, 1)
+		promptResultCh := make(chan promptResult, 1)
+
+		go func() {
+			input, err := readPrompt(promptStr, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd, statusCh, delegateCh, promptCancelCh)
+			promptResultCh <- promptResult{input: input, err: err}
+		}()
+
+		var input string
+		var err error
+
+		select {
+		case result := <-promptResultCh:
+			input = result.input
+			err = result.err
+		case <-hiveResultReady:
+			hiveResultMu.Lock()
+			res := pendingHiveResult
+			pendingHiveResult = nil
+			hiveResultMu.Unlock()
+			select {
+			case promptCancelCh <- struct{}{}:
+			default:
+			}
+			if res != nil {
+				workerLabel := res.FromName
+				if strings.TrimSpace(workerLabel) == "" {
+					workerLabel = res.FromID
+				}
+				payload := res.Result
+				if res.Error != "" {
+					payload = res.Error
+				}
+				completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
+				sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
+				native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+				toolsDesc := ""
+				if !native {
+					toolsDesc = getToolsDescription(servers)
+				}
+				fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
+				maxRounds := 10
+				if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+					maxRounds = *provider.MaxToolRounds
+				}
+				toolTimeout := 180
+				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+					toolTimeout = *provider.ToolTimeout
+				}
+				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
+				fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
+				hiveMgr.Status("Hive: idle")
+				continue
+			}
+		}
+
 		if err != nil {
 			if err == ErrPromptAborted {
 				fmt.Println("\n[Cancelled] Use /quit to exit or /save to save and exit.")

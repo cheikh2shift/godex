@@ -76,6 +76,7 @@ type promptModel struct {
 	delegateCount   int
 	delegateLatest  string
 	statusHidden    bool
+	Cancelled       chan struct{}
 }
 
 func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats) promptModel {
@@ -99,24 +100,42 @@ func newPromptModel(prompt string, history []string, modelName string, contextUs
 		wd:           wd,
 		statusCh:     statusCh,
 		delegateCh:   delegateCh,
+		Cancelled:    make(chan struct{}),
 	}
 }
 
-func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats) (string, error) {
+func readPrompt(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats, cancelCh <-chan struct{}) (string, error) {
 	m := newPromptModel(prompt, history, modelName, contextUsage, contextLimit, historyDB, wd, statusCh, delegateCh)
 	p := tea.NewProgram(m)
-	finalModel, err := p.Run()
-	if err != nil {
-		return "", err
+
+	type result struct {
+		model tea.Model
+		err   error
 	}
-	result := finalModel.(promptModel)
-	if result.aborted {
+	resultCh := make(chan result, 1)
+
+	go func() {
+		finalModel, err := p.Run()
+		resultCh <- result{model: finalModel, err: err}
+	}()
+
+	select {
+	case r := <-resultCh:
+		if r.err != nil {
+			return "", r.err
+		}
+		result := r.model.(promptModel)
+		if result.aborted {
+			return "", ErrPromptAborted
+		}
+		if !result.submitted {
+			return "", nil
+		}
+		return result.value(), nil
+	case <-cancelCh:
+		p.Kill()
 		return "", ErrPromptAborted
 	}
-	if !result.submitted {
-		return "", nil
-	}
-	return result.value(), nil
 }
 
 func (m promptModel) Init() tea.Cmd {
@@ -842,7 +861,7 @@ func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
 }
 
 type commitRow struct {
-	primary string
+	primary   string
 	secondary string
 }
 
