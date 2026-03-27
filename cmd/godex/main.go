@@ -270,7 +270,9 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false)
+			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, func(toolName string) {
+				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
+			})
 		})
 		if err != nil {
 			fmt.Printf("[Hive] Failed to start hive manager: %v\n", err)
@@ -315,41 +317,20 @@ func main() {
 	var commitContextPath string
 	var commitContextRef string
 
+	var hiveResultMu sync.Mutex
+	var pendingHiveResult *hive.HiveResult
+	hiveResultReady := make(chan struct{}, 1)
+
 	if hiveMgr != nil {
 		go func() {
 			for res := range hiveMgr.Results() {
-				workerLabel := res.FromName
-				if strings.TrimSpace(workerLabel) == "" {
-					workerLabel = res.FromID
+				hiveResultMu.Lock()
+				pendingHiveResult = &res
+				hiveResultMu.Unlock()
+				select {
+				case hiveResultReady <- struct{}{}:
+				default:
 				}
-				if res.Error != "" {
-					hiveMgr.Status(fmt.Sprintf("Hive: result error from %s", workerLabel))
-				} else {
-					hiveMgr.Status(fmt.Sprintf("Hive: received result from %s", workerLabel))
-				}
-
-				payload := res.Result
-				if res.Error != "" {
-					payload = res.Error
-				}
-				userPrompt := fmt.Sprintf("Hive worker %s said:\n%s", workerLabel, payload)
-				sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
-				native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
-				toolsDesc := ""
-				if !native {
-					toolsDesc = getToolsDescription(servers)
-				}
-				fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, userPrompt, "")
-				maxRounds := 10
-				if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
-					maxRounds = *provider.MaxToolRounds
-				}
-				toolTimeout := 180
-				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
-					toolTimeout = *provider.ToolTimeout
-				}
-				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, userPrompt, maxRounds, toolTimeout, llmProvider, false)
-				hiveMgr.Status("Hive: idle")
 			}
 		}()
 	}
@@ -368,6 +349,51 @@ func main() {
 
 promptLoop:
 	for {
+		// Process pending hive results immediately (before waiting for input)
+		if hiveMgr != nil {
+			select {
+			case <-hiveResultReady:
+				hiveResultMu.Lock()
+				res := pendingHiveResult
+				pendingHiveResult = nil
+				hiveResultMu.Unlock()
+				if res != nil {
+					workerLabel := res.FromName
+					if strings.TrimSpace(workerLabel) == "" {
+						workerLabel = res.FromID
+					}
+					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
+					if res.Error != "" {
+						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+					}
+					payload := res.Result
+					if res.Error != "" {
+						payload = res.Error
+					}
+					completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
+					sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
+					native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+					toolsDesc := ""
+					if !native {
+						toolsDesc = getToolsDescription(servers)
+					}
+					fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
+					maxRounds := 10
+					if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+						maxRounds = *provider.MaxToolRounds
+					}
+					toolTimeout := 180
+					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+						toolTimeout = *provider.ToolTimeout
+					}
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, false, nil)
+					hiveMgr.Status("Hive: idle")
+					continue
+				}
+			default:
+			}
+		}
+
 		// Show prompt with background process count
 		bgCount := getBgCount(servers)
 		prompt := "> "
@@ -899,6 +925,50 @@ promptLoop:
 				Response: "Max tool rounds reached",
 			})
 		}
+
+		// Process any pending hive results after the prompt completes
+		if hiveMgr != nil {
+			select {
+			case <-hiveResultReady:
+				hiveResultMu.Lock()
+				res := pendingHiveResult
+				pendingHiveResult = nil
+				hiveResultMu.Unlock()
+				if res != nil {
+					workerLabel := res.FromName
+					if strings.TrimSpace(workerLabel) == "" {
+						workerLabel = res.FromID
+					}
+					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
+					if res.Error != "" {
+						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+					}
+					payload := res.Result
+					if res.Error != "" {
+						payload = res.Error
+					}
+					completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
+					sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
+					native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
+					toolsDesc := ""
+					if !native {
+						toolsDesc = getToolsDescription(servers)
+					}
+					fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
+					maxRounds := 10
+					if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+						maxRounds = *provider.MaxToolRounds
+					}
+					toolTimeout := 180
+					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+						toolTimeout = *provider.ToolTimeout
+					}
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, false, nil)
+					hiveMgr.Status("Hive: idle")
+				}
+			default:
+			}
+		}
 	}
 
 	cancel()
@@ -1414,7 +1484,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, nil)
 	if err != nil {
 		return err
 	}
@@ -1483,7 +1553,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 User request: %s`, strings.TrimSpace(base), input)
 }
 
-func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose bool) (string, error) {
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
 	toolsDesc := ""
 	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
@@ -1542,6 +1612,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 			for _, tc := range toolCalls {
 				toolName := tc["name"].(string)
 				args := tc["arguments"].(map[string]interface{})
+
+				if onToolCall != nil {
+					onToolCall(toolName)
+				}
 
 				if verbose {
 					toolDesc := getToolDescription(servers, toolName)
