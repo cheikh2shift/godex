@@ -61,6 +61,7 @@ var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", 
 var (
 	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
 	orangeOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
+	purpleOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Render("●")
 	muted        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	debugMode    bool
 	pathPromptMu sync.Mutex
@@ -366,6 +367,7 @@ promptLoop:
 					if res.Error != "" {
 						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
 					}
+					fmt.Printf("%s %s\n\n", purpleOrb, muted.Render("Sending output to LLM..."))
 					payload := res.Result
 					if res.Error != "" {
 						payload = res.Error
@@ -386,7 +388,7 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, false, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, nil)
 					hiveMgr.Status("Hive: idle")
 					continue
 				}
@@ -943,6 +945,7 @@ promptLoop:
 					if res.Error != "" {
 						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
 					}
+					fmt.Printf("%s %s\n\n", purpleOrb, muted.Render("Sending output to LLM..."))
 					payload := res.Result
 					if res.Error != "" {
 						payload = res.Error
@@ -963,7 +966,7 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, false, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, nil)
 					hiveMgr.Status("Hive: idle")
 				}
 			default:

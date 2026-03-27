@@ -175,6 +175,10 @@ GoDex includes built-in MCP servers:
 
 For detailed MCP configuration including external servers, see [MCP.md](MCP.md).
 
+### Hive Network
+
+GoDex supports a Hive network mode where multiple instances can delegate tasks to each other. See [HIVE.md](HIVE.md) for details.
+
 #### Adding Allowed Paths
 
 By default, MCP servers only allow access to the current working directory. Add more allowed paths:
