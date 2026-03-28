@@ -83,7 +83,7 @@ complete -F _{{.ProgName}}_completion {{.ProgName}}
 
 const zshCompletionTemplate = `#compdef godex
 
-_{{.ProgName}}_completion() {
+{{.ProgName}}_completion() {
     local -a providers
     local config_path="${HOME}/.godex/providers.yaml"
     
@@ -100,10 +100,17 @@ _{{.ProgName}}_completion() {
         cmd)
             _describe 'providers' providers
             ;;
+        args)
+            case "$words[1]" in
+                --config)
+                    _files -g "*.yaml" -g "*.yml"
+                    ;;
+            esac
+            ;;
     esac
 }
 
-_{{.ProgName}}_completion "$@"
+{{.ProgName}}_completion "$@"
 `
 
 type completionData struct {
