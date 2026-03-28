@@ -7,14 +7,14 @@ description: Set up a GoDex Hive multi-agent network. Use when creating a networ
 
 ## Instructions
 
-Hive is a multi-agent system where GoDex instances coordinate through task delegation. One instance acts as master, others as workers.
+Hive is a peer-to-peer multi-agent system where GoDex instances delegate tasks to each other. Any instance can delegate work to any other instance.
 
 ### How Hive Works
 
-- **Master**: Coordinates tasks, communicates with LLM, delegates work to workers
-- **Workers**: Execute delegated tasks, can further delegate to other workers
+- **Peers**: All instances are equal - any can delegate to any other
+- **Discovery**: Instances find each other via JSON files in a shared directory
 - **Communication**: WebSocket over localhost (127.0.0.1)
-- **Discovery**: JSON instance files in shared directory
+- **Authentication**: Shared secret (hive code) validates connections
 
 ### Instance Discovery
 
@@ -28,78 +28,147 @@ Each instance writes a JSON file to `{baseDir}/hive/instances/{codeHash}/{instan
   "port": 49152,
   "mcp_servers": ["filesystem", "bash"],
   "started_at": "2024-01-01T00:00:00Z",
-  "pid": 12345
+  "pid": 12345,
+  "max_tokens": 32000
 }
 ```
 
-Instances discover each other by reading this directory.
+Instances discover peers by reading this directory.
+
+### Authentication
+
+Each instance has a shared secret (hive code). This is used to:
+
+1. **Compute directory path**: `hash(hive_code) = codeHash` - determines where instance files are stored
+2. **WebSocket handshake**: Token sent during connection, validated by peer
+
+WebSocket handshake example:
+```
+GET /ws HTTP/1.1
+Host: localhost:{port}
+Authorization: {hive_code}
+Upgrade: websocket
+```
+
+Peers validate the token by computing the same hash and comparing.
 
 ### Delegation Protocol
 
-1. Connect to worker via WebSocket at `ws://127.0.0.1:{port}/ws`
-2. Send delegate message:
+1. **Connect** to peer via WebSocket at `ws://127.0.0.1:{port}/ws`
+2. **Authenticate** with hive code as Bearer token
+3. **Send** delegate message:
    ```json
    {"type": "delegate", "id": "request-id", "prompt": "task description"}
    ```
-3. Worker processes task and returns:
+4. **Receive** result:
    ```json
-   {"type": "result", "id": "request-id", "result": "..."}
+   {"type": "result", "id": "request-id", "result": "...", "error": ""}
    ```
 
-### Implementing the Server
+### Required Components
 
-The Hive server implements the MCP tool interface with these tools:
+1. **Manager** - Handles instance registration, discovery, delegation
+2. **WebSocket Server** - Accepts connections, validates auth, processes messages
+3. **MCP Server** - Exposes hive_list and hive_delegate tools
+4. **Results Channel** - Returns delegate results to caller
 
-**hive_list** - Returns all instance JSON files from the discovery directory
+### Key Implementation Details
+
+1. **Starting the Server**
+   - Listen on random available port: `net.Listen("tcp", "127.0.0.1:0")`
+   - Register instance by writing JSON file to discovery directory
+
+2. **WebSocket Handler**
+   - Validate Authorization header against local hive code
+   - Read delegate message, process via LLM handler
+   - Return result or error
+
+3. **Delegation (Async)**
+   - Connect to target peer
+   - Send delegate message
+   - Return immediately (non-blocking)
+   - Listen on results channel for completion
+
+4. **Instance Selection**
+   When `target_id` is omitted:
+   - If `required_tools` specified: pick peer with most matching MCP servers
+   - Otherwise: pick peer with most available context tokens
+
+### MCP Tools
+
+**hive_list** - Returns all instance JSON files from discovery directory
 
 **hive_delegate** - Accepts:
 - `prompt`: Task description (required)
 - `target_id`: Specific instance ID (optional)
 - `required_tools`: Array of required MCP server names (optional)
 
-Selection logic when `target_id` is omitted:
-1. If `required_tools` specified: pick worker with most matching MCP servers
-2. Otherwise: pick worker with most available context tokens
+### Code Structure
 
-### Required Components
+```
+internal/hive/
+├── manager.go      # Manager, delegation, discovery
+├── ws.go           # WebSocket read/write, handshake
+├── names.go        # Random human names for instances
+└── ...
 
-1. **Manager** - Handles instance registration, discovery, delegation
-2. **WebSocket Server** - Accepts connections, processes delegate messages
-3. **MCP Server** - Exposes hive_list and hive_delegate tools
-4. **Results Channel** - Returns delegate results to caller
-
-### Key Implementation Details
-
-- Each instance runs an HTTP server with a `/ws` endpoint for WebSocket connections
-- Authentication uses the shared hive code as token (sent via WebSocket handshake)
-- The handler function processes prompts through the agent's LLM
-- Results are returned synchronously over the WebSocket connection
-
-### Starting Instances
-
-Any GoDex instance with `--hive "code"` becomes part of the network. The first instance acts as master by default.
+internal/mcp/
+└── hive.go         # MCP server with hive_list, hive_delegate
+```
 
 ## Examples
-
-### Setting up a worker
-
-1. Start godex with `--hive "secret"`
-2. Instance creates JSON file in hive discovery directory
-3. Other instances can now delegate tasks to this worker
 
 ### Implementing delegation
 
 ```go
-// Connect to worker
-conn, err := net.Dial("tcp", "127.0.0.1:" + workerPort)
-
-// WebSocket handshake with hive code as token
-// Send delegate message
-req := map[string]string{
-    "type":   "delegate",
-    "id":     "unique-id",
-    "prompt": "your task",
+// Connect to peer
+conn, err := net.Dial("tcp", "127.0.0.1:"+peerPort)
+if err != nil {
+    return err
 }
 
-// Read result from worker response
+// WebSocket handshake with hive code as token
+// Send: GET /ws ... Authorization: {hive_code}
+
+// Send delegate message
+req := wireMessage{
+    Type:   "delegate",
+    ID:     uuid.New(),
+    Prompt: "your task",
+}
+payload, _ := json.Marshal(req)
+writeWSMessage(conn, payload)
+
+// Read result
+respRaw, _ := readWSMessage(conn)
+var resp wireMessage
+json.Unmarshal(respRaw, &resp)
+
+// resp.Result contains the answer
+// resp.Error contains any error message
+```
+
+### Starting a peer
+
+```go
+manager, err := hive.NewManager(
+    "your-secret-code",   // hive code (shared secret)
+    "./data",             // base directory
+    "nemotron",           // model name
+    32000,                // max tokens
+    []string{"filesystem", "bash"},  // available MCP servers
+    statusCh,             // channel for status updates
+    handlerFn,            // function to process prompts via LLM
+)
+```
+
+### Selecting best peer
+
+```go
+// In hive_delegate tool
+instances, _ := manager.Instances()
+
+target := selectBestInstance(instances, selfID, requiredTools)
+
+manager.DelegateAsync(ctx, target.ID, prompt)
 ```
