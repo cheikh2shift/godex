@@ -359,7 +359,8 @@ promptLoop:
 
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
-		log.Println("[DEBUG] Context limit:", contextLimit, "Input tokens:", inputTokens, "Output tokens:", outputTokens)
+
+		// log.Println("[DEBUG] Context limit:", contextLimit, "Input tokens:", inputTokens, "Output tokens:", outputTokens)
 
 		var delegateCh <-chan hive.HiveStats
 		if hiveMgr != nil {
@@ -732,9 +733,11 @@ promptLoop:
 				}
 			}()
 
-			resp, err := agent.SendPromptWithThink(roundCtx, provider, fullPrompt, func(think string) {
+			llmProvider.SetThinkCallback(func(think string) {
 				streamed.WriteString(think)
 			})
+			resp, err := llmProvider.Send(roundCtx, fullPrompt)
+			llmProvider.SetThinkCallback(nil)
 
 			// Stop spinner and clear line
 			stopSpinner <- true
@@ -1678,11 +1681,13 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		var resp string
 		var err error
 		if verbose {
-			resp, err = agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
+			llmProvider.SetThinkCallback(func(think string) {
 				fmt.Print(think)
 			})
+			resp, err = llmProvider.Send(ctx, fullPrompt)
+			llmProvider.SetThinkCallback(nil)
 		} else {
-			resp, err = agent.SendPrompt(ctx, provider, fullPrompt)
+			resp, err = llmProvider.Send(ctx, fullPrompt)
 		}
 		if err != nil {
 			return "", err

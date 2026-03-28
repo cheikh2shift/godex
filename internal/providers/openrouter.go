@@ -274,6 +274,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			content = pickMessageContent(choice.Message.Content, choice.Message.Reasoning, choice.Message.ReasoningDetails)
 		}
 		p.mu.Lock()
+
 		if ok {
 			p.promptTokens = usage.InputTokens
 			p.completionTokens = usage.OutputTokens
