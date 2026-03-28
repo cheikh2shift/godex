@@ -43,7 +43,8 @@ _{{.ProgName}}_completion() {
         return
         ;;
     --config)
-        _filedir yaml yml
+        COMPREPLY=($(compgen -d -S/ -- "${cur}"))
+        COMPREPLY+=($(compgen -f -X '!*.yaml' -X '!*.yml' -- "${cur}"))
         return
         ;;
     --completion)

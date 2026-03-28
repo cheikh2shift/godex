@@ -135,7 +135,8 @@ _cgodex_completion() {
             return 0
             ;;
         --config)
-            COMPREPLY=($(compgen -f -- "$cur"))
+            COMPREPLY=($(compgen -d -S/ -- "$cur"))
+            COMPREPLY+=($(compgen -f -X '!*.yaml' -X '!*.yml' -- "$cur"))
             return 0
             ;;
     esac
