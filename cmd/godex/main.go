@@ -1409,7 +1409,7 @@ func getBgCount(servers []MCPServer) int {
 	return 0
 }
 
-func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
+func buildMQProvider(provider *config.Provider) modelquery.Provider {
 	mqProvider := modelquery.Provider{
 		Endpoint: provider.Endpoint,
 		APIKey:   provider.APIKey,
@@ -1423,70 +1423,74 @@ func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
 		mqProvider.Type = modelquery.ProviderOpenRouter
 	default:
 		fmt.Println("[Model] Unknown provider type")
-		return
+	}
+	return mqProvider
+}
+
+func selectNewModel(provider *config.Provider, llmProv providers.Provider) (bool, string, int) {
+	mqProvider := buildMQProvider(provider)
+	if mqProvider.Type == "" {
+		return false, "", 0
 	}
 
 	selected, contextLen := wizard.ModelSelectPrompt(mqProvider, provider.Model)
-	if selected != "" && selected != provider.Model {
-		provider.Model = selected
-		if contextLen > 0 {
-			provider.ContextLimit = contextLen
+	if selected == "" || selected == provider.Model {
+		return false, "", 0
+	}
+
+	if contextLen == 0 && provider.Type == "ollama" {
+		if limit, err := providers.GetOllamaContextLimit(selected); err == nil {
+			contextLen = limit
+			fmt.Printf("[Model] Fetched context limit from web: %d\n", contextLen)
 		}
-		if err := llmProv.SetModel(selected, contextLen); err != nil {
-			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
-		}
-		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
+	}
+
+	provider.Model = selected
+	if contextLen > 0 {
+		provider.ContextLimit = contextLen
+	}
+
+	if err := llmProv.SetModel(selected, contextLen); err != nil {
+		fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
+	}
+
+	return true, selected, contextLen
+}
+
+func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
+	changed, model, contextLen := selectNewModel(provider, llmProv)
+	if changed {
+		fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
 	}
 }
 
 func handleModelPersist(provider *config.Provider, llmProv providers.Provider, configPath string) {
-	mqProvider := modelquery.Provider{
-		Endpoint: provider.Endpoint,
-		APIKey:   provider.APIKey,
-	}
-	switch provider.Type {
-	case "ollama":
-		mqProvider.Type = modelquery.ProviderOllama
-	case "gemini":
-		mqProvider.Type = modelquery.ProviderGemini
-	case "openrouter":
-		mqProvider.Type = modelquery.ProviderOpenRouter
-	default:
-		fmt.Println("[Model] Unknown provider type")
+	changed, model, contextLen := selectNewModel(provider, llmProv)
+	if !changed {
 		return
 	}
 
-	selected, contextLen := wizard.ModelSelectPrompt(mqProvider, provider.Model)
-	if selected != "" && selected != provider.Model {
-		provider.Model = selected
-		if contextLen > 0 {
-			provider.ContextLimit = contextLen
-		}
-		if err := llmProv.SetModel(selected, contextLen); err != nil {
-			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
-		}
-		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
+	fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
 
-		cfg, err := config.Load(configPath)
-		if err != nil {
-			fmt.Printf("[Model] Failed to load config: %v\n", err)
-			return
-		}
-
-		for i := range cfg.Providers {
-			if cfg.Providers[i].Name == provider.Name {
-				cfg.Providers[i].Model = provider.Model
-				cfg.Providers[i].ContextLimit = provider.ContextLimit
-				break
-			}
-		}
-
-		if err := config.Save(configPath, cfg); err != nil {
-			fmt.Printf("[Model] Failed to save config: %v\n", err)
-			return
-		}
-		fmt.Printf("[Model] Saved to %s\n", configPath)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("[Model] Failed to load config: %v\n", err)
+		return
 	}
+
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Name == provider.Name {
+			cfg.Providers[i].Model = provider.Model
+			cfg.Providers[i].ContextLimit = provider.ContextLimit
+			break
+		}
+	}
+
+	if err := config.Save(configPath, cfg); err != nil {
+		fmt.Printf("[Model] Failed to save config: %v\n", err)
+		return
+	}
+	fmt.Printf("[Model] Saved to %s\n", configPath)
 }
 
 func printHelp() {

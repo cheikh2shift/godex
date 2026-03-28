@@ -178,6 +178,40 @@ func (o *ollamaProvider) fetchOllamaLibraryContext() error {
 	return nil
 }
 
+func GetOllamaContextLimit(model string) (int, error) {
+	modelName := model
+	if idx := strings.Index(modelName, ":"); idx > 0 {
+		modelName = modelName[:idx]
+	}
+
+	url := fmt.Sprintf("https://ollama.com/library/%s/tags", modelName)
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return 0, fmt.Errorf("library page returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	matches := re.FindStringSubmatch(string(body))
+	if len(matches) >= 2 {
+		contextStr := matches[1]
+		if val, err := strconv.Atoi(contextStr); err == nil {
+			return val * 1000, nil
+		}
+	}
+
+	return 0, fmt.Errorf("could not find context limit for model %s", model)
+}
+
 func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error) {
 	o.sendMu.Lock()
 	defer o.sendMu.Unlock()

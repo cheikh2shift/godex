@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -20,11 +19,10 @@ type modelSelectModel struct {
 	loading        bool
 	provider       modelquery.Provider
 	searchDebounce time.Duration
-	lastQuery      string
-	mu             sync.Mutex
 	done           bool
 	result         string
 	defaultValue   string
+	resultsCh      chan []modelquery.Model
 }
 
 type modelSelectState struct {
@@ -34,8 +32,6 @@ type modelSelectState struct {
 }
 
 func (m *modelSelectModel) getState() modelSelectState {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	return modelSelectState{
 		results: m.results,
 		cursor:  m.cursor,
@@ -60,6 +56,7 @@ func newModelSelectModel(provider modelquery.Provider, defaultValue string) mode
 		provider:       provider,
 		searchDebounce: 300 * time.Millisecond,
 		defaultValue:   defaultValue,
+		resultsCh:      make(chan []modelquery.Model, 1),
 	}
 }
 
@@ -71,6 +68,18 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case []modelquery.Model:
+		m.loading = false
+		m.results = msg
+		if len(m.results) > 6 {
+			m.results = m.results[:6]
+		}
+		if len(m.results) > 0 {
+			m.cursor = 0
+		} else {
+			m.cursor = -1
+		}
+
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyUp:
@@ -104,6 +113,8 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRunes:
 			m.textInput, cmd = m.textInput.Update(msg)
 			m.cursor = -1
+			m.loading = true
+			m.results = nil
 			go m.searchDebounced(m.textInput.Value())
 			return m, cmd
 		default:
@@ -114,6 +125,26 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, cmd
+}
+
+func (m *modelSelectModel) searchDebounced(query string) {
+	if strings.TrimSpace(query) == "" {
+		m.resultsCh <- nil
+		return
+	}
+
+	time.Sleep(m.searchDebounce)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models, err := modelquery.SearchModels(ctx, m.provider, query)
+	if err != nil {
+		m.resultsCh <- nil
+		return
+	}
+
+	m.resultsCh <- models
 }
 
 func formatContextLen(n int) string {
@@ -129,46 +160,6 @@ func formatContextLen(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func (m *modelSelectModel) searchDebounced(query string) {
-	if query == m.lastQuery || strings.TrimSpace(query) == "" {
-		return
-	}
-
-	time.Sleep(m.searchDebounce)
-
-	m.mu.Lock()
-	if query != m.lastQuery {
-		m.loading = true
-	}
-	m.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	models, err := modelquery.SearchModels(ctx, m.provider, query)
-	if err != nil {
-		m.mu.Lock()
-		m.results = nil
-		m.loading = false
-		m.mu.Unlock()
-		return
-	}
-
-	m.mu.Lock()
-	m.results = models
-	if len(m.results) > 6 {
-		m.results = m.results[:6]
-	}
-	if len(m.results) > 0 {
-		m.cursor = 0
-	} else {
-		m.cursor = -1
-	}
-	m.loading = false
-	m.lastQuery = query
-	m.mu.Unlock()
-}
-
 func (m *modelSelectModel) View() string {
 	var b strings.Builder
 
@@ -178,7 +169,7 @@ func (m *modelSelectModel) View() string {
 
 	state := m.getState()
 
-	if state.loading {
+	if m.loading && state.results == nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  Loading..."))
 		b.WriteString("\n")
 	}
@@ -215,6 +206,13 @@ func (m *modelSelectModel) View() string {
 
 func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) (string, int) {
 	m := newModelSelectModel(provider, defaultValue)
+
+	go func() {
+		for models := range m.resultsCh {
+			m.Update(models)
+		}
+	}()
+
 	p := tea.NewProgram(&m)
 	finalModel, err := p.Run()
 	if err != nil {
