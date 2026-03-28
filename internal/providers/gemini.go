@@ -334,3 +334,11 @@ func resolveAPIKey(cfg *config.Provider) (string, error) {
 	}
 	return "", fmt.Errorf("missing API key for provider %q", cfg.Name)
 }
+
+func (g *geminiProvider) SetModel(model string, contextLimit int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.model = model
+	g.contextLimit = contextLimit
+	return nil
+}

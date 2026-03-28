@@ -167,7 +167,8 @@ func RunWizard(destination string) error {
 	mqProvider.Endpoint = provider.Endpoint
 	mqProvider.APIKey = provider.APIKey
 
-	provider.Model = ModelSelectPrompt(mqProvider, getDefault("model", modelDefault))
+	modelID, _ := ModelSelectPrompt(mqProvider, getDefault("model", modelDefault))
+	provider.Model = modelID
 
 	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
 

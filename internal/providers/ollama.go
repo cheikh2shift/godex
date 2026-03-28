@@ -494,3 +494,11 @@ func (o *ollamaProvider) AppendMessages(messages []Message) error {
 func (o *ollamaProvider) SupportsNativeToolCalls() bool {
 	return false
 }
+
+func (o *ollamaProvider) SetModel(model string, contextLimit int) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.model = model
+	o.contextLimit = contextLimit
+	return nil
+}

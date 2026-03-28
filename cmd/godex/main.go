@@ -1426,13 +1426,19 @@ func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
 		return
 	}
 
-	selected := wizard.ModelSelectPrompt(mqProvider, provider.Model)
+	selected, contextLen := wizard.ModelSelectPrompt(mqProvider, provider.Model)
 	if selected != "" && selected != provider.Model {
 		provider.Model = selected
-		fmt.Printf("[Model] Switched to %s\n", provider.Model)
+		if contextLen > 0 {
+			provider.ContextLimit = contextLen
+		}
+		if err := llmProv.SetModel(selected, contextLen); err != nil {
+			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
+		}
 		if err := llmProv.Reset(); err != nil {
 			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
 		}
+		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
 	}
 }
 
@@ -1453,13 +1459,19 @@ func handleModelPersist(provider *config.Provider, llmProv providers.Provider, c
 		return
 	}
 
-	selected := wizard.ModelSelectPrompt(mqProvider, provider.Model)
+	selected, contextLen := wizard.ModelSelectPrompt(mqProvider, provider.Model)
 	if selected != "" && selected != provider.Model {
 		provider.Model = selected
-		fmt.Printf("[Model] Switched to %s\n", provider.Model)
+		if contextLen > 0 {
+			provider.ContextLimit = contextLen
+		}
+		if err := llmProv.SetModel(selected, contextLen); err != nil {
+			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
+		}
 		if err := llmProv.Reset(); err != nil {
 			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
 		}
+		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
 
 		cfg, err := config.Load(configPath)
 		if err != nil {
@@ -1470,6 +1482,7 @@ func handleModelPersist(provider *config.Provider, llmProv providers.Provider, c
 		for i := range cfg.Providers {
 			if cfg.Providers[i].Name == provider.Name {
 				cfg.Providers[i].Model = provider.Model
+				cfg.Providers[i].ContextLimit = provider.ContextLimit
 				break
 			}
 		}

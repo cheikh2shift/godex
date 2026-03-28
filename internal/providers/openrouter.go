@@ -718,3 +718,11 @@ func renderToolCalls(calls []responseToolCall) string {
 	}
 	return b.String()
 }
+
+func (p *openRouterProvider) SetModel(model string, contextLimit int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.model = model
+	p.contextLimit = contextLimit
+	return nil
+}

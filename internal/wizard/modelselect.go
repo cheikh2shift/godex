@@ -213,16 +213,23 @@ func (m *modelSelectModel) View() string {
 	return b.String()
 }
 
-func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) string {
+func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) (string, int) {
 	m := newModelSelectModel(provider, defaultValue)
 	p := tea.NewProgram(&m)
 	finalModel, err := p.Run()
 	if err != nil {
-		return defaultValue
+		return defaultValue, 0
 	}
 	result := finalModel.(*modelSelectModel)
 	if result.result == "" {
-		return defaultValue
+		return defaultValue, 0
 	}
-	return result.result
+
+	state := result.getState()
+	for _, model := range state.results {
+		if model.ID == result.result {
+			return model.ID, model.ContextLen
+		}
+	}
+	return result.result, 0
 }

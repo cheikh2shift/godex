@@ -35,6 +35,7 @@ type Provider interface {
 	AppendMessages(messages []Message) error
 	SupportsNativeToolCalls() bool
 	SetStatusChannel(chan<- string)
+	SetModel(model string, contextLimit int) error
 }
 
 type factory func(cfg *config.Provider) (Provider, error)

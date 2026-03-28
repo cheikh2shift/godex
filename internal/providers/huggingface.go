@@ -299,3 +299,10 @@ func buildHFMessages(messages []Message, prompt string) []map[string]string {
 	})
 	return payload
 }
+
+func (h *huggingfaceProvider) SetModel(model string, contextLimit int) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.model = model
+	return nil
+}
