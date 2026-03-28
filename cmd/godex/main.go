@@ -272,7 +272,7 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, func(toolName string) {
+			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, func(toolName string) {
 				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
 			})
 		})
@@ -420,7 +420,7 @@ promptLoop:
 				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 					toolTimeout = *provider.ToolTimeout
 				}
-				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
+				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
 				fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
 				hiveMgr.Status("Hive: idle")
 				continue
@@ -818,7 +818,7 @@ promptLoop:
 			var toolExecError bool
 
 			if len(toolCalls) > 1 && llmProvider != nil {
-				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), true)
+				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), true, false)
 
 			} else {
 				hasError := false
@@ -864,7 +864,7 @@ promptLoop:
 						}
 					}
 
-					result, err := callTool(roundCtx, servers, toolName, args, toolTimeout)
+					result, err := callTool(roundCtx, servers, toolName, args, toolTimeout, false)
 					if errors.Is(err, ErrUserAborted) {
 						fmt.Println("\nUser aborted.")
 						goto promptLoop
@@ -992,7 +992,7 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
 					hiveMgr.Status("Hive: idle")
 				}
 			default:
@@ -1601,7 +1601,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, nil)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, nil)
 	if err != nil {
 		return err
 	}
@@ -1670,7 +1670,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 User request: %s`, strings.TrimSpace(base), input)
 }
 
-func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug bool, onToolCall func(string)) (string, error) {
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
 	toolsDesc := ""
 	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
@@ -1733,7 +1733,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		var toolResults []string
 		var toolExecError bool
 		if len(toolCalls) > 1 && llmProvider != nil {
-			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), verbose)
+			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), verbose, autoDenyRestrictedPaths)
 		} else {
 			hasError := false
 			for _, tc := range toolCalls {
@@ -1769,7 +1769,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 				}
 
-				result, err := callTool(ctx, servers, toolName, args, toolTimeout)
+				result, err := callTool(ctx, servers, toolName, args, toolTimeout, autoDenyRestrictedPaths)
 				if err != nil {
 					errMsg := fmt.Sprintf("ERROR: %v", err)
 					if verbose {
@@ -2000,7 +2000,7 @@ func parseArgs(argsStr string) map[string]interface{} {
 	return args
 }
 
-func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {
 
 	//log.Println("args", args)
 	normalizeToolPathArgs(name, args)
@@ -2014,6 +2014,10 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 				if isPathRestrictionError(err) {
 					path := extractPathFromError(err)
 					allowedPaths := server.AllowedPaths()
+					if autoDenyRestrictedPaths {
+						log.Printf("[Hive] Auto-denied restricted path access: %s (allowed paths: %v)\n", path, allowedPaths)
+						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction.", path)
+					}
 					pathPromptMu.Lock()
 					selected := showPathRestrictionPrompt(path, allowedPaths)
 					pathPromptMu.Unlock()
@@ -2047,7 +2051,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 	return "", fmt.Errorf("tool %s not found", name)
 }
 
-func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool) ([]string, bool) {
+func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool, autoDenyRestrictedPaths bool) ([]string, bool) {
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
@@ -2084,7 +2088,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 	for i, tc := range toolCalls {
 		wg.Add(1)
-		go func(index int, call map[string]interface{}) {
+		go func(index int, call map[string]interface{}, autoDeny bool) {
 			defer wg.Done()
 
 			toolName := call["name"].(string)
@@ -2108,7 +2112,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 			default:
 			}
 
-			result, err := callTool(ctx, servers, toolName, args, timeoutSecs)
+			result, err := callTool(ctx, servers, toolName, args, timeoutSecs, autoDeny)
 
 			select {
 			case resultCh <- struct {
@@ -2118,7 +2122,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 			}{index, result, err}:
 			default:
 			}
-		}(i, tc)
+		}(i, tc, autoDenyRestrictedPaths)
 	}
 
 	go func() {
