@@ -1,4 +1,4 @@
-module github.com/cheikh-seck/godex
+module github.com/cheikh2shift/godex
 
 go 1.25.7
 

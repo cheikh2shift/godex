@@ -11,8 +11,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/cheikh-seck/godex/internal/history"
-	"github.com/cheikh-seck/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/history"
+	"github.com/cheikh2shift/godex/internal/hive"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")

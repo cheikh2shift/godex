@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const defaultHFBaseURL = "https://router.huggingface.co/v1"
@@ -298,4 +298,11 @@ func buildHFMessages(messages []Message, prompt string) []map[string]string {
 		"content": prompt,
 	})
 	return payload
+}
+
+func (h *huggingfaceProvider) SetModel(model string, contextLimit int) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.model = model
+	return nil
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	projectctx "github.com/cheikh-seck/godex/internal/context"
+	projectctx "github.com/cheikh2shift/godex/internal/context"
 )
 
 const (

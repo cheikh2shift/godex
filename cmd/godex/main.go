@@ -25,14 +25,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
-	"github.com/cheikh-seck/godex/internal/agent"
-	"github.com/cheikh-seck/godex/internal/config"
-	godexcontext "github.com/cheikh-seck/godex/internal/context"
-	"github.com/cheikh-seck/godex/internal/history"
-	"github.com/cheikh-seck/godex/internal/hive"
-	"github.com/cheikh-seck/godex/internal/mcp"
-	"github.com/cheikh-seck/godex/internal/providers"
-	"github.com/cheikh-seck/godex/internal/wizard"
+	"github.com/cheikh2shift/godex/internal/agent"
+	"github.com/cheikh2shift/godex/internal/config"
+	godexcontext "github.com/cheikh2shift/godex/internal/context"
+	"github.com/cheikh2shift/godex/internal/history"
+	"github.com/cheikh2shift/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/mcp"
+	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/wizard"
+	"github.com/cheikh2shift/godex/modelquery"
 )
 
 const (
@@ -56,7 +57,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
 
 var (
 	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -359,6 +360,8 @@ promptLoop:
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
 
+		// log.Println("[DEBUG] Context limit:", contextLimit, "Input tokens:", inputTokens, "Output tokens:", outputTokens)
+
 		var delegateCh <-chan hive.HiveStats
 		if hiveMgr != nil {
 			delegateCh = hiveMgr.Stats()
@@ -470,6 +473,14 @@ promptLoop:
 		}
 		if input == "/help" {
 			printHelp()
+			continue
+		}
+		if input == "/model" {
+			handleModelSwitch(provider, llmProvider, servers)
+			continue
+		}
+		if input == "/model-persist" {
+			handleModelPersist(provider, llmProvider, configPath, servers)
 			continue
 		}
 		if strings.EqualFold(input, "who's at work") || strings.EqualFold(input, "whos at work") {
@@ -722,9 +733,11 @@ promptLoop:
 				}
 			}()
 
-			resp, err := agent.SendPromptWithThink(roundCtx, provider, fullPrompt, func(think string) {
+			llmProvider.SetThinkCallback(func(think string) {
 				streamed.WriteString(think)
 			})
+			resp, err := llmProvider.Send(roundCtx, fullPrompt)
+			llmProvider.SetThinkCallback(nil)
 
 			// Stop spinner and clear line
 			stopSpinner <- true
@@ -1400,6 +1413,92 @@ func getBgCount(servers []MCPServer) int {
 	return 0
 }
 
+func buildMQProvider(provider *config.Provider) modelquery.Provider {
+	mqProvider := modelquery.Provider{
+		Endpoint: provider.Endpoint,
+		APIKey:   provider.APIKey,
+	}
+	switch provider.Type {
+	case "ollama":
+		mqProvider.Type = modelquery.ProviderOllama
+	case "gemini":
+		mqProvider.Type = modelquery.ProviderGemini
+	case "openrouter":
+		mqProvider.Type = modelquery.ProviderOpenRouter
+	default:
+		fmt.Println("[Model] Unknown provider type")
+	}
+	return mqProvider
+}
+
+func selectNewModel(provider *config.Provider, llmProv providers.Provider) (bool, string, int) {
+	mqProvider := buildMQProvider(provider)
+	if mqProvider.Type == "" {
+		return false, "", 0
+	}
+
+	selected, contextLen := wizard.ModelSelectPrompt(mqProvider, provider.Model)
+	if selected == "" || selected == provider.Model {
+		return false, "", 0
+	}
+
+	if contextLen == 0 && provider.Type == "ollama" {
+		if limit, err := providers.GetOllamaContextLimit(selected); err == nil {
+			contextLen = limit
+			fmt.Printf("[Model] Fetched context limit from web: %d\n", contextLen)
+		}
+	}
+
+	provider.Model = selected
+	if contextLen > 0 {
+		provider.ContextLimit = contextLen
+	}
+
+	if err := llmProv.SetModel(selected, contextLen); err != nil {
+		fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
+	}
+
+	return true, selected, contextLen
+}
+
+func handleModelSwitch(provider *config.Provider, llmProv providers.Provider, servers []MCPServer) {
+	changed, model, contextLen := selectNewModel(provider, llmProv)
+	if changed {
+		fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
+		agent.SetProviderTools(provider, buildProviderTools(servers))
+	}
+}
+
+func handleModelPersist(provider *config.Provider, llmProv providers.Provider, configPath string, servers []MCPServer) {
+	changed, model, contextLen := selectNewModel(provider, llmProv)
+	if !changed {
+		return
+	}
+
+	fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
+	agent.SetProviderTools(provider, buildProviderTools(servers))
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Printf("[Model] Failed to load config: %v\n", err)
+		return
+	}
+
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Name == provider.Name {
+			cfg.Providers[i].Model = provider.Model
+			cfg.Providers[i].ContextLimit = provider.ContextLimit
+			break
+		}
+	}
+
+	if err := config.Save(configPath, cfg); err != nil {
+		fmt.Printf("[Model] Failed to save config: %v\n", err)
+		return
+	}
+	fmt.Printf("[Model] Saved to %s\n", configPath)
+}
+
 func printHelp() {
 	fmt.Println(`
 Multiline: Enter to add new line, Enter again on empty line to submit
@@ -1425,6 +1524,8 @@ Commands:
   /clear            - Clear the terminal
   /exit, /quit     - Exit the program
   /help            - Show this help
+  /model           - Switch LLM model
+  /model-persist   - Switch LLM model and save to config
 
 Tips:
   - Paste multiline text - waits for more input automatically
@@ -1580,11 +1681,13 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		var resp string
 		var err error
 		if verbose {
-			resp, err = agent.SendPromptWithThink(ctx, provider, fullPrompt, func(think string) {
+			llmProvider.SetThinkCallback(func(think string) {
 				fmt.Print(think)
 			})
+			resp, err = llmProvider.Send(ctx, fullPrompt)
+			llmProvider.SetThinkCallback(nil)
 		} else {
-			resp, err = agent.SendPrompt(ctx, provider, fullPrompt)
+			resp, err = llmProvider.Send(ctx, fullPrompt)
 		}
 		if err != nil {
 			return "", err
@@ -1749,6 +1852,24 @@ func getToolsDescription(servers []MCPServer) string {
 		}
 	}
 	return desc.String()
+}
+
+func buildProviderTools(servers []MCPServer) []providers.Tool {
+	var providerTools []providers.Tool
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			var inputSchema map[string]interface{}
+			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+				inputSchema = map[string]interface{}{}
+			}
+			providerTools = append(providerTools, providers.Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: inputSchema,
+			})
+		}
+	}
+	return providerTools
 }
 
 func renderThinking(text string) string {
@@ -2890,6 +3011,8 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		"  /commit-search <query> - Search commits",
 		"  /clear-context - Reset context",
 		"  /help - Show all commands",
+		"  /model - Switch LLM model",
+		"  /model-persist - Switch LLM model and save to config",
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Tips:"),
 		"  Ctrl+C - Cancel prompt",

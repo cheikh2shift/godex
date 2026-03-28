@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"
@@ -274,6 +274,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			content = pickMessageContent(choice.Message.Content, choice.Message.Reasoning, choice.Message.ReasoningDetails)
 		}
 		p.mu.Lock()
+
 		if ok {
 			p.promptTokens = usage.InputTokens
 			p.completionTokens = usage.OutputTokens
@@ -717,4 +718,12 @@ func renderToolCalls(calls []responseToolCall) string {
 		b.Write(payload)
 	}
 	return b.String()
+}
+
+func (p *openRouterProvider) SetModel(model string, contextLimit int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.model = model
+	p.contextLimit = contextLimit
+	return nil
 }

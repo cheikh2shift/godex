@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheikh-seck/godex/internal/config"
-	"github.com/cheikh-seck/godex/internal/mcp"
-	"github.com/cheikh-seck/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/mcp"
+	"github.com/cheikh2shift/godex/internal/providers"
 )
 
 var (
