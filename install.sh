@@ -102,13 +102,6 @@ GODEX_BASH_COMPLETION='#!/bin/bash
 # shellcheck disable=SC2034
 PROG="godex"
 
-godex_get_providers() {
-    local config_path=$(godex_get_config_path)
-    if [[ -f "$config_path" ]]; then
-        grep -E "^    - name:" "$config_path" | sed "s/.*- name://" | tr -d " \"
-    fi
-}
-
 godex_get_config_path() {
     local default_path="${HOME}/.godex/providers.yaml"
     for ((i=1; i<cword; i++)); do
@@ -120,10 +113,17 @@ godex_get_config_path() {
     echo "$default_path"
 }
 
+godex_get_providers() {
+    local config_path=$(godex_get_config_path)
+    if [[ -f "$config_path" ]]; then
+        grep -E "^    - name:" "$config_path" | sed "s/.*- name://" | tr -d " "
+    fi
+}
+
 godex_get_default_provider() {
     local config_path=$(godex_get_config_path)
     if [[ -f "$config_path" ]]; then
-        grep -E "^    - name:" "$config_path" | head -1 | sed "s/.*- name://" | tr -d " \"
+        grep -E "^    - name:" "$config_path" | head -1 | sed "s/.*- name://" | tr -d " "
     fi
 }
 
@@ -206,9 +206,13 @@ if [ -d "/etc/bash_completion.d" ] && [ -w "/etc/bash_completion.d" ]; then
 elif [ -n "$BASH_COMPLETION_USER_DIR" ] && [ -d "$BASH_COMPLETION_USER_DIR" ]; then
     echo "$GODEX_BASH_COMPLETION" > "${BASH_COMPLETION_USER_DIR}/godex"
     echo "Bash completion installed to ${BASH_COMPLETION_USER_DIR}/godex"
+elif [ -d "$HOME/.bash_completion.d" ]; then
+    echo "$GODEX_BASH_COMPLETION" > "$HOME/.bash_completion.d/godex"
+    echo "Bash completion installed to $HOME/.bash_completion.d/godex"
 else
-    echo "To enable bash completion, add this to your ~/.bashrc:"
-    echo "$GODEX_BASH_COMPLETION"
+    mkdir -p "$HOME/.bash_completion.d"
+    echo "$GODEX_BASH_COMPLETION" > "$HOME/.bash_completion.d/godex"
+    echo "Bash completion installed to $HOME/.bash_completion.d/godex"
 fi
 
 echo "Installation complete!"

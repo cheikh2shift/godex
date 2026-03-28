@@ -14,13 +14,6 @@ const bashCompletionTemplate = `#!/bin/bash
 # shellcheck disable=SC2034
 PROG="{{.ProgName}}"
 
-{{.ProgName}}_get_providers() {
-    local config_path=$(${PROG}_get_config_path)
-    if [[ -f "$config_path" ]]; then
-        grep -E '^    - name:' "$config_path" | sed 's/.*- name://' | tr -d ' "'
-    fi
-}
-
 {{.ProgName}}_get_config_path() {
     local default_path="${HOME}/.godex/providers.yaml"
     for ((i=1; i<cword; i++)); do
@@ -32,10 +25,17 @@ PROG="{{.ProgName}}"
     echo "$default_path"
 }
 
+{{.ProgName}}_get_providers() {
+    local config_path=$(${PROG}_get_config_path)
+    if [[ -f "$config_path" ]]; then
+        grep -E '^    - name:' "$config_path" | sed 's/.*- name://' | tr -d ' '
+    fi
+}
+
 {{.ProgName}}_get_default_provider() {
     local config_path=$(${PROG}_get_config_path)
     if [[ -f "$config_path" ]]; then
-        grep -E '^    - name:' "$config_path" | head -1 | sed 's/.*- name://' | tr -d ' "'
+        grep -E '^    - name:' "$config_path" | head -1 | sed 's/.*- name://' | tr -d ' '
     fi
 }
 
