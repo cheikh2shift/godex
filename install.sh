@@ -103,9 +103,39 @@ GODEX_BASH_COMPLETION='#!/bin/bash
 PROG="godex"
 
 godex_get_providers() {
-    local config_path="${HOME}/.godex/providers.yaml"
+    local config_path=$(godex_get_config_path)
     if [[ -f "$config_path" ]]; then
         grep -E "^    - name:" "$config_path" | sed "s/.*- name://" | tr -d " \"
+    fi
+}
+
+godex_get_config_path() {
+    local default_path="${HOME}/.godex/providers.yaml"
+    for ((i=1; i<cword; i++)); do
+        if [[ "${words[i]}" == "--config" ]] && [[ -n "${words[i+1]}" ]] && [[ "${words[i+1]}" != --* ]]; then
+            echo "${words[i+1]}"
+            return
+        fi
+    done
+    echo "$default_path"
+}
+
+godex_get_default_provider() {
+    local config_path=$(godex_get_config_path)
+    if [[ -f "$config_path" ]]; then
+        grep -E "^    - name:" "$config_path" | head -1 | sed "s/.*- name://" | tr -d " \"
+    fi
+}
+
+godex_get_models() {
+    local config_path=$(godex_get_config_path)
+    local provider_name="${1:-}"
+    local query="${2:-}"
+    if [[ -f "$config_path" ]]; then
+        if [[ -z "$provider_name" ]]; then
+            provider_name=$(godex_get_default_provider)
+        fi
+        godex --completion models "$config_path" "$provider_name" "$query"
     fi
 }
 
@@ -137,6 +167,23 @@ _cgodex_completion() {
         --config)
             COMPREPLY=($(compgen -d -S/ -- "$cur"))
             COMPREPLY+=($(compgen -f -X '!*.yaml' -X '!*.yml' -- "$cur"))
+            return 0
+            ;;
+        --model)
+            local provider_name=""
+            local i
+            for ((i=1; i<cword; i++)); do
+                if [[ "${words[i]}" == "--provider" ]] && [[ -n "${words[i+1]}" ]] && [[ "${words[i+1]}" != --* ]]; then
+                    provider_name="${words[i+1]}"
+                    break
+                fi
+            done
+            if [[ -z "$provider_name" ]]; then
+                provider_name=$(godex_get_default_provider)
+            fi
+            while IFS= read -r model; do
+                COMPREPLY+=("$model")
+            done < <(godex --completion models "$(godex_get_config_path)" "$provider_name" "${cur}")
             return 0
             ;;
     esac

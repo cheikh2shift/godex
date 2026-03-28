@@ -129,7 +129,7 @@ func main() {
 	}
 
 	if generateComp != "" {
-		runCompletion([]string{generateComp})
+		runCompletion(append([]string{generateComp}, flag.Args()...))
 		os.Exit(0)
 	}
 
