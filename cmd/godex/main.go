@@ -359,6 +359,7 @@ promptLoop:
 
 		contextLimit := llmProvider.ContextLimit()
 		inputTokens, outputTokens := llmProvider.TokenUsage()
+		log.Println("[DEBUG] Context limit:", contextLimit, "Input tokens:", inputTokens, "Output tokens:", outputTokens)
 
 		var delegateCh <-chan hive.HiveStats
 		if hiveMgr != nil {
@@ -474,11 +475,11 @@ promptLoop:
 			continue
 		}
 		if input == "/model" {
-			handleModelSwitch(provider, llmProvider)
+			handleModelSwitch(provider, llmProvider, servers)
 			continue
 		}
 		if input == "/model-persist" {
-			handleModelPersist(provider, llmProvider, configPath)
+			handleModelPersist(provider, llmProvider, configPath, servers)
 			continue
 		}
 		if strings.EqualFold(input, "who's at work") || strings.EqualFold(input, "whos at work") {
@@ -1457,20 +1458,22 @@ func selectNewModel(provider *config.Provider, llmProv providers.Provider) (bool
 	return true, selected, contextLen
 }
 
-func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
+func handleModelSwitch(provider *config.Provider, llmProv providers.Provider, servers []MCPServer) {
 	changed, model, contextLen := selectNewModel(provider, llmProv)
 	if changed {
 		fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
+		agent.SetProviderTools(provider, buildProviderTools(servers))
 	}
 }
 
-func handleModelPersist(provider *config.Provider, llmProv providers.Provider, configPath string) {
+func handleModelPersist(provider *config.Provider, llmProv providers.Provider, configPath string, servers []MCPServer) {
 	changed, model, contextLen := selectNewModel(provider, llmProv)
 	if !changed {
 		return
 	}
 
 	fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
+	agent.SetProviderTools(provider, buildProviderTools(servers))
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -1844,6 +1847,24 @@ func getToolsDescription(servers []MCPServer) string {
 		}
 	}
 	return desc.String()
+}
+
+func buildProviderTools(servers []MCPServer) []providers.Tool {
+	var providerTools []providers.Tool
+	for _, server := range servers {
+		for _, tool := range server.Tools() {
+			var inputSchema map[string]interface{}
+			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+				inputSchema = map[string]interface{}{}
+			}
+			providerTools = append(providerTools, providers.Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: inputSchema,
+			})
+		}
+	}
+	return providerTools
 }
 
 func renderThinking(text string) string {
