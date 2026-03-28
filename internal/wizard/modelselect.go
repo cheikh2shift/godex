@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/cheikh-seck/godex/modelquery"
+	"github.com/cheikh2shift/godex/modelquery"
 )
 
 type modelSelectModel struct {
@@ -213,7 +213,7 @@ func (m *modelSelectModel) View() string {
 	return b.String()
 }
 
-func modelSelectPrompt(provider modelquery.Provider, defaultValue string) string {
+func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) string {
 	m := newModelSelectModel(provider, defaultValue)
 	p := tea.NewProgram(&m)
 	finalModel, err := p.Run()

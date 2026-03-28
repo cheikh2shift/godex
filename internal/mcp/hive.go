@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cheikh-seck/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/hive"
 )
 
 type HiveServer struct {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 // Tool represents an executable tool.

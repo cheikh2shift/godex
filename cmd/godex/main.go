@@ -25,14 +25,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
-	"github.com/cheikh-seck/godex/internal/agent"
-	"github.com/cheikh-seck/godex/internal/config"
-	godexcontext "github.com/cheikh-seck/godex/internal/context"
-	"github.com/cheikh-seck/godex/internal/history"
-	"github.com/cheikh-seck/godex/internal/hive"
-	"github.com/cheikh-seck/godex/internal/mcp"
-	"github.com/cheikh-seck/godex/internal/providers"
-	"github.com/cheikh-seck/godex/internal/wizard"
+	"github.com/cheikh2shift/godex/internal/agent"
+	"github.com/cheikh2shift/godex/internal/config"
+	godexcontext "github.com/cheikh2shift/godex/internal/context"
+	"github.com/cheikh2shift/godex/internal/history"
+	"github.com/cheikh2shift/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/mcp"
+	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/wizard"
+	"github.com/cheikh2shift/godex/modelquery"
 )
 
 const (
@@ -56,7 +57,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
 
 var (
 	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -470,6 +471,14 @@ promptLoop:
 		}
 		if input == "/help" {
 			printHelp()
+			continue
+		}
+		if input == "/model" {
+			handleModelSwitch(provider, llmProvider)
+			continue
+		}
+		if input == "/model-persist" {
+			handleModelPersist(provider, llmProvider, configPath)
 			continue
 		}
 		if strings.EqualFold(input, "who's at work") || strings.EqualFold(input, "whos at work") {
@@ -1400,6 +1409,79 @@ func getBgCount(servers []MCPServer) int {
 	return 0
 }
 
+func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
+	mqProvider := modelquery.Provider{
+		Endpoint: provider.Endpoint,
+		APIKey:   provider.APIKey,
+	}
+	switch provider.Type {
+	case "ollama":
+		mqProvider.Type = modelquery.ProviderOllama
+	case "gemini":
+		mqProvider.Type = modelquery.ProviderGemini
+	case "openrouter":
+		mqProvider.Type = modelquery.ProviderOpenRouter
+	default:
+		fmt.Println("[Model] Unknown provider type")
+		return
+	}
+
+	selected := wizard.ModelSelectPrompt(mqProvider, provider.Model)
+	if selected != "" && selected != provider.Model {
+		provider.Model = selected
+		fmt.Printf("[Model] Switched to %s\n", provider.Model)
+		if err := llmProv.Reset(); err != nil {
+			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
+		}
+	}
+}
+
+func handleModelPersist(provider *config.Provider, llmProv providers.Provider, configPath string) {
+	mqProvider := modelquery.Provider{
+		Endpoint: provider.Endpoint,
+		APIKey:   provider.APIKey,
+	}
+	switch provider.Type {
+	case "ollama":
+		mqProvider.Type = modelquery.ProviderOllama
+	case "gemini":
+		mqProvider.Type = modelquery.ProviderGemini
+	case "openrouter":
+		mqProvider.Type = modelquery.ProviderOpenRouter
+	default:
+		fmt.Println("[Model] Unknown provider type")
+		return
+	}
+
+	selected := wizard.ModelSelectPrompt(mqProvider, provider.Model)
+	if selected != "" && selected != provider.Model {
+		provider.Model = selected
+		fmt.Printf("[Model] Switched to %s\n", provider.Model)
+		if err := llmProv.Reset(); err != nil {
+			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
+		}
+
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			fmt.Printf("[Model] Failed to load config: %v\n", err)
+			return
+		}
+
+		for i := range cfg.Providers {
+			if cfg.Providers[i].Name == provider.Name {
+				cfg.Providers[i].Model = provider.Model
+				break
+			}
+		}
+
+		if err := config.Save(configPath, cfg); err != nil {
+			fmt.Printf("[Model] Failed to save config: %v\n", err)
+			return
+		}
+		fmt.Printf("[Model] Saved to %s\n", configPath)
+	}
+}
+
 func printHelp() {
 	fmt.Println(`
 Multiline: Enter to add new line, Enter again on empty line to submit
@@ -1425,6 +1507,8 @@ Commands:
   /clear            - Clear the terminal
   /exit, /quit     - Exit the program
   /help            - Show this help
+  /model           - Switch LLM model
+  /model-persist   - Switch LLM model and save to config
 
 Tips:
   - Paste multiline text - waits for more input automatically
@@ -2890,6 +2974,8 @@ func printStartupBanner(provider *config.Provider, servers []MCPServer, mcpLogs 
 		"  /commit-search <query> - Search commits",
 		"  /clear-context - Reset context",
 		"  /help - Show all commands",
+		"  /model - Switch LLM model",
+		"  /model-persist - Switch LLM model and save to config",
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render("Tips:"),
 		"  Ctrl+C - Cancel prompt",

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const bashCompletionTemplate = `#!/bin/bash

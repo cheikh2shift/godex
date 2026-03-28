@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const DefaultGeminiModel = "gemini-2.5-flash"

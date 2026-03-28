@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const defaultOpenRouterBaseURL = "https://openrouter.ai/api/v1"

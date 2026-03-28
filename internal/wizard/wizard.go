@@ -21,9 +21,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cheikh-seck/godex/internal/config"
-	"github.com/cheikh-seck/godex/internal/providers"
-	"github.com/cheikh-seck/godex/modelquery"
+	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/modelquery"
 )
 
 func RunWizard(destination string) error {
@@ -167,7 +167,7 @@ func RunWizard(destination string) error {
 	mqProvider.Endpoint = provider.Endpoint
 	mqProvider.APIKey = provider.APIKey
 
-	provider.Model = modelSelectPrompt(mqProvider, getDefault("model", modelDefault))
+	provider.Model = ModelSelectPrompt(mqProvider, getDefault("model", modelDefault))
 
 	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
 

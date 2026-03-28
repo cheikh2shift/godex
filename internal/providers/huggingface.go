@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cheikh-seck/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/config"
 )
 
 const defaultHFBaseURL = "https://router.huggingface.co/v1"
