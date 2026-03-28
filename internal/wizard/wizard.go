@@ -23,6 +23,7 @@ import (
 
 	"github.com/cheikh-seck/godex/internal/config"
 	"github.com/cheikh-seck/godex/internal/providers"
+	"github.com/cheikh-seck/godex/modelquery"
 )
 
 func RunWizard(destination string) error {
@@ -153,7 +154,20 @@ func RunWizard(destination string) error {
 	} else if provider.Type == "openrouter" {
 		modelDefault = "moonshotai/kimi-k2.5"
 	}
-	provider.Model = prompt(reader, "Model", getDefault("model", modelDefault))
+
+	mqProvider := modelquery.Provider{}
+	switch provider.Type {
+	case "ollama":
+		mqProvider.Type = modelquery.ProviderOllama
+	case "gemini":
+		mqProvider.Type = modelquery.ProviderGemini
+	case "openrouter":
+		mqProvider.Type = modelquery.ProviderOpenRouter
+	}
+	mqProvider.Endpoint = provider.Endpoint
+	mqProvider.APIKey = provider.APIKey
+
+	provider.Model = modelSelectPrompt(mqProvider, getDefault("model", modelDefault))
 
 	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
 
