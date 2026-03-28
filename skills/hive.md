@@ -1,73 +1,22 @@
-# Hive - Multi-Agent Task Delegation
+---
+name: godex-hive
+description: Set up a GoDex Hive multi-agent network. Use when creating a network of GoDex agents that can delegate tasks between each other.
+---
 
-Hive enables GoDex instances to work together by delegating tasks between a master and worker agents.
+# GoDex Hive
 
-## Overview
+## Instructions
+
+Hive is a multi-agent system where GoDex instances coordinate through task delegation. One instance acts as master, others as workers.
+
+### How Hive Works
 
 - **Master**: Coordinates tasks, communicates with LLM, delegates work to workers
 - **Workers**: Execute delegated tasks, can further delegate to other workers
 - **Communication**: WebSocket over localhost (127.0.0.1)
 - **Discovery**: JSON instance files in shared directory
 
-## Starting a Hive
-
-```bash
-# Master instance
-godex --hive "your-secret-code"
-
-# Worker instances (same code joins the hive)
-godex --hive "your-secret-code"
-```
-
-All instances with the same code form a hive. The first instance becomes the master by default.
-
-## Tools
-
-### hive_delegate
-
-Delegate a task to another hive instance.
-
-```json
-{
-  "name": "hive_delegate",
-  "arguments": {
-    "prompt": "Analyze this code file and explain what it does",
-    "required_tools": ["filesystem", "bash"],
-    "target_id": "optional-specific-instance-id"
-  }
-}
-```
-
-**Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `prompt` | string | Yes | Task description for the worker |
-| `target_id` | string | No | Specific worker ID (auto-selects if omitted) |
-| `required_tools` | array | No | MCP servers the worker must have |
-
-### hive_list
-
-List all available hive instances.
-
-```json
-{
-  "name": "hive_list",
-  "arguments": {}
-}
-```
-
-Returns array of instances with: `id`, `name`, `model`, `port`, `mcp_servers`, `started_at`
-
-## Instance Selection
-
-When `target_id` is omitted, selection logic:
-
-1. If `required_tools` specified: pick worker with most matching MCP servers
-2. Otherwise: pick worker with most available context tokens
-
-## How It Works
-
-### Discovery
+### Instance Discovery
 
 Each instance writes a JSON file to `{baseDir}/hive/instances/{codeHash}/{instanceID}.json`:
 
@@ -83,72 +32,74 @@ Each instance writes a JSON file to `{baseDir}/hive/instances/{codeHash}/{instan
 }
 ```
 
-Instances periodically check for other instances by reading this directory.
+Instances discover each other by reading this directory.
 
-### Delegation Flow
+### Delegation Protocol
 
-1. Master calls `hive_delegate` with task prompt
-2. Master connects to worker via WebSocket at `ws://127.0.0.1:{port}/ws`
-3. Sends message: `{"type": "delegate", "id": "request-id", "prompt": "..."}`
-4. Worker executes task via its LLM and tools
-5. Worker returns: `{"type": "result", "id": "request-id", "result": "..."}`
-6. Master receives result and continues processing
+1. Connect to worker via WebSocket at `ws://127.0.0.1:{port}/ws`
+2. Send delegate message:
+   ```json
+   {"type": "delegate", "id": "request-id", "prompt": "task description"}
+   ```
+3. Worker processes task and returns:
+   ```json
+   {"type": "result", "id": "request-id", "result": "..."}
+   ```
 
-### Task Execution
+### Implementing the Server
 
-Each WebSocket connection handles **one task at a time**. The worker:
-1. Receives the delegated prompt
-2. Runs the full agent loop with its configured tools
-3. Returns the final result
-4. Connection closes
+The Hive server implements the MCP tool interface with these tools:
 
-If a worker receives multiple delegations, they run in parallel (separate goroutines).
+**hive_list** - Returns all instance JSON files from the discovery directory
 
-## Response Handling
+**hive_delegate** - Accepts:
+- `prompt`: Task description (required)
+- `target_id`: Specific instance ID (optional)
+- `required_tools`: Array of required MCP server names (optional)
 
-When a worker completes a task:
+Selection logic when `target_id` is omitted:
+1. If `required_tools` specified: pick worker with most matching MCP servers
+2. Otherwise: pick worker with most available context tokens
 
-1. Result is sent back to master via WebSocket
-2. Master's main loop receives the result via `Results()` channel
-3. If user is typing, the prompt is cancelled
-4. Result is displayed immediately
-5. User can continue interacting
+### Required Components
 
-## Architecture
+1. **Manager** - Handles instance registration, discovery, delegation
+2. **WebSocket Server** - Accepts connections, processes delegate messages
+3. **MCP Server** - Exposes hive_list and hive_delegate tools
+4. **Results Channel** - Returns delegate results to caller
 
+### Key Implementation Details
+
+- Each instance runs an HTTP server with a `/ws` endpoint for WebSocket connections
+- Authentication uses the shared hive code as token (sent via WebSocket handshake)
+- The handler function processes prompts through the agent's LLM
+- Results are returned synchronously over the WebSocket connection
+
+### Starting Instances
+
+Any GoDex instance with `--hive "code"` becomes part of the network. The first instance acts as master by default.
+
+## Examples
+
+### Setting up a worker
+
+1. Start godex with `--hive "secret"`
+2. Instance creates JSON file in hive discovery directory
+3. Other instances can now delegate tasks to this worker
+
+### Implementing delegation
+
+```go
+// Connect to worker
+conn, err := net.Dial("tcp", "127.0.0.1:" + workerPort)
+
+// WebSocket handshake with hive code as token
+// Send delegate message
+req := map[string]string{
+    "type":   "delegate",
+    "id":     "unique-id",
+    "prompt": "your task",
+}
+
+// Read result from worker response
 ```
-                    ┌──────────────┐
-                    │   Master     │
-                    │  (user CLI)  │
-                    └──────┬───────┘
-                           │ delegate
-                    ┌──────▼───────┐
-        ┌───────────│  Worker 1   │───────────┐
-        │           └─────────────┘           │
-        │                                    │
-   ┌────▼────┐                         ┌────▼────┐
-   │ Task A  │                         │ Task B  │
-   └─────────┘                         └─────────┘
-```
-
-## Use Cases
-
-- **Parallel processing**: Delegate independent tasks to multiple workers
-- **Specialized agents**: Workers with specific MCP tools (e.g., webscraper, database)
-- **Long-running tasks**: Offload heavy computation without blocking master
-- **Skill-based routing**: Match tasks to workers with required capabilities
-
-## Security
-
-- Hive code acts as shared secret
-- Only instances with correct code can connect
-- All communication over localhost
-- Each instance maintains own permissions
-
-## Common Issues
-
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| No instances found | Wrong code or workers not started | Use same `--hive` code |
-| Delegation fails | Worker crashed or tool missing | Check worker logs |
-| Instance stuck | Worker still processing | Wait or restart worker |
