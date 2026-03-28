@@ -1435,9 +1435,6 @@ func handleModelSwitch(provider *config.Provider, llmProv providers.Provider) {
 		if err := llmProv.SetModel(selected, contextLen); err != nil {
 			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
 		}
-		if err := llmProv.Reset(); err != nil {
-			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
-		}
 		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
 	}
 }
@@ -1467,9 +1464,6 @@ func handleModelPersist(provider *config.Provider, llmProv providers.Provider, c
 		}
 		if err := llmProv.SetModel(selected, contextLen); err != nil {
 			fmt.Printf("[Model] Warning: failed to update model: %v\n", err)
-		}
-		if err := llmProv.Reset(); err != nil {
-			fmt.Printf("[Model] Warning: failed to reset context: %v\n", err)
 		}
 		fmt.Printf("[Model] Switched to %s (context: %d)\n", provider.Model, provider.ContextLimit)
 
