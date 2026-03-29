@@ -260,7 +260,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 			} `json:"usage"`
 		}
 
-		content, toolCalls, usage, ok := parseResponsesOutput(bodyBytes)
+		content, reasoningContent, toolCalls, usage, ok := parseResponsesOutput(bodyBytes)
 		if !ok {
 			if err := json.Unmarshal(bodyBytes, &response); err != nil {
 				return "", fmt.Errorf("failed to decode response: %w", err)
@@ -272,7 +272,13 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 
 			choice := response.Choices[0]
 			content = pickMessageContent(choice.Message.Content, choice.Message.Reasoning, choice.Message.ReasoningDetails)
+			reasoningContent = choice.Message.Reasoning
 		}
+
+		if reasoningContent != "" && p.OnThink != nil {
+			p.OnThink(reasoningContent)
+		}
+
 		p.mu.Lock()
 
 		if ok {
@@ -607,7 +613,7 @@ type responsesUsage struct {
 	TotalTokens  int
 }
 
-func parseResponsesOutput(body []byte) (string, []responseToolCall, responsesUsage, bool) {
+func parseResponsesOutput(body []byte) (string, string, []responseToolCall, responsesUsage, bool) {
 	var resp struct {
 		Output []map[string]interface{} `json:"output"`
 		Usage  struct {
@@ -617,12 +623,13 @@ func parseResponsesOutput(body []byte) (string, []responseToolCall, responsesUsa
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", nil, responsesUsage{}, false
+		return "", "", nil, responsesUsage{}, false
 	}
 	if len(resp.Output) == 0 {
-		return "", nil, responsesUsage{}, false
+		return "", "", nil, responsesUsage{}, false
 	}
 	var textParts []string
+	var reasoningParts []string
 	var toolCalls []responseToolCall
 
 	for _, item := range resp.Output {
@@ -640,12 +647,23 @@ func parseResponsesOutput(body []byte) (string, []responseToolCall, responsesUsa
 						if txt, ok := ci["text"].(string); ok && strings.TrimSpace(txt) != "" {
 							textParts = append(textParts, strings.TrimSpace(txt))
 						}
+					} else if ct == "reasoning" || ct == "thinking" {
+						if txt, ok := ci["text"].(string); ok && strings.TrimSpace(txt) != "" {
+							reasoningParts = append(reasoningParts, strings.TrimSpace(txt))
+						}
 					}
 				}
+			}
+			if reasoning, ok := item["reasoning"].(string); ok && strings.TrimSpace(reasoning) != "" {
+				reasoningParts = append(reasoningParts, strings.TrimSpace(reasoning))
 			}
 		case "output_text":
 			if txt, ok := item["text"].(string); ok && strings.TrimSpace(txt) != "" {
 				textParts = append(textParts, strings.TrimSpace(txt))
+			}
+		case "reasoning":
+			if txt, ok := item["summary"].(string); ok && strings.TrimSpace(txt) != "" {
+				reasoningParts = append(reasoningParts, strings.TrimSpace(txt))
 			}
 		case "function_call":
 			name, _ := item["name"].(string)
@@ -671,21 +689,20 @@ func parseResponsesOutput(body []byte) (string, []responseToolCall, responsesUsa
 	}
 
 	if len(toolCalls) > 0 {
-		return "", toolCalls, responsesUsage{
+		return "", "", toolCalls, responsesUsage{
 			InputTokens:  resp.Usage.InputTokens,
 			OutputTokens: resp.Usage.OutputTokens,
 			TotalTokens:  resp.Usage.TotalTokens,
 		}, true
 	}
-	if len(textParts) > 0 {
-		joined := strings.TrimSpace(strings.Join(textParts, "\n"))
-		return parseMaybeJSON(joined), nil, responsesUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			TotalTokens:  resp.Usage.TotalTokens,
-		}, true
+
+	joined := strings.TrimSpace(strings.Join(textParts, "\n"))
+	reasoning := strings.TrimSpace(strings.Join(reasoningParts, "\n"))
+	if joined == "" && reasoning != "" {
+		joined = reasoning
 	}
-	return "", nil, responsesUsage{
+
+	return parseMaybeJSON(joined), reasoning, nil, responsesUsage{
 		InputTokens:  resp.Usage.InputTokens,
 		OutputTokens: resp.Usage.OutputTokens,
 		TotalTokens:  resp.Usage.TotalTokens,
