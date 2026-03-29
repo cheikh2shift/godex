@@ -1,6 +1,3 @@
-> [!WARNING]
-> I love adding features, please add any requests to the issue tab.
-
 # GoDex - AI Agent
 
 ![GoDex Screenshot](screen3.gif)
