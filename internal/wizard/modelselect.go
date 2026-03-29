@@ -12,6 +12,10 @@ import (
 	"github.com/cheikh2shift/godex/modelquery"
 )
 
+type searchResultMsg struct {
+	models []modelquery.Model
+}
+
 type modelSelectModel struct {
 	textInput      textinput.Model
 	results        []modelquery.Model
@@ -22,8 +26,9 @@ type modelSelectModel struct {
 	done           bool
 	result         string
 	defaultValue   string
-	resultsCh      chan []modelquery.Model
+	currentQuery   string
 	searchCancel   context.CancelFunc
+	pendingSearch  bool
 }
 
 type modelSelectState struct {
@@ -55,32 +60,32 @@ func newModelSelectModel(provider modelquery.Provider, defaultValue string) mode
 		results:        nil,
 		cursor:         -1,
 		provider:       provider,
-		searchDebounce: 300 * time.Millisecond,
+		searchDebounce: 200 * time.Millisecond,
 		defaultValue:   defaultValue,
-		resultsCh:      make(chan []modelquery.Model),
 	}
 }
 
 func (m *modelSelectModel) Init() tea.Cmd {
-	if m.defaultValue != "" {
-		go m.searchDebounced(m.defaultValue)
-	}
-	return textinput.Blink
+	return tea.Batch(
+		textinput.Blink,
+		searchModelsCmd(m.provider, ""),
+	)
 }
 
 func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case []modelquery.Model:
+	case searchResultMsg:
 		m.loading = false
-		m.results = msg
+		m.pendingSearch = false
+		m.results = msg.models
 		if len(m.results) > 6 {
 			m.results = m.results[:6]
 		}
-		if len(m.results) > 0 {
+		if len(m.results) > 0 && m.cursor < 0 {
 			m.cursor = 0
-		} else {
+		} else if len(m.results) == 0 {
 			m.cursor = -1
 		}
 
@@ -122,8 +127,9 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.searchCancel != nil {
 				m.searchCancel()
 			}
-			go m.searchDebounced(m.textInput.Value())
-			return m, cmd
+			m.currentQuery = m.textInput.Value()
+			m.pendingSearch = true
+			return m, tea.Batch(cmd, searchModelsCmd(m.provider, m.currentQuery))
 		default:
 			var textCmd tea.Cmd
 			m.textInput, textCmd = m.textInput.Update(msg)
@@ -134,33 +140,18 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *modelSelectModel) searchDebounced(query string) {
-	if strings.TrimSpace(query) == "" {
-		select {
-		case m.resultsCh <- nil:
-		case <-time.After(time.Second):
+func searchModelsCmd(provider modelquery.Provider, query string) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(200 * time.Millisecond)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		models, err := modelquery.SearchModels(ctx, provider, query)
+		if err != nil || len(models) == 0 {
+			return searchResultMsg{models: nil}
 		}
-		return
-	}
-
-	time.Sleep(m.searchDebounce)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m.searchCancel = cancel
-	defer cancel()
-
-	models, err := modelquery.SearchModels(ctx, m.provider, query)
-	if err != nil {
-		select {
-		case m.resultsCh <- nil:
-		case <-ctx.Done():
-		}
-		return
-	}
-
-	select {
-	case m.resultsCh <- models:
-	case <-ctx.Done():
+		return searchResultMsg{models: models}
 	}
 }
 
@@ -186,7 +177,7 @@ func (m *modelSelectModel) View() string {
 
 	state := m.getState()
 
-	if m.loading && state.results == nil {
+	if m.loading {
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("  Loading..."))
 		b.WriteString("\n")
 	}
@@ -223,26 +214,11 @@ func (m *modelSelectModel) View() string {
 
 func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) (string, int) {
 	m := newModelSelectModel(provider, defaultValue)
-
-	searchDone := make(chan struct{})
-	go func() {
-		for models := range m.resultsCh {
-			m.Update(models)
-		}
-		close(searchDone)
-	}()
-
 	p := tea.NewProgram(&m)
 	finalModel, err := p.Run()
 	if err != nil {
 		return defaultValue, 0
 	}
-
-	if m.searchCancel != nil {
-		m.searchCancel()
-	}
-	close(m.resultsCh)
-	<-searchDone
 
 	result := finalModel.(*modelSelectModel)
 	if result.result == "" {

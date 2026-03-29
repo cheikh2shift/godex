@@ -37,7 +37,7 @@ func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
 		"filter":       "gguf",
 		"sort":         "downloads",
 		"direction":    "-1",
-		"limit":        "50",
+		"limit":        "500",
 		"full":         "false",
 	}
 	url = addParams(url, queryParams)
@@ -46,6 +46,8 @@ func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
 	if err != nil {
 		return nil, fmt.Errorf("huggingface: %w", err)
 	}
+
+	//log.Printf("HuggingFace API response: %s", string(data))
 
 	var resp HuggingFaceResponse
 	if err := json.Unmarshal(data, &resp); err != nil {

@@ -1,17 +1,20 @@
 package providers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +53,9 @@ type llamaProvider struct {
 	serverProcess *os.Process
 	serverPort    int
 	serverMu      sync.Mutex
+	serverReady   bool
+
+	OnDownloadProgress func(DownloadProgress)
 }
 
 func init() {
@@ -146,16 +152,261 @@ func resolveModelPath(model string) (string, bool, error) {
 	return model, false, nil
 }
 
+func resolveModelPathWithDownload(ctx context.Context, model string, downloadProgress chan<- DownloadProgress) (string, string, bool, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "", "", false, fmt.Errorf("empty model name")
+	}
+
+	localPath, isLocal, err := resolveModelPath(model)
+	if err != nil {
+		return "", "", false, err
+	}
+
+	if isLocal {
+		return localPath, model, true, nil
+	}
+
+	if !strings.Contains(model, "/") {
+		return model, model, false, nil
+	}
+
+	modelID := model
+	selectedQuant := ""
+
+	if strings.Contains(model, ":") {
+		parts := strings.SplitN(model, ":", 2)
+		modelID = parts[0]
+		selectedQuant = strings.ToUpper(parts[1])
+	}
+
+	ggufFiles, err := getGGUFFiles(ctx, modelID)
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to list GGUF files: %w", err)
+	}
+
+	if len(ggufFiles) == 0 {
+		return model, model, false, nil
+	}
+
+	quantToFile := make(map[string]string)
+	quantRe := regexp.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
+	for _, f := range ggufFiles {
+		matches := quantRe.FindStringSubmatch(f)
+		if len(matches) >= 2 {
+			quantToFile[strings.ToUpper(matches[1])] = f
+		}
+	}
+
+	if selectedQuant == "" {
+		fmt.Printf("\nAvailable quantizations for %s:\n", modelID)
+		quants := SortQuantizationsKeys(quantToFile)
+		for i, q := range quants {
+			desc := GetQuantizationDescription(q)
+			fmt.Printf("  %d. %s - %s\n", i+1, q, desc)
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("\nSelect quantization (default: 6 for Q4_K_M): ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+
+		if input == "" {
+			idx := slices.Index(quants, "Q4_K_M")
+			if idx >= 0 {
+				selectedQuant = quants[idx]
+			} else {
+				selectedQuant = quants[0]
+			}
+		} else {
+			idx, err := strconv.Atoi(input)
+			if err != nil || idx < 1 || idx > len(quants) {
+				fmt.Println("Invalid selection, using default Q4_K_M")
+				idx = slices.Index(quants, "Q4_K_M")
+				if idx >= 0 {
+					selectedQuant = quants[idx]
+				} else {
+					selectedQuant = quants[0]
+				}
+			} else {
+				selectedQuant = quants[idx-1]
+			}
+		}
+	}
+
+	selectedFile, ok := quantToFile[selectedQuant]
+	if !ok {
+		selectedFile = selectBestGGUF(ggufFiles)
+		if selectedFile == "" {
+			return "", "", false, fmt.Errorf("no suitable GGUF file found for %s", modelID)
+		}
+		fmt.Printf("Selected quantization %s not found, using %s\n", selectedQuant, selectedFile)
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	modelsDir := filepath.Join(homeDir, ".godex", "models")
+	if err := os.MkdirAll(modelsDir, 0755); err != nil {
+		return "", "", false, fmt.Errorf("failed to create models directory: %w", err)
+	}
+
+	filename := filepath.Base(selectedFile)
+	destPath := filepath.Join(modelsDir, filename)
+
+	modelWithQuant := modelID + ":" + selectedQuant
+
+	if fileExists(destPath) {
+		fmt.Printf("[llama.cpp] Using cached model: %s\n", filename)
+		return destPath, modelWithQuant, true, nil
+	}
+
+	log.Printf("[llama.cpp] Downloading model %s to %s", modelID, destPath)
+	fmt.Printf("[llama.cpp] Downloading %s...\n", filename)
+
+	downloadURL := getDownloadURL(modelID, selectedFile)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return "", "", false, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", "", false, fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", "", false, fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	tmpPath := destPath + ".tmp"
+	tmpFile, err := os.Create(tmpPath)
+	if err != nil {
+		return "", "", false, fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	var totalSize int64
+	if resp.ContentLength > 0 {
+		totalSize = resp.ContentLength
+	}
+
+	progressWriter := &progressWriter{
+		w:          tmpFile,
+		total:      totalSize,
+		filename:   filename,
+		progressCh: downloadProgress,
+	}
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := progressWriter.Write(buf[:n]); werr != nil {
+				tmpFile.Close()
+				os.Remove(tmpPath)
+				return "", "", false, fmt.Errorf("failed to write: %w", werr)
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return "", "", false, fmt.Errorf("failed to read: %w", err)
+		}
+	}
+
+	tmpFile.Close()
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return "", "", false, fmt.Errorf("failed to save model: %w", err)
+	}
+
+	return destPath, modelWithQuant, true, nil
+}
+
+type progressWriter struct {
+	w          io.Writer
+	total      int64
+	written    int64
+	filename   string
+	progressCh chan<- DownloadProgress
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.w.Write(p)
+	if n > 0 {
+		pw.written += int64(n)
+		pw.printProgress()
+	}
+	return n, err
+}
+
+func (pw *progressWriter) printProgress() {
+	if pw.total <= 0 {
+		return
+	}
+
+	percent := float64(pw.written) * 100 / float64(pw.total)
+	barWidth := 40
+	filled := int(percent / 100 * float64(barWidth))
+	bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
+
+	fmt.Printf("\r[%s] %.1f%% (%s / %s)", bar, percent,
+		formatBytes(pw.written), formatBytes(pw.total))
+
+	if pw.written >= pw.total {
+		fmt.Println()
+	}
+
+	if pw.progressCh != nil {
+		select {
+		case pw.progressCh <- DownloadProgress{
+			Downloaded: pw.written,
+			Total:      pw.total,
+			Filename:   pw.filename,
+		}:
+		default:
+		}
+	}
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
 func newLlamaProvider(cfg *config.Provider) (Provider, error) {
+	return newLlamaProviderWithProgress(cfg, nil)
+}
+
+type ModelDownloadState struct {
+	ModelID      string
+	Quantization string
+	Progress     chan DownloadProgress
+	Done         chan error
+	ModelPath    string
+}
+
+func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(DownloadProgress)) (Provider, error) {
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
-		model = "qwen2.5-coder-7b Q4_K_M"
+		model = "Qwen/Qwen2.5-3B-Instruct-GGUF"
 	}
 
 	modelPath, isLocal, err := resolveModelPath(model)
 	if err != nil {
 		return nil, err
 	}
+
+	isHFModel := !isLocal && strings.Contains(model, "/")
 
 	serverPath, err := detectLlamaServer()
 	if err != nil {
@@ -168,35 +419,79 @@ func newLlamaProvider(cfg *config.Provider) (Provider, error) {
 	}
 
 	p := &llamaProvider{
-		baseURL:          fmt.Sprintf("http://localhost:%d", port),
-		model:            modelPath,
-		modelIsHF:        !isLocal,
-		cfg:              cfg,
-		temperature:      cfg.Temperature,
-		client:           &http.Client{Timeout: defaultLlamaServerTimeout},
-		messages:         []map[string]interface{}{},
-		contextLimit:     cfg.ContextLimit,
-		pendingToolCalls: make(map[string]string),
-		serverPort:       port,
+		baseURL:            fmt.Sprintf("http://localhost:%d", port),
+		model:              modelPath,
+		modelIsHF:          false,
+		cfg:                cfg,
+		temperature:        cfg.Temperature,
+		client:             &http.Client{Timeout: defaultLlamaServerTimeout},
+		messages:           []map[string]interface{}{},
+		contextLimit:       cfg.ContextLimit,
+		pendingToolCalls:   make(map[string]string),
+		serverPort:         port,
+		serverReady:        false,
+		OnDownloadProgress: downloadProgress,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := p.startServer(ctx, serverPath); err != nil {
-		return nil, fmt.Errorf("failed to start llama-server: %w", err)
-	}
-
-	if p.contextLimit == 0 {
-		if err := p.fetchModelInfo(ctx); err != nil {
-			fmt.Printf("[llama.cpp] Warning: could not fetch model info: %v\n", err)
+	if isHFModel {
+		p.model = ""
+		modelPath, modelWithQuant, _, err := resolveModelPathWithDownload(context.Background(), model, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve model: %w", err)
 		}
+		p.model = modelPath
+		if p.cfg != nil {
+			p.cfg.Model = modelWithQuant
+		}
+		if downloadProgress != nil {
+			downloadProgress(DownloadProgress{
+				Filename: filepath.Base(modelPath),
+				Total:    -1,
+			})
+		}
+		go p.startServerAsync(serverPath)
+	} else {
+		go p.startServerAsync(serverPath)
 	}
 
 	return p, nil
 }
 
-func (p *llamaProvider) startServer(ctx context.Context, serverPath string) error {
+func (p *llamaProvider) startServerAsync(serverPath string) {
+	go func() {
+		log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
+		if err := p.startServerSync(serverPath); err != nil {
+			log.Printf("[llama.cpp] Server start failed: %v", err)
+			return
+		}
+		p.serverReady = true
+		log.Printf("[llama.cpp] Server ready at %s", p.baseURL)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if p.contextLimit == 0 {
+			if err := p.fetchModelInfo(ctx); err != nil {
+				fmt.Printf("[llama.cpp] Warning: could not fetch model info: %v\n", err)
+			}
+		}
+	}()
+}
+
+func (p *llamaProvider) killServer() {
+	p.serverMu.Lock()
+	defer p.serverMu.Unlock()
+
+	if p.serverProcess != nil {
+		p.serverProcess.Kill()
+		p.serverProcess = nil
+	}
+	if p.serverCmd != nil {
+		p.serverCmd.Wait()
+		p.serverCmd = nil
+	}
+}
+
+func (p *llamaProvider) startServerSync(serverPath string) error {
 	p.serverMu.Lock()
 	defer p.serverMu.Unlock()
 
@@ -217,7 +512,9 @@ func (p *llamaProvider) startServer(ctx context.Context, serverPath string) erro
 	}
 	args = append(args, "--log-disable")
 
-	cmd := exec.CommandContext(ctx, serverPath, args...)
+	log.Printf("[llama.cpp] Running: %s %v", serverPath, args)
+
+	cmd := exec.Command(serverPath, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -228,15 +525,15 @@ func (p *llamaProvider) startServer(ctx context.Context, serverPath string) erro
 	p.serverCmd = cmd
 	p.serverProcess = cmd.Process
 
-	waitCtx, waitCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer waitCancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-waitCtx.Done():
+		case <-ctx.Done():
 			p.killServer()
 			return fmt.Errorf("timeout waiting for llama-server to start")
 		case <-ticker.C:
@@ -251,20 +548,6 @@ func (p *llamaProvider) startServer(ctx context.Context, serverPath string) erro
 				}
 			}
 		}
-	}
-}
-
-func (p *llamaProvider) killServer() {
-	p.serverMu.Lock()
-	defer p.serverMu.Unlock()
-
-	if p.serverProcess != nil {
-		p.serverProcess.Kill()
-		p.serverProcess = nil
-	}
-	if p.serverCmd != nil {
-		p.serverCmd.Wait()
-		p.serverCmd = nil
 	}
 }
 
@@ -302,7 +585,31 @@ func (p *llamaProvider) fetchModelInfo(ctx context.Context) error {
 	return nil
 }
 
+func (p *llamaProvider) waitForServerReady(ctx context.Context) error {
+	if p.serverReady {
+		return nil
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if p.serverReady {
+				return nil
+			}
+		}
+	}
+}
+
 func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error) {
+	if err := p.waitForServerReady(ctx); err != nil {
+		return "", fmt.Errorf("server not ready: %w", err)
+	}
+
 	p.sendMu.Lock()
 	defer p.sendMu.Unlock()
 
@@ -616,6 +923,12 @@ func (p *llamaProvider) SetThinkCallback(fn func(string)) {
 	p.OnThink = fn
 }
 
+func (p *llamaProvider) SetDownloadProgressCallback(fn func(DownloadProgress)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.OnDownloadProgress = fn
+}
+
 func (p *llamaProvider) SetStatusChannel(ch chan<- string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -716,9 +1029,65 @@ func (p *llamaProvider) SupportsNativeToolCalls() bool {
 
 func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.model = model
+
+	modelPath, isLocal, err := resolveModelPath(model)
+	if err != nil {
+		p.mu.Unlock()
+		return fmt.Errorf("failed to resolve model path: %w", err)
+	}
+
+	isHFModel := !isLocal && strings.Contains(model, "/")
+
+	var downloadProgressCh chan DownloadProgress
+	if p.OnDownloadProgress != nil && isHFModel {
+		downloadProgressCh = make(chan DownloadProgress, 10)
+		go func() {
+			for prog := range downloadProgressCh {
+				p.OnDownloadProgress(prog)
+			}
+		}()
+	}
+
+	if isHFModel {
+		ctx := context.Background()
+		downloadedPath, modelWithQuant, _, err := resolveModelPathWithDownload(ctx, model, downloadProgressCh)
+		if err != nil {
+			if downloadProgressCh != nil {
+				close(downloadProgressCh)
+			}
+			p.mu.Unlock()
+			return fmt.Errorf("failed to download model: %w", err)
+		}
+		modelPath = downloadedPath
+		model = modelWithQuant
+		isLocal = true
+	}
+
+	if downloadProgressCh != nil {
+		close(downloadProgressCh)
+	}
+
+	p.model = modelPath
+	p.modelIsHF = false
 	p.contextLimit = contextLimit
+	if p.cfg != nil {
+		p.cfg.Model = model
+	}
+
+	needsRestart := p.serverProcess != nil
+	p.mu.Unlock()
+
+	if needsRestart {
+		p.killServer()
+		p.serverReady = false
+
+		serverPath, err := detectLlamaServer()
+		if err != nil {
+			return fmt.Errorf("failed to detect llama-server: %w", err)
+		}
+		go p.startServerAsync(serverPath)
+	}
+
 	return nil
 }
 

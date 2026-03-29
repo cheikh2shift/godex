@@ -811,7 +811,7 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	}
 
 	fmt.Printf("llama-server installed to %s\n", installPath)
-	fmt.Printf("Make sure ~/.godex/bin is in your PATH, or set GODEX_DIR=%s\n", godexDir)
+	fmt.Println("Make sure ~/.godex/bin/llama-server is in your PATH")
 
 	return nil
 }
