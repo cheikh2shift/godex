@@ -30,15 +30,18 @@ type HuggingFaceModel struct {
 type HuggingFaceResponse []HuggingFaceModel
 
 // listHuggingFaceModels queries HuggingFace for available GGUF-compatible models.
-func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
+func listHuggingFaceModels(ctx context.Context, p Provider, query string) ([]Model, error) {
 	url := "https://huggingface.co/api/models"
 	queryParams := map[string]string{
 		"pipeline_tag": "text-generation",
 		"filter":       "gguf",
 		"sort":         "downloads",
 		"direction":    "-1",
-		"limit":        "500",
+		"limit":        "10",
 		"full":         "false",
+	}
+	if query != "" {
+		queryParams["search"] = query
 	}
 	url = addParams(url, queryParams)
 
@@ -47,8 +50,6 @@ func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
 		return nil, fmt.Errorf("huggingface: %w", err)
 	}
 
-	//log.Printf("HuggingFace API response: %s", string(data))
-
 	var resp HuggingFaceResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("huggingface: failed to parse response: %w", err)
@@ -56,10 +57,6 @@ func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
 
 	models := make([]Model, 0, len(resp))
 	for _, m := range resp {
-		if !isGGUFCapable(m) {
-			continue
-		}
-
 		displayName := m.ID
 		if idx := strings.LastIndex(displayName, "/"); idx >= 0 {
 			displayName = displayName[idx+1:]
@@ -79,14 +76,4 @@ func listHuggingFaceModels(ctx context.Context, p Provider) ([]Model, error) {
 	}
 
 	return models, nil
-}
-
-// isGGUFCapable returns true if the model has GGUF files.
-func isGGUFCapable(m HuggingFaceModel) bool {
-	for _, sibling := range m.Siblings {
-		if strings.HasSuffix(strings.ToLower(sibling.Rfilename), ".gguf") {
-			return true
-		}
-	}
-	return false
 }

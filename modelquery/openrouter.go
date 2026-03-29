@@ -55,7 +55,7 @@ type OpenRouterTopProvider struct {
 }
 
 // listOpenRouterModels queries OpenRouter for available models.
-func listOpenRouterModels(ctx context.Context, p Provider) ([]Model, error) {
+func listOpenRouterModels(ctx context.Context, p Provider, query string) ([]Model, error) {
 	url := "https://openrouter.ai/api/v1/models"
 
 	data, err := doRequest(ctx, "GET", url, "", nil)

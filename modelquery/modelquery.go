@@ -49,47 +49,68 @@ type Provider struct {
 //	    fmt.Println(m.ID, m.Name)
 //	}
 func ListModels(ctx context.Context, p Provider) ([]Model, error) {
+	return ListModelsWithQuery(ctx, p, "")
+}
+
+func ListModelsWithQuery(ctx context.Context, p Provider, query string) ([]Model, error) {
 	switch p.Type {
 	case ProviderOllama:
 		return listOllamaModels(ctx, p)
 	case ProviderOpenRouter:
-		return listOpenRouterModels(ctx, p)
+		return listOpenRouterModels(ctx, p, query)
 	case ProviderGemini:
 		return listGeminiModels(ctx, p)
 	case ProviderHuggingFace:
-		return listHuggingFaceModels(ctx, p)
+		return listHuggingFaceModels(ctx, p, query)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", p.Type)
 	}
 }
 
-// SearchModels queries the provider and filters models matching the query.
-// It searches in both model ID and name fields.
-//
-// Example usage:
-//
-//	models, err := modelquery.SearchModels(ctx, provider, "claude")
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
 func SearchModels(ctx context.Context, p Provider, query string) ([]Model, error) {
-	models, err := ListModels(ctx, p)
-	if err != nil {
-		return nil, err
-	}
+	return SearchModelsWithQuery(ctx, p, query)
+}
 
+func SearchModelsWithQuery(ctx context.Context, p Provider, query string) ([]Model, error) {
 	query = normalizeQuery(query)
 	if query == "" {
-		return models, nil
+		return ListModelsWithQuery(ctx, p, "")
 	}
 
+	switch p.Type {
+	case ProviderOllama:
+		models, err := listOllamaModels(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return filterModels(models, query), nil
+	case ProviderOpenRouter:
+		models, err := listOpenRouterModels(ctx, p, "")
+		if err != nil {
+			return nil, err
+		}
+		return filterModels(models, query), nil
+	case ProviderGemini:
+		models, err := listGeminiModels(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return filterModels(models, query), nil
+	case ProviderHuggingFace:
+		return listHuggingFaceModels(ctx, p, query)
+	default:
+		return nil, fmt.Errorf("unsupported provider type: %s", p.Type)
+	}
+}
+
+func filterModels(models []Model, query string) []Model {
 	var result []Model
 	for _, m := range models {
 		if contains(m.ID, query) || contains(m.Name, query) || contains(m.Description, query) {
 			result = append(result, m)
 		}
 	}
-	return result, nil
+	return result
 }
 
 // normalizeQuery lowercases and trims the query string.
