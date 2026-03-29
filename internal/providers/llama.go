@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
@@ -54,6 +55,8 @@ type llamaProvider struct {
 	serverPort    int
 	serverMu      sync.Mutex
 	serverReady   bool
+	serverStarted bool
+	startMu       sync.Mutex
 
 	OnDownloadProgress func(DownloadProgress)
 }
@@ -418,11 +421,23 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		return nil, fmt.Errorf("failed to find free port: %w", err)
 	}
 
+	cfgCopy := &config.Provider{
+		Type:          cfg.Type,
+		Name:          cfg.Name,
+		Model:         cfg.Model,
+		Endpoint:      cfg.Endpoint,
+		APIKey:        cfg.APIKey,
+		Temperature:   cfg.Temperature,
+		ContextLimit:  cfg.ContextLimit,
+		MaxToolRounds: cfg.MaxToolRounds,
+		ToolTimeout:   cfg.ToolTimeout,
+	}
+
 	p := &llamaProvider{
 		baseURL:            fmt.Sprintf("http://localhost:%d", port),
 		model:              modelPath,
 		modelIsHF:          false,
-		cfg:                cfg,
+		cfg:                cfgCopy,
 		temperature:        cfg.Temperature,
 		client:             &http.Client{Timeout: defaultLlamaServerTimeout},
 		messages:           []map[string]interface{}{},
@@ -430,6 +445,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		pendingToolCalls:   make(map[string]string),
 		serverPort:         port,
 		serverReady:        false,
+		serverStarted:      false,
 		OnDownloadProgress: downloadProgress,
 	}
 
@@ -440,24 +456,29 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 			return nil, fmt.Errorf("failed to resolve model: %w", err)
 		}
 		p.model = modelPath
-		if p.cfg != nil {
-			p.cfg.Model = modelWithQuant
-		}
+		p.cfg.Model = modelWithQuant
 		if downloadProgress != nil {
 			downloadProgress(DownloadProgress{
 				Filename: filepath.Base(modelPath),
 				Total:    -1,
 			})
 		}
-		go p.startServerAsync(serverPath)
-	} else {
-		go p.startServerAsync(serverPath)
 	}
+
+	p.startServerAsync(serverPath)
 
 	return p, nil
 }
 
 func (p *llamaProvider) startServerAsync(serverPath string) {
+	p.startMu.Lock()
+	if p.serverStarted {
+		p.startMu.Unlock()
+		return
+	}
+	p.serverStarted = true
+	p.startMu.Unlock()
+
 	go func() {
 		log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
 		if err := p.startServerSync(serverPath); err != nil {
@@ -465,7 +486,7 @@ func (p *llamaProvider) startServerAsync(serverPath string) {
 			return
 		}
 		p.serverReady = true
-		log.Printf("[llama.cpp] Server ready at %s", p.baseURL)
+		//log.Printf("[llama.cpp] Server ready at %s\n", p.baseURL)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -482,7 +503,7 @@ func (p *llamaProvider) killServer() {
 	defer p.serverMu.Unlock()
 
 	if p.serverProcess != nil {
-		p.serverProcess.Kill()
+		p.serverProcess.Signal(syscall.SIGTERM)
 		p.serverProcess = nil
 	}
 	if p.serverCmd != nil {
@@ -1075,17 +1096,21 @@ func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 	}
 
 	needsRestart := p.serverProcess != nil
-	p.mu.Unlock()
-
 	if needsRestart {
 		p.killServer()
 		p.serverReady = false
+		p.startMu.Lock()
+		p.serverStarted = false
+		p.startMu.Unlock()
+	}
+	p.mu.Unlock()
 
+	if needsRestart {
 		serverPath, err := detectLlamaServer()
 		if err != nil {
 			return fmt.Errorf("failed to detect llama-server: %w", err)
 		}
-		go p.startServerAsync(serverPath)
+		p.startServerAsync(serverPath)
 	}
 
 	return nil

@@ -1002,6 +1002,7 @@ promptLoop:
 
 	cancel()
 	cleanup(servers)
+	agent.CloseProvider(provider)
 	if hiveMgr != nil {
 		hiveMgr.Close()
 	}
