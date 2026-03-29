@@ -531,7 +531,7 @@ func (p *llamaProvider) startServerSync(serverPath string) error {
 	if p.contextLimit > 0 {
 		args = append(args, "-c", strconv.Itoa(p.contextLimit))
 	}
-	args = append(args, "--log-disable")
+	args = append(args, "--log-disable", "--jinja")
 
 	log.Printf("[llama.cpp] Running: %s %v", serverPath, args)
 
