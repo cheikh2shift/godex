@@ -5,15 +5,39 @@
 
 ![GoDex Screenshot](screen3.gif)
 
-GoDex is an AI agent that interfaces with Ollama, Gemini, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
+GoDex is an AI agent that interfaces with Ollama, llama.cpp, Gemini, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
 
 Orchestration and parallel tasks? open another terminal tab and start a new instance of `godex`.
 
 ## Requirements
 
 - **Go 1.25.7+** - Build from source
-- **Ollama** - For the default LLM backend (or use Gemini or OpenRouter)
+- **Ollama** - For the default LLM backend (or use Gemini, OpenRouter, or llama.cpp)
 
+## Table of Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+  - [Quick Install](#quick-install-linuxmacos)
+  - [Docker](#quick-install-docker)
+  - [Build from Source](#build-from-source)
+  - [Manual Download](#manual-download)
+- [Setting up providers](#setting-up-providers)
+  - [Ollama Setup](#ollama-setup)
+  - [OpenRouter Setup](#openrouter-setup)
+  - [llama.cpp Setup](#llamacpp-setup)
+- [Configuration](#configuration)
+  - [Quick Setup](#quick-setup)
+  - [Manual Configuration](#manual-configuration)
+  - [Configuration Options](#configuration-options)
+  - [MCP Servers](#mcp-servers)
+  - [Hive Network](#hive-network)
+- [Usage](#usage)
+  - [Shell Completion](#shell-completion)
+  - [Commands in TUI](#commands-in-tui)
+- [Building](#building)
+- [Running Securely with Docker](#running-securely-with-docker)
+- [Troubleshooting](#troubleshooting)
 
 ## Installation
 
@@ -77,6 +101,27 @@ sudo mv godex /usr/local/bin/
    godex --wizard
    ```
    Select `openrouter` as the provider type and choose from 100+ available models.
+
+### llama.cpp Setup
+
+1. **Install llama.cpp**: Download from https://github.com/ggerganov/llama.cpp/releases or build from source
+
+2. **Ensure llama-server is in your PATH**: The binary should be named `llama-server` and accessible from command line
+
+3. **Run the wizard** to configure:
+   ```bash
+   godex --wizard
+   ```
+   Select `llama.cpp` as the provider type. GoDex will automatically download models from Hugging Face or use local GGUF files.
+
+4. **Using an external llama-server** (optional):
+   ```bash
+   # Start llama-server manually with jinja support for function calling
+   llama-server -m models/your-model.gguf -fa -c 8192 --jinja
+   
+   # Connect godex to it
+   godex --llama-server http://localhost:8080
+   ```
 
 ## Configuration
 
@@ -151,8 +196,8 @@ Docker note: from inside the GoDex container, use `http://ollama-proxy:11434` to
 | Field | Description |
 |-------|-------------|
 | `name` | Provider identifier |
-| `type` | Provider type: `ollama`, `gemini` or `openrouter` |
-| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, OpenRouter: `https://openrouter.ai/api/v1`) |
+| `type` | Provider type: `ollama`, `llama.cpp`, `gemini` or `openrouter` |
+| `endpoint` | Base URL for provider (Ollama: `http://localhost:11434`, llama.cpp: `http://localhost:8080`, OpenRouter: `https://openrouter.ai/api/v1`) |
 | `model` | Model name (e.g., `nemotron-3-super:cloud`, `codellama`, `minimax-m2.7:cloud` |
 | `description` | Human-readable description |
 | `temperature` | LLM temperature (0.0-1.0) |
