@@ -23,6 +23,7 @@ type modelSelectModel struct {
 	result         string
 	defaultValue   string
 	resultsCh      chan []modelquery.Model
+	searchCancel   context.CancelFunc
 }
 
 type modelSelectState struct {
@@ -56,11 +57,14 @@ func newModelSelectModel(provider modelquery.Provider, defaultValue string) mode
 		provider:       provider,
 		searchDebounce: 300 * time.Millisecond,
 		defaultValue:   defaultValue,
-		resultsCh:      make(chan []modelquery.Model, 1),
+		resultsCh:      make(chan []modelquery.Model),
 	}
 }
 
 func (m *modelSelectModel) Init() tea.Cmd {
+	if m.defaultValue != "" {
+		go m.searchDebounced(m.defaultValue)
+	}
 	return textinput.Blink
 }
 
@@ -115,6 +119,9 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = -1
 			m.loading = true
 			m.results = nil
+			if m.searchCancel != nil {
+				m.searchCancel()
+			}
 			go m.searchDebounced(m.textInput.Value())
 			return m, cmd
 		default:
@@ -129,22 +136,32 @@ func (m *modelSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *modelSelectModel) searchDebounced(query string) {
 	if strings.TrimSpace(query) == "" {
-		m.resultsCh <- nil
+		select {
+		case m.resultsCh <- nil:
+		case <-time.After(time.Second):
+		}
 		return
 	}
 
 	time.Sleep(m.searchDebounce)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	m.searchCancel = cancel
 	defer cancel()
 
 	models, err := modelquery.SearchModels(ctx, m.provider, query)
 	if err != nil {
-		m.resultsCh <- nil
+		select {
+		case m.resultsCh <- nil:
+		case <-ctx.Done():
+		}
 		return
 	}
 
-	m.resultsCh <- models
+	select {
+	case m.resultsCh <- models:
+	case <-ctx.Done():
+	}
 }
 
 func formatContextLen(n int) string {
@@ -207,10 +224,12 @@ func (m *modelSelectModel) View() string {
 func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) (string, int) {
 	m := newModelSelectModel(provider, defaultValue)
 
+	searchDone := make(chan struct{})
 	go func() {
 		for models := range m.resultsCh {
 			m.Update(models)
 		}
+		close(searchDone)
 	}()
 
 	p := tea.NewProgram(&m)
@@ -218,6 +237,13 @@ func ModelSelectPrompt(provider modelquery.Provider, defaultValue string) (strin
 	if err != nil {
 		return defaultValue, 0
 	}
+
+	if m.searchCancel != nil {
+		m.searchCancel()
+	}
+	close(m.resultsCh)
+	<-searchDone
+
 	result := finalModel.(*modelSelectModel)
 	if result.result == "" {
 		return defaultValue, 0

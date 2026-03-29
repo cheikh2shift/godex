@@ -1421,6 +1421,8 @@ func buildMQProvider(provider *config.Provider) modelquery.Provider {
 	switch provider.Type {
 	case "ollama":
 		mqProvider.Type = modelquery.ProviderOllama
+	case "llama", "llamacpp":
+		mqProvider.Type = modelquery.ProviderHuggingFace
 	case "gemini":
 		mqProvider.Type = modelquery.ProviderGemini
 	case "openrouter":

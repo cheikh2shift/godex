@@ -97,19 +97,29 @@ func RunWizard(destination string) error {
 		return defaultVal
 	}
 
-	provider.Name = prompt(reader, "Provider name", getDefault("name", "my-local-identifier"))
-	provider.Type = selectPrompt("Provider type", []selectOption{
+	providerName, err := prompt(reader, "Provider name", getDefault("name", "my-local-identifier"))
+	if err != nil || providerName == "" {
+		return nil
+	}
+	provider.Name = providerName
+	providerType, err := selectPrompt("Provider type", []selectOption{
 		{label: "ollama", desc: "LLM via Ollama"},
+		{label: "llama", desc: "LLM via llama.cpp (local, no server needed)"},
 		{label: "gemini", desc: "Google Gemini API"},
 		{label: "openrouter", desc: "OpenRouter (OpenAI, Anthropic, Meta models)"},
-	}, getDefault("type", "ollama"), false)
+	}, getDefault("type", "ollama"), true)
+	if err != nil || providerType == "" {
+		fmt.Println("\nSetup cancelled.")
+		return nil
+	}
+	provider.Type = providerType
 
 	if provider.Params == nil {
 		provider.Params = map[string]string{}
 	}
 
 	if provider.Type == "openrouter" {
-		authMethod := selectPrompt("OpenRouter authentication", []selectOption{
+		authMethod, _ := selectPrompt("OpenRouter authentication", []selectOption{
 			{label: "oauth", desc: "Login via browser (OAuth PKCE) - opens browser"},
 			{label: "manual", desc: "Enter API key manually"},
 			{label: "env", desc: "Use OPENROUTER_API_KEY from environment"},
@@ -119,38 +129,46 @@ func RunWizard(destination string) error {
 			apiKey, err := doOpenRouterOAuth()
 			if err != nil {
 				fmt.Printf("OAuth failed: %v. Falling back to manual entry.\n", err)
-				provider.APIKey = prompt(reader, "OpenRouter API key", "")
+				provider.APIKey, _ = prompt(reader, "OpenRouter API key", "")
 			} else {
 				provider.APIKey = apiKey
 				fmt.Println("Successfully authenticated with OpenRouter!")
 			}
 		} else if authMethod == "manual" {
-			provider.APIKey = prompt(reader, "OpenRouter API key", "")
+			provider.APIKey, _ = prompt(reader, "OpenRouter API key", "")
 		} else if authMethod == "env" {
 			provider.APIKeyEnv = "OPENROUTER_API_KEY"
 		}
-		provider.Endpoint = prompt(reader, "OpenRouter base URL", getDefault("endpoint", "https://openrouter.ai/api/v1"))
+		provider.Endpoint, _ = prompt(reader, "OpenRouter base URL", getDefault("endpoint", "https://openrouter.ai/api/v1"))
 
 	} else if provider.Type == "gemini" {
-		backend := selectPrompt("Backend", []selectOption{
+		backend, _ := selectPrompt("Backend", []selectOption{
 			{label: "gemini", desc: "Use Google Gemini API directly"},
 			{label: "vertex", desc: "Use Google Cloud Vertex AI (requires GCP setup)"},
 		}, getDefault("backend", "gemini"))
 		provider.Params["backend"] = backend
 		if backend == "vertex" || backend == "vertexai" {
-			provider.Params["project"] = prompt(reader, "Vertex project", getDefault("project", ""))
-			provider.Params["location"] = prompt(reader, "Vertex location", "us-central1")
+			provider.Params["project"], _ = prompt(reader, "Vertex project", getDefault("project", ""))
+			provider.Params["location"], _ = prompt(reader, "Vertex location", "us-central1")
 		} else {
-			provider.APIKeyEnv = prompt(reader, "API key environment variable", getDefault("api_key_env", "GEMINI_API_KEY"))
+			provider.APIKeyEnv, _ = prompt(reader, "API key environment variable", getDefault("api_key_env", "GEMINI_API_KEY"))
 		}
 	} else if provider.Type == "ollama" {
-		provider.Endpoint = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
+		provider.Endpoint, _ = prompt(reader, "Ollama base URL", getDefault("endpoint", "http://localhost:11434"))
 		provider.Params["backend"] = "ollama"
+	} else if provider.Type == "llama" {
+		provider.Params["backend"] = "llama"
+		if err := checkOrInstallLlamaServer(reader); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+			fmt.Println("You can still configure the provider, but it may not work until llama-server is available.")
+		}
 	}
 
 	modelDefault := providers.DefaultGeminiModel
 	if provider.Type == "ollama" {
 		modelDefault = providers.DefaultOllamaModel
+	} else if provider.Type == "llama" {
+		modelDefault = "Qwen/Qwen2.5-3B-Instruct-GGUF"
 	} else if provider.Type == "openrouter" {
 		modelDefault = "moonshotai/kimi-k2.5"
 	}
@@ -159,6 +177,8 @@ func RunWizard(destination string) error {
 	switch provider.Type {
 	case "ollama":
 		mqProvider.Type = modelquery.ProviderOllama
+	case "llama":
+		mqProvider.Type = modelquery.ProviderHuggingFace
 	case "gemini":
 		mqProvider.Type = modelquery.ProviderGemini
 	case "openrouter":
@@ -170,23 +190,23 @@ func RunWizard(destination string) error {
 	modelID, _ := ModelSelectPrompt(mqProvider, getDefault("model", modelDefault))
 	provider.Model = modelID
 
-	provider.Description = prompt(reader, "Description", getDefault("description", "This model is red"))
+	provider.Description, _ = prompt(reader, "Description", getDefault("description", "This model is red"))
 
-	tempStr := prompt(reader, "Temperature (0.0-1.0). The higher the value, the more random the output.", getDefault("temperature", "0.5"))
+	tempStr, _ := prompt(reader, "Temperature (0.0-1.0). The higher the value, the more random the output.", getDefault("temperature", "0.5"))
 	if tempStr != "" {
 		if val, err := strconv.ParseFloat(tempStr, 64); err == nil {
 			provider.Temperature = &val
 		}
 	}
 
-	maxRoundsStr := prompt(reader, "Max tool rounds (10)", getDefault("max_tool_rounds", "10"))
+	maxRoundsStr, _ := prompt(reader, "Max tool rounds (10)", getDefault("max_tool_rounds", "10"))
 	if maxRoundsStr != "" {
 		if val, err := strconv.Atoi(maxRoundsStr); err == nil {
 			provider.MaxToolRounds = &val
 		}
 	}
 
-	toolTimeoutStr := prompt(reader, "Tool timeout in seconds (180)", getDefault("tool_timeout", "180"))
+	toolTimeoutStr, _ := prompt(reader, "Tool timeout in seconds (180)", getDefault("tool_timeout", "180"))
 	if toolTimeoutStr != "" {
 		if val, err := strconv.Atoi(toolTimeoutStr); err == nil {
 			provider.ToolTimeout = &val
@@ -245,7 +265,7 @@ func RunWizard(destination string) error {
 	return nil
 }
 
-func prompt(reader *bufio.Reader, question, def string) string {
+func prompt(reader *bufio.Reader, question, def string) (string, error) {
 	for attempts := 0; attempts < 3; attempts++ {
 		if def != "" {
 			fmt.Printf("%s [%s]: ", question, def)
@@ -253,17 +273,21 @@ func prompt(reader *bufio.Reader, question, def string) string {
 			fmt.Printf("%s: ", question)
 		}
 		input, _ := reader.ReadString('\n')
+		if len(input) > 0 && input[0] == 27 {
+			fmt.Println("\nSetup cancelled.")
+			return "", nil
+		}
 		input = strings.TrimSpace(input)
 		if input == "" {
-			return def
+			return def, nil
 		}
 		if looksLikePromptEcho(input) {
 			fmt.Println("Input looked like a prompt echo. Please enter a value.")
 			continue
 		}
-		return input
+		return input, nil
 	}
-	return def
+	return def, nil
 }
 
 func promptYesNo(reader *bufio.Reader, question string, def bool) bool {
@@ -389,7 +413,7 @@ func (m selectModel) View() string {
 	return b.String()
 }
 
-func selectPrompt(title string, options []selectOption, defaultVal string, allowCancel ...bool) string {
+func selectPrompt(title string, options []selectOption, defaultVal string, allowCancel ...bool) (string, error) {
 	m := newSelectModel(options)
 	if len(allowCancel) > 0 && !allowCancel[0] {
 		m.allowCancel = false
@@ -403,13 +427,13 @@ func selectPrompt(title string, options []selectOption, defaultVal string, allow
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
-		return defaultVal
+		return defaultVal, err
 	}
 	result := finalModel.(selectModel)
 	if result.result == "" {
-		return defaultVal
+		return defaultVal, nil
 	}
-	return result.result
+	return result.result, nil
 }
 
 type multiSelectModel struct {
@@ -646,4 +670,148 @@ func exchangeCodeForKey(code, codeVerifier string) (string, error) {
 	}
 
 	return result.Key, nil
+}
+
+type progressWriter struct {
+	total       int64
+	downloaded  int64
+	lastPercent int
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pw.downloaded += int64(n)
+	if pw.total > 0 {
+		percent := int(float64(pw.downloaded) / float64(pw.total) * 100)
+		if percent != pw.lastPercent && percent <= 100 {
+			pw.lastPercent = percent
+			barWidth := 40
+			filled := (barWidth * percent) / 100
+			bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
+			fmt.Printf("\r[%s] %d%% (%.1f MB)", bar, percent, float64(pw.downloaded)/1024/1024)
+			if percent == 100 {
+				fmt.Println()
+			}
+		}
+	}
+	return n, nil
+}
+
+func checkOrInstallLlamaServer(reader *bufio.Reader) error {
+	paths := []string{}
+
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		paths = append(paths,
+			filepath.Join(homeDir, ".godex", "llama-server"),
+			filepath.Join(homeDir, ".godex", "bin", "llama-server"),
+		)
+	}
+
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if err := os.Chmod(p, 0755); err == nil {
+				return nil
+			}
+		}
+	}
+
+	if _, err := exec.LookPath("llama-server"); err == nil {
+		return nil
+	}
+
+	fmt.Println()
+	fmt.Println("llama-server not found in PATH or ~/.godex/")
+	fmt.Println("To use llama.cpp, you need to install llama-server.")
+	fmt.Println()
+
+	install := promptYesNo(reader, "Would you like to download and install llama-server now? (y/N)", false)
+	if !install {
+		return fmt.Errorf("llama-server not installed")
+	}
+
+	godexDir := filepath.Join(homeDir, ".godex")
+	installDir := filepath.Join(godexDir, "bin")
+
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return fmt.Errorf("failed to create install directory: %w", err)
+	}
+
+	arch := runtime.GOARCH
+	osName := runtime.GOOS
+	if osName == "darwin" {
+		osName = "macos"
+	}
+
+	latestURL := fmt.Sprintf("https://github.com/ggml-org/llama.cpp/releases/latest/download/llama-server-%s-%s.tar.gz", osName, arch)
+	installPath := filepath.Join(installDir, "llama-server")
+
+	resp, err := http.Get(latestURL)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		fmt.Printf("No pre-built binary found for %s/%s, building from source is not supported in the wizard.\n", osName, arch)
+		fmt.Println("Please install llama.cpp manually or use a different provider.")
+		return fmt.Errorf("no pre-built binary for %s/%s", osName, arch)
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	totalSize := resp.ContentLength
+	fmt.Printf("Downloading %s...\n", latestURL)
+	if totalSize > 0 {
+		fmt.Printf("Total size: %.1f MB\n", float64(totalSize)/1024/1024)
+	}
+	fmt.Println()
+
+	tmpFile := filepath.Join(os.TempDir(), "llama-server.tar.gz")
+	outFile, err := os.Create(tmpFile)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	writer := &progressWriter{total: totalSize}
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := outFile.Write(buf[:n]); werr != nil {
+				outFile.Close()
+				return fmt.Errorf("failed to write: %w", werr)
+			}
+			writer.Write(buf[:n])
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			outFile.Close()
+			return fmt.Errorf("failed to read: %w", err)
+		}
+	}
+	outFile.Close()
+
+	fmt.Println("Download complete. Extracting...")
+
+	extractCmd := exec.Command("tar", "-xzf", tmpFile, "-C", installDir)
+	if err := extractCmd.Run(); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to extract: %w", err)
+	}
+
+	os.Remove(tmpFile)
+
+	if err := os.Chmod(installPath, 0755); err != nil {
+		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	fmt.Printf("llama-server installed to %s\n", installPath)
+	fmt.Printf("Make sure ~/.godex/bin is in your PATH, or set GODEX_DIR=%s\n", godexDir)
+
+	return nil
 }

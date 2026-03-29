@@ -218,6 +218,7 @@ func TestProviderTypes(t *testing.T) {
 		{ProviderOllama, "ollama"},
 		{ProviderOpenRouter, "openrouter"},
 		{ProviderGemini, "gemini"},
+		{ProviderHuggingFace, "huggingface"},
 	}
 
 	for _, tt := range tests {
@@ -261,5 +262,92 @@ func TestProviderStruct(t *testing.T) {
 	}
 	if p.APIKey != "test-key" {
 		t.Errorf("Provider.APIKey = %v, want test-key", p.APIKey)
+	}
+}
+
+func TestHuggingFaceListModels(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	p := Provider{
+		Type: ProviderHuggingFace,
+	}
+
+	models, err := ListModels(ctx, p)
+	if err != nil {
+		t.Skipf("HuggingFace not available: %v", err)
+	}
+
+	if len(models) == 0 {
+		t.Fatal("expected at least one GGUF model from HuggingFace")
+	}
+
+	var hasGGUF bool
+	for _, m := range models {
+		if contains(m.ID, "gguf") || contains(m.Description, "gguf") {
+			hasGGUF = true
+		}
+		t.Logf("Model: ID=%s Name=%s Description=%s", m.ID, m.Name, m.Description)
+	}
+
+	if !hasGGUF {
+		t.Error("expected at least one GGUF model")
+	}
+}
+
+func TestHuggingFaceSearchModels(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	p := Provider{
+		Type: ProviderHuggingFace,
+	}
+
+	models, err := SearchModels(ctx, p, "llama")
+	if err != nil {
+		t.Skipf("HuggingFace not available: %v", err)
+	}
+
+	t.Logf("Found %d models matching 'llama'", len(models))
+	for _, m := range models {
+		t.Logf("Model: ID=%s Name=%s", m.ID, m.Name)
+	}
+}
+
+func TestHuggingFaceSearchModelsQwen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	p := Provider{
+		Type: ProviderHuggingFace,
+	}
+
+	models, err := SearchModels(ctx, p, "qwen")
+	if err != nil {
+		t.Skipf("HuggingFace not available: %v", err)
+	}
+
+	t.Logf("Found %d models matching 'qwen'", len(models))
+	for _, m := range models {
+		t.Logf("Model: ID=%s Name=%s", m.ID, m.Name)
+	}
+}
+
+func TestHuggingFaceSearchModelsMistral(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	p := Provider{
+		Type: ProviderHuggingFace,
+	}
+
+	models, err := SearchModels(ctx, p, "mistral")
+	if err != nil {
+		t.Skipf("HuggingFace not available: %v", err)
+	}
+
+	t.Logf("Found %d models matching 'mistral'", len(models))
+	for _, m := range models {
+		t.Logf("Model: ID=%s Name=%s", m.ID, m.Name)
 	}
 }

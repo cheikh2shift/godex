@@ -15,9 +15,10 @@ import (
 type ProviderType string
 
 const (
-	ProviderOllama     ProviderType = "ollama"
-	ProviderOpenRouter ProviderType = "openrouter"
-	ProviderGemini     ProviderType = "gemini"
+	ProviderOllama      ProviderType = "ollama"
+	ProviderOpenRouter  ProviderType = "openrouter"
+	ProviderGemini      ProviderType = "gemini"
+	ProviderHuggingFace ProviderType = "huggingface"
 )
 
 // Model represents a machine learning model with its metadata.
@@ -55,6 +56,8 @@ func ListModels(ctx context.Context, p Provider) ([]Model, error) {
 		return listOpenRouterModels(ctx, p)
 	case ProviderGemini:
 		return listGeminiModels(ctx, p)
+	case ProviderHuggingFace:
+		return listHuggingFaceModels(ctx, p)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", p.Type)
 	}
