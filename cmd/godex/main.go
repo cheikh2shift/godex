@@ -97,13 +97,14 @@ var (
 
 func main() {
 	var (
-		configPath    string
-		providerName  string
-		runWizard     bool
-		prompt        string
-		autoConfirm   bool
-		modelOverride string
-		hiveCode      string
+		configPath     string
+		providerName   string
+		runWizard      bool
+		prompt         string
+		autoConfirm    bool
+		modelOverride  string
+		hiveCode       string
+		llamaServerURL string
 	)
 
 	home, err := os.UserHomeDir()
@@ -121,6 +122,7 @@ func main() {
 	flag.BoolVar(&printVersion, "version", false, "print version information")
 	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
 	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
+	flag.StringVar(&llamaServerURL, "llama-server", "", "external llama.cpp server URL (e.g. http://localhost:9090). If set, won't launch inline server")
 	flag.Parse()
 
 	if os.Getenv("GODEX_COMPLETE") != "" {
@@ -185,6 +187,9 @@ func main() {
 	}
 	if strings.TrimSpace(modelOverride) != "" {
 		provider.Model = strings.TrimSpace(modelOverride)
+	}
+	if strings.TrimSpace(llamaServerURL) != "" {
+		provider.LlamaServerURL = strings.TrimSpace(llamaServerURL)
 	}
 	llmProvider, err := agent.GetProvider(provider)
 	if err != nil {

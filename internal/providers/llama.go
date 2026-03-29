@@ -410,15 +410,28 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 	}
 
 	isHFModel := !isLocal && strings.Contains(model, "/")
+	externalURL := strings.TrimSpace(cfg.LlamaServerURL)
 
-	serverPath, err := detectLlamaServer()
-	if err != nil {
-		return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", err)
-	}
+	var baseURL string
+	var serverPath string
+	var port int
+	var serverReady bool
 
-	port, err := findFreePort()
-	if err != nil {
-		return nil, fmt.Errorf("failed to find free port: %w", err)
+	if externalURL != "" {
+		baseURL = externalURL
+		serverReady = true
+		log.Printf("[llama.cpp] Using external server at %s", baseURL)
+	} else {
+		serverPath, err = detectLlamaServer()
+		if err != nil {
+			return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", err)
+		}
+
+		port, err = findFreePort()
+		if err != nil {
+			return nil, fmt.Errorf("failed to find free port: %w", err)
+		}
+		baseURL = fmt.Sprintf("http://localhost:%d", port)
 	}
 
 	cfgCopy := &config.Provider{
@@ -434,7 +447,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 	}
 
 	p := &llamaProvider{
-		baseURL:            fmt.Sprintf("http://localhost:%d", port),
+		baseURL:            baseURL,
 		model:              modelPath,
 		modelIsHF:          false,
 		cfg:                cfgCopy,
@@ -444,7 +457,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		contextLimit:       cfg.ContextLimit,
 		pendingToolCalls:   make(map[string]string),
 		serverPort:         port,
-		serverReady:        false,
+		serverReady:        serverReady,
 		serverStarted:      false,
 		OnDownloadProgress: downloadProgress,
 	}
@@ -465,7 +478,9 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		}
 	}
 
-	p.startServerAsync(serverPath)
+	if externalURL == "" {
+		p.startServerAsync(serverPath)
+	}
 
 	return p, nil
 }

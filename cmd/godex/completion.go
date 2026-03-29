@@ -62,6 +62,7 @@ PROG="{{.ProgName}}"
     echo "--version:print version information"
     echo "--debug:enable debug mode"
     echo "--completion:generate shell completion"
+    echo "--llama-server:external llama.cpp server URL"
 }
 
 _{{.ProgName}}_completion() {
@@ -354,6 +355,7 @@ func printFlagCompletions() {
 		"--version",
 		"--debug",
 		"--completion",
+		"--llama-server",
 		"--help",
 	}
 	for _, f := range flags {
@@ -407,6 +409,7 @@ complete -c godex -l auto-confirm -s y -f
 complete -c godex -l version -s v -f
 complete -c godex -l debug -s d -f
 complete -c godex -l completion -x -a "bash zsh fish" -d "Generate shell completion"
+complete -c godex -l llama-server -s l -x -d "External llama.cpp server URL"
 `, defaultConfigPath, defaultConfigPath)
 }
 

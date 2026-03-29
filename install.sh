@@ -150,6 +150,7 @@ godex_get_flags_with_desc() {
     echo "--version:print version information"
     echo "--debug:enable debug mode"
     echo "--completion:generate shell completion"
+    echo "--llama-server:external llama.cpp server URL"
 }
 
 _cgodex_completion() {

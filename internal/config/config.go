@@ -19,19 +19,20 @@ type MCPServer struct {
 
 // Provider describes a single LLM provider, referenced from the TUI agent.
 type Provider struct {
-	Name          string            `yaml:"name"`
-	Type          string            `yaml:"type"`
-	Endpoint      string            `yaml:"endpoint"`
-	Model         string            `yaml:"model,omitempty"`
-	Description   string            `yaml:"description,omitempty"`
-	APIKey        string            `yaml:"api_key,omitempty"`
-	APIKeyEnv     string            `yaml:"api_key_env,omitempty"`
-	Temperature   *float64          `yaml:"temperature,omitempty"`
-	MaxToolRounds *int              `yaml:"max_tool_rounds,omitempty"`
-	ToolTimeout   *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180
-	ContextLimit  int               `yaml:"context_limit,omitempty"`
-	Params        map[string]string `yaml:"params,omitempty"`
-	MCPServers    []MCPServer       `yaml:"mcp_servers,omitempty"`
+	Name           string            `yaml:"name"`
+	Type           string            `yaml:"type"`
+	Endpoint       string            `yaml:"endpoint"`
+	Model          string            `yaml:"model,omitempty"`
+	Description    string            `yaml:"description,omitempty"`
+	APIKey         string            `yaml:"api_key,omitempty"`
+	APIKeyEnv      string            `yaml:"api_key_env,omitempty"`
+	Temperature    *float64          `yaml:"temperature,omitempty"`
+	MaxToolRounds  *int              `yaml:"max_tool_rounds,omitempty"`
+	ToolTimeout    *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180
+	ContextLimit   int               `yaml:"context_limit,omitempty"`
+	Params         map[string]string `yaml:"params,omitempty"`
+	MCPServers     []MCPServer       `yaml:"mcp_servers,omitempty"`
+	LlamaServerURL string            `yaml:"-"` // CLI override for external llama.cpp server (not persisted)
 }
 
 // Config is a list of providers, with a default provider name for the CLI.
