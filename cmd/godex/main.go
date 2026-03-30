@@ -268,7 +268,7 @@ func main() {
 			if !native {
 				toolsDesc = getToolsDescription(servers)
 			}
-			fullPrompt := buildFullPrompt(native, toolsDesc, "", wd, prompt, "")
+			fullPrompt := buildFullPrompt(native, toolsDesc, "", wd, prompt, "", hiveCode)
 			maxRounds := 10
 			if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
 				maxRounds = *provider.MaxToolRounds
@@ -416,7 +416,11 @@ promptLoop:
 				if !native {
 					toolsDesc = getToolsDescription(servers)
 				}
-				fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
+				var hiveInstanceID string
+				if hiveMgr != nil {
+					hiveInstanceID = hiveMgr.Instance().ID
+				}
+				fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "", hiveInstanceID)
 				maxRounds := 10
 				if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
 					maxRounds = *provider.MaxToolRounds
@@ -686,7 +690,7 @@ promptLoop:
 
 		sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
 
-		fullPrompt := buildFullPrompt(nativeToolCalls, toolsSection, sessionContext, wd, input, "")
+		fullPrompt := buildFullPrompt(nativeToolCalls, toolsSection, sessionContext, wd, input, "", "")
 
 		maxToolRounds := 10
 		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -988,7 +992,11 @@ promptLoop:
 					if !native {
 						toolsDesc = getToolsDescription(servers)
 					}
-					fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "")
+					var hiveInstanceID string
+					if hiveMgr != nil {
+						hiveInstanceID = hiveMgr.Instance().ID
+					}
+					fullPrompt := buildFullPrompt(native, toolsDesc, sessionContext, wd, completionMsg, "", hiveInstanceID)
 					maxRounds := 10
 					if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
 						maxRounds = *provider.MaxToolRounds
@@ -1597,7 +1605,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	if !nativeToolCalls {
 		toolsDesc = getToolsDescription(servers)
 	}
-	fullPrompt := buildFullPrompt(nativeToolCalls, toolsDesc, "", wd, prompt, tree)
+	fullPrompt := buildFullPrompt(nativeToolCalls, toolsDesc, "", wd, prompt, tree, "")
 
 	// Get tool settings
 	maxToolRounds := 10
@@ -1620,18 +1628,23 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	return nil
 }
 
-func buildFullPrompt(nativeToolCalls bool, toolsSection, sessionContext, wd, input, tree string) string {
+func buildFullPrompt(nativeToolCalls bool, toolsSection, sessionContext, wd, input, tree, hiveInstanceID string) string {
 	base := ""
 	if sessionContext != "" {
 		base = sessionContext + "\n\n"
 	}
+	hiveInfo := ""
+	if hiveInstanceID != "" {
+		hiveInfo = fmt.Sprintf(`- Hive Instance ID: %s. You can't assign a task to yourself, but you can ask other hive workers to perform tasks for you.
+`, hiveInstanceID)
+	}
 	base += fmt.Sprintf(`CRITICAL INFORMATION:
 - Operating System: %s (%s)
 - Current working directory: %s
-Use this path when the user asks about "this folder", "current directory", or similar.
+%sUse this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-`, runtime.GOOS, runtime.GOARCH, wd)
+`, runtime.GOOS, runtime.GOARCH, wd, hiveInfo)
 
 	if !nativeToolCalls {
 		base = fmt.Sprintf(`You have access to these tools:
