@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/chromedp"
 	"golang.org/x/net/html"
 )
+
+type cacheEntry struct {
+	html      string
+	expiresAt time.Time
+}
 
 type WebScraperServer struct {
 	allowedURLs   []string
@@ -19,6 +26,8 @@ type WebScraperServer struct {
 	browserCtx    context.Context
 	browserCancel context.CancelFunc
 	autoConfirm   bool
+	cache         map[string]cacheEntry
+	cacheMu       sync.Mutex
 }
 
 func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServer {
@@ -29,27 +38,18 @@ func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServ
 	return &WebScraperServer{
 		allowedURLs: allowedURLs,
 		autoConfirm: autoConfirm,
+		cache:       make(map[string]cacheEntry),
 		tools: []Tool{
 			{
 				Name:        "fetch_url",
-				Description: "Fetch a URL and return rendered HTML (JavaScript executed). Supports following redirects.",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"},"wait":{"type":"number","description":"Wait time in seconds after load (default 2)"}},"required":["url"]}`),
-			},
-			{
-				Name:        "search_html",
-				Description: "Search HTML content for text or HTML elements using CSS selector or text search",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"html":{"type":"string","description":"HTML content to search"},"selector":{"type":"string","description":"CSS selector to match"},"text":{"type":"string","description":"Text pattern to search for"}},"required":["html"]}`),
+				Description: "Fetch a URL and return rendered HTML (JavaScript executed). Supports following redirects. Use grep to filter lines, or start_line/end_line to return a specific portion of the page.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"},"wait":{"type":"number","description":"Wait time in seconds after load (default 2)"},"grep":{"type":"string","description":"Regex pattern to filter returned HTML lines"},"start_line":{"type":"number","description":"Start line number (1-indexed) to return"},"end_line":{"type":"number","description":"End line number (1-indexed, inclusive) to return"}},"required":["url"]}`),
 			},
 			{
 				Name:        "get_links",
 				Description: "Extract all links from HTML content",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"html":{"type":"string","description":"HTML content to parse"},"base_url":{"type":"string","description":"Base URL for resolving relative links"}},"required":["html"]}`),
 			},
-			/*{
-				Name:        "click_element",
-				Description: "Click an element on a rendered page and return the new HTML (requires active browser context)",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"selector":{"type":"string","description":"CSS selector to click"},"wait":{"type":"number","description":"Wait time in seconds after click (default 2)"}},"required":["selector"]}`),
-			},*/
 		},
 	}
 }
@@ -77,6 +77,7 @@ func (s *WebScraperServer) isURLAllowed(rawURL string) bool {
 		if err != nil {
 			continue
 		}
+
 		if parsed.Host == allowedParsed.Host || strings.HasSuffix(parsed.Host, "."+allowedParsed.Host) {
 			return true
 		}
@@ -103,12 +104,8 @@ func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments 
 	switch name {
 	case "fetch_url":
 		return s.fetchURL(arguments)
-	case "search_html":
-		return s.searchHTML(arguments)
 	case "get_links":
 		return s.getLinks(arguments)
-	case "click_element":
-		return s.clickElement(ctx, arguments)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -128,6 +125,19 @@ func (s *WebScraperServer) fetchURL(args map[string]interface{}) (string, error)
 	if w, ok := args["wait"].(float64); ok {
 		waitSec = int(w)
 	}
+
+	grepPattern, _ := args["grep"].(string)
+	startLine, hasStart := args["start_line"].(float64)
+	endLine, hasEnd := args["end_line"].(float64)
+
+	// Check cache
+	s.cacheMu.Lock()
+	if entry, exists := s.cache[rawURL]; exists && time.Now().Before(entry.expiresAt) {
+		htmlContent := entry.html
+		s.cacheMu.Unlock()
+		return s.processContent(htmlContent, grepPattern, startLine, endLine, hasStart, hasEnd)
+	}
+	s.cacheMu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -157,118 +167,82 @@ func (s *WebScraperServer) fetchURL(args map[string]interface{}) (string, error)
 		return "", fmt.Errorf("failed to fetch URL: %v", err)
 	}
 
+	// Cache the result for 1 minute
+	s.cacheMu.Lock()
+	s.cache[rawURL] = cacheEntry{
+		html:      htmlContent,
+		expiresAt: time.Now().Add(1 * time.Minute),
+	}
+	s.cacheMu.Unlock()
+
+	return s.processContent(htmlContent, grepPattern, startLine, endLine, hasStart, hasEnd)
+}
+
+func (s *WebScraperServer) processContent(htmlContent, grepPattern string, startLine, endLine float64, hasStart, hasEnd bool) (string, error) {
+	// Apply line range first to slice the raw HTML
+	if hasStart || hasEnd {
+		if !hasStart {
+			startLine = 1
+		}
+		if !hasEnd {
+			lines := strings.Split(htmlContent, "\n")
+			endLine = float64(len(lines))
+		}
+		htmlContent = s.applyLineRange(htmlContent, startLine, endLine)
+	}
+
+	// Apply grep filter if provided
+	if grepPattern != "" {
+		matched, err := s.applyGrep(htmlContent, grepPattern)
+		if err != nil {
+			return "", err
+		}
+		htmlContent = matched
+	}
+
 	return htmlContent, nil
 }
 
-func (s *WebScraperServer) searchHTML(args map[string]interface{}) (string, error) {
-	htmlContent, ok := args["html"].(string)
-	if !ok {
-		return "", fmt.Errorf("html is required")
-	}
-
-	selector, _ := args["selector"].(string)
-	textPattern, _ := args["text"].(string)
-
-	doc, err := html.Parse(strings.NewReader(htmlContent))
+func (s *WebScraperServer) applyGrep(htmlContent, pattern string) (string, error) {
+	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse HTML: %v", err)
+		return "", fmt.Errorf("invalid grep pattern: %v", err)
 	}
 
-	var results []string
-
-	if selector != "" {
-		results = s.findBySelector(doc, selector)
+	lines := strings.Split(htmlContent, "\n")
+	var matched []string
+	for _, line := range lines {
+		if re.MatchString(line) {
+			matched = append(matched, line)
+		}
 	}
 
-	if textPattern != "" {
-		results = append(results, s.findByText(doc, textPattern)...)
+	if len(matched) == 0 {
+		return "No matches found for pattern: " + pattern, nil
 	}
 
-	if selector == "" && textPattern == "" {
-		results = s.findByText(doc, ".")
-	}
-
-	if len(results) == 0 {
-		return "No matches found", nil
-	}
-
-	return strings.Join(results, "\n---\n"), nil
+	return strings.Join(matched, "\n"), nil
 }
 
-func (s *WebScraperServer) findBySelector(n *html.Node, selector string) []string {
-	var results []string
+func (s *WebScraperServer) applyLineRange(content string, start, end float64) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
 
-	selector = strings.TrimPrefix(selector, ".")
+	// Convert to 0-indexed
+	startIdx := int(start) - 1
+	endIdx := int(end)
 
-	var walk func(node *html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.ElementNode {
-			for _, attr := range node.Attr {
-				if attr.Key == "class" {
-					classes := strings.Fields(attr.Val)
-					for _, c := range classes {
-						if c == selector || strings.Contains(c, selector) {
-							if text := s.getTextContent(node); text != "" {
-								results = append(results, text)
-							}
-						}
-					}
-				}
-				if attr.Key == "id" && attr.Val == selector {
-					if text := s.getTextContent(node); text != "" {
-						results = append(results, text)
-					}
-				}
-			}
-			if node.Data == selector {
-				if text := s.getTextContent(node); text != "" {
-					results = append(results, text)
-				}
-			}
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx > totalLines {
+		endIdx = totalLines
+	}
+	if startIdx >= endIdx {
+		return ""
 	}
 
-	walk(n)
-	return results
-}
-
-func (s *WebScraperServer) findByText(n *html.Node, pattern string) []string {
-	var results []string
-	pattern = strings.ToLower(pattern)
-
-	var walk func(node *html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.TextNode {
-			text := strings.TrimSpace(node.Data)
-			if text != "" && (pattern == "." || strings.Contains(strings.ToLower(text), pattern)) {
-				results = append(results, text)
-			}
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-
-	walk(n)
-	return results
-}
-
-func (s *WebScraperServer) getTextContent(n *html.Node) string {
-	var sb strings.Builder
-	var walk func(node *html.Node)
-	walk = func(node *html.Node) {
-		if node.Type == html.TextNode {
-			sb.WriteString(node.Data)
-		}
-		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(n)
-	return strings.TrimSpace(sb.String())
+	return strings.Join(lines[startIdx:endIdx], "\n")
 }
 
 func (s *WebScraperServer) getLinks(args map[string]interface{}) (string, error) {
@@ -314,40 +288,6 @@ func (s *WebScraperServer) getLinks(args map[string]interface{}) (string, error)
 	return strings.Join(links, "\n"), nil
 }
 
-func (s *WebScraperServer) clickElement(ctx context.Context, args map[string]interface{}) (string, error) {
-	selector, ok := args["selector"].(string)
-	if !ok {
-		return "", fmt.Errorf("selector is required")
-	}
-
-	waitSec := 2
-	if w, ok := args["wait"].(float64); ok {
-		waitSec = int(w)
-	}
-
-	allocCtx, cancel := chromedp.NewExecAllocator(ctx,
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-sandbox", true),
-	)
-	defer cancel()
-
-	taskCtx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
-
-	var htmlContent string
-	err := chromedp.Run(taskCtx,
-		chromedp.Click(selector, chromedp.ByQuery),
-		chromedp.Sleep(time.Duration(waitSec)*time.Second),
-		chromedp.OuterHTML("html", &htmlContent, chromedp.ByQuery),
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to click element: %v", err)
-	}
-
-	return htmlContent, nil
-}
-
 func (s *WebScraperServer) AddPath(ctx context.Context, path string) error {
 	return s.AddURL(ctx, path)
 }
@@ -362,29 +302,33 @@ func (s *WebScraperServer) AddURL(ctx context.Context, url string) error {
 	return nil
 }
 
-func (s *WebScraperServer) TempAddPath(path string) {
-	s.AddPath(context.Background(), path)
-}
-
-func (s *WebScraperServer) RemovePath(ctx context.Context, path string) error {
-	return s.RemoveURL(ctx, path)
-}
-
-func (s *WebScraperServer) RemoveURL(ctx context.Context, url string) error {
-	for i, u := range s.allowedURLs {
-		if u == url {
-			s.allowedURLs = append(s.allowedURLs[:i], s.allowedURLs[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("URL not found: %s", url)
-}
-
 func (s *WebScraperServer) AllowedPaths() []string {
 	return s.allowedURLs
 }
 
+func (s *WebScraperServer) TempAddPath(path string) {
+	s.allowedURLs = append(s.allowedURLs, path)
+}
+
+func (s *WebScraperServer) RemovePath(ctx context.Context, path string) error {
+	for i, p := range s.allowedURLs {
+		if p == path {
+			s.allowedURLs = append(s.allowedURLs[:i], s.allowedURLs[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("path not found: %s", path)
+}
+
+func (s *WebScraperServer) RemoveURL(ctx context.Context, url string) error {
+	return s.RemovePath(ctx, url)
+}
+
 func (s *WebScraperServer) Close() error {
+	return s.Teardown()
+}
+
+func (s *WebScraperServer) Teardown() error {
 	if s.browserCancel != nil {
 		s.browserCancel()
 	}
