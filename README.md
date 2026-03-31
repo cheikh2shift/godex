@@ -86,6 +86,8 @@ sudo mv godex /usr/local/bin/
 
 ### OpenRouter Setup
 
+Launch Godex and choose `oauth` as the form of authentication to automatically obtain an API key or:
+
 1. **Get an API key**: Sign up at https://openrouter.ai/keys
 
 2. **Set the environment variable**:
