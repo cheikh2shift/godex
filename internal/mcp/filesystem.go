@@ -96,7 +96,7 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 			{
 				Name:        "search_in_file",
 				Description: "Search for text within a specific file, returns matching lines with line numbers",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"query":{"type":"string","description":"Text to search for"},"case_sensitive":{"type":"boolean","description":"Enable case-sensitive matching"},"use_regex":{"type":"boolean","description":"Treat query as a regular expression"}},"required":["path","query"]}`),
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"query":{"type":"string","description":"Text to search for (use when not using pattern)"}, "pattern":{"type":"string","description":"Regex pattern to search for (alternative to query)"},"case_sensitive":{"type":"boolean","description":"Enable case-sensitive matching"},"use_regex":{"type":"boolean","description":"Treat query as a regular expression"}},"required":["path"]}`),
 			},
 		},
 	}
@@ -561,12 +561,25 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 	if !ok {
 		return "", fmt.Errorf("path is required")
 	}
-	query, ok := args["query"].(string)
-	if !ok {
-		return "", fmt.Errorf("query is required")
+
+	var query string
+	if q, ok := args["query"].(string); ok && q != "" {
+		query = q
 	}
+
+	patternArg, patternProvided := args["pattern"].(string)
 	caseSensitive, _ := args["case_sensitive"].(bool)
 	useRegex, _ := args["use_regex"].(bool)
+
+	if query == "" && !patternProvided {
+		return "", fmt.Errorf("either query or pattern is required")
+	}
+
+	searchPattern := query
+	if patternProvided {
+		searchPattern = patternArg
+		useRegex = true
+	}
 
 	if err := s.checkAndMaybeAddPath(path); err != nil {
 		return "", err
@@ -579,11 +592,11 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 
 	var regex *regexp.Regexp
 	if useRegex {
-		pattern := query
+		compiledPattern := searchPattern
 		if !caseSensitive {
-			pattern = "(?i)" + pattern
+			compiledPattern = "(?i)" + compiledPattern
 		}
-		regex, err = regexp.Compile(pattern)
+		regex, err = regexp.Compile(compiledPattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}
@@ -598,10 +611,10 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 			matched = regex.MatchString(line)
 		} else {
 			searchLine := line
-			searchQuery := query
+			searchQuery := searchPattern
 			if !caseSensitive {
 				searchLine = strings.ToLower(line)
-				searchQuery = strings.ToLower(query)
+				searchQuery = strings.ToLower(searchPattern)
 			}
 			matched = strings.Contains(searchLine, searchQuery)
 		}
