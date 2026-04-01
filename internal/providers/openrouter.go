@@ -383,7 +383,16 @@ func prependSystemMessage(messages []map[string]interface{}, content string) []m
 	if content == "" {
 		return messages
 	}
-	out := make([]map[string]interface{}, 0, len(messages)+1)
+
+	size := len(messages) + 1
+
+	if size > 64*1024*1024 {
+
+		// value too large
+		return messages
+	}
+
+	out := make([]map[string]interface{}, 0, size)
 	out = append(out, map[string]interface{}{
 		"role":    "system",
 		"content": content,

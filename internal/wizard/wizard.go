@@ -730,6 +730,72 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 		return fmt.Errorf("llama-server not installed")
 	}
 
+	fmt.Println("Fetching available llama-server releases...")
+	assets, err := fetchLlamaReleases()
+	if err != nil {
+		return fmt.Errorf("failed to fetch releases: %w", err)
+	}
+
+	if len(assets) == 0 {
+		return fmt.Errorf("no llama-server releases found")
+	}
+
+	fmt.Println()
+	fmt.Println("Available downloads:")
+	fmt.Println()
+
+	osGroups := make(map[string][]LlamaAsset)
+	for _, asset := range assets {
+		dispName := getOSDisplayName(asset.OS)
+		osGroups[dispName] = append(osGroups[dispName], asset)
+	}
+
+	var options []string
+	optionToAsset := make(map[int]LlamaAsset)
+	idx := 1
+
+	currentAssetOS := goOSToAssetOS()
+	currentOSGroup := getOSDisplayName(currentAssetOS)
+
+	if assets, ok := osGroups[currentOSGroup]; ok {
+		fmt.Printf("%s:\n", currentOSGroup)
+		for _, asset := range assets {
+			fmt.Printf("  %d. %s (current OS)\n", idx, asset.FileName)
+			optionToAsset[idx] = asset
+			options = append(options, fmt.Sprintf("%s: %s", currentOSGroup, asset.FileName))
+			idx++
+		}
+		fmt.Println()
+	}
+
+	fmt.Print("Select an option (number)")
+	var defaultChoice int
+	for i := range options {
+		assetObj := optionToAsset[i+1]
+		if getOSKey(assetObj.OS) == getOSKey(currentAssetOS) {
+			defaultChoice = i + 1
+			break
+		}
+	}
+	if defaultChoice == 0 {
+		defaultChoice = 1
+	}
+
+	fmt.Printf(" [default: %d]: ", defaultChoice)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		input = strconv.Itoa(defaultChoice)
+	}
+
+	choice, err := strconv.Atoi(input)
+	if err != nil || choice < 1 || choice > len(options) {
+		return fmt.Errorf("invalid selection")
+	}
+
+	selectedAsset := optionToAsset[choice]
+	downloadURL := selectedAsset.URL
+
 	godexDir := filepath.Join(homeDir, ".godex")
 	installDir := filepath.Join(godexDir, "bin")
 
@@ -737,25 +803,16 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 		return fmt.Errorf("failed to create install directory: %w", err)
 	}
 
-	arch := runtime.GOARCH
-	osName := runtime.GOOS
-	if osName == "darwin" {
-		osName = "macos"
-	}
-
-	latestURL := fmt.Sprintf("https://github.com/ggml-org/llama.cpp/releases/latest/download/llama-server-%s-%s.tar.gz", osName, arch)
 	installPath := filepath.Join(installDir, "llama-server")
 
-	resp, err := http.Get(latestURL)
+	resp, err := http.Get(downloadURL)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
-		fmt.Printf("No pre-built binary found for %s/%s, building from source is not supported in the wizard.\n", osName, arch)
-		fmt.Println("Please install llama.cpp manually or use a different provider.")
-		return fmt.Errorf("no pre-built binary for %s/%s", osName, arch)
+		return fmt.Errorf("download failed: asset not found (404)")
 	}
 
 	if resp.StatusCode != 200 {
@@ -763,7 +820,7 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	}
 
 	totalSize := resp.ContentLength
-	fmt.Printf("Downloading %s...\n", latestURL)
+	fmt.Printf("Downloading %s...\n", downloadURL)
 	if totalSize > 0 {
 		fmt.Printf("Total size: %.1f MB\n", float64(totalSize)/1024/1024)
 	}
@@ -814,4 +871,149 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	fmt.Println("Make sure ~/.godex/bin/llama-server is in your PATH")
 
 	return nil
+}
+
+type LlamaAsset struct {
+	OS       string
+	Arch     string
+	FileName string
+	URL      string
+}
+
+func parseOSFromFilename(filename string) (os, arch string) {
+	binMarker := "-bin-"
+	suffix := ".tar.gz"
+
+	binIdx := strings.Index(filename, binMarker)
+	suffixIdx := strings.Index(filename, suffix)
+	if binIdx == -1 || suffixIdx == -1 {
+		return "", ""
+	}
+
+	middle := filename[binIdx+len(binMarker) : suffixIdx]
+
+	lastDash := strings.LastIndex(middle, "-")
+	if lastDash == -1 {
+		return "", ""
+	}
+
+	os = middle[:lastDash]
+	arch = middle[lastDash+1:]
+
+	return os, arch
+}
+
+type GitHubReleaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+}
+
+type GitHubRelease struct {
+	TagName string               `json:"tag_name"`
+	Assets  []GitHubReleaseAsset `json:"assets"`
+}
+
+var httpDo = func(req *http.Request) (*http.Response, error) {
+	client := &http.Client{}
+	return client.Do(req)
+}
+
+func fetchLlamaReleases() ([]LlamaAsset, error) {
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/ggml-org/llama.cpp/releases", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "godex")
+
+	resp, err := httpDo(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch releases: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("failed to fetch releases: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var releases []GitHubRelease
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return nil, fmt.Errorf("failed to parse releases data: %w", err)
+	}
+
+	if len(releases) == 0 {
+		return nil, fmt.Errorf("no releases found")
+	}
+
+	release := releases[0]
+
+	var assets []LlamaAsset
+	for _, asset := range release.Assets {
+		if strings.HasSuffix(asset.Name, ".tar.gz") && strings.Contains(asset.Name, "-bin-") {
+			osName, arch := parseOSFromFilename(asset.Name)
+			if osName != "" && arch != "" {
+				assets = append(assets, LlamaAsset{
+					OS:       osName,
+					Arch:     arch,
+					FileName: asset.Name,
+					URL:      asset.DownloadURL,
+				})
+			}
+		}
+	}
+
+	return assets, nil
+}
+
+func mustParseURL(rawURL string) *url.URL {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
+func getOSDisplayName(osName string) string {
+	switch {
+	case osName == "linux" || strings.HasPrefix(osName, "ubuntu"):
+		return "Linux"
+	case osName == "darwin" || osName == "macos":
+		return "macOS"
+	case osName == "windows":
+		return "Windows"
+	default:
+		return osName
+	}
+}
+
+func goOSToAssetOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macos"
+	case "linux":
+		return "ubuntu"
+	case "windows":
+		return "win"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func getOSKey(osName string) string {
+	lower := strings.ToLower(osName)
+	switch {
+	case lower == "linux" || strings.HasPrefix(lower, "ubuntu"):
+		return "linux"
+	case lower == "darwin" || lower == "macos":
+		return "darwin"
+	case lower == "windows":
+		return "windows"
+	default:
+		return lower
+	}
 }
