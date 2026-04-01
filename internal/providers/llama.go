@@ -583,12 +583,25 @@ func (p *llamaProvider) startServerAsync() {
 }
 
 func (p *llamaProvider) killServer() {
+	log.Printf("[llama.cpp] killServer() called, process=%v", p.serverProcess.Pid)
 	p.serverMu.Lock()
 	defer p.serverMu.Unlock()
 
 	if p.serverProcess != nil {
+		log.Printf("[llama.cpp] Sending SIGTERM to pid %d", p.serverProcess.Pid)
 		p.serverProcess.Signal(syscall.SIGTERM)
-		p.serverProcess.Wait()
+		ch := make(chan struct{})
+		go func() {
+			p.serverProcess.Wait()
+			close(ch)
+		}()
+		select {
+		case <-ch:
+			log.Printf("[llama.cpp] Process terminated gracefully")
+		case <-time.After(2 * time.Second):
+			log.Printf("[llama.cpp] Process did not terminate, sending SIGKILL")
+			p.serverProcess.Kill()
+		}
 		p.serverProcess = nil
 	}
 	if p.serverCmd != nil {
@@ -1078,6 +1091,7 @@ type llamaResponseToolCall struct {
 }
 
 func (p *llamaProvider) Close() error {
+	log.Printf("[llama.cpp] Close() called")
 	p.sendMu.Lock()
 	defer p.sendMu.Unlock()
 

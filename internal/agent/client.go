@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -159,23 +160,39 @@ func RegisterMCPExecutor(provider *config.Provider, executor *mcp.MCPToolExecuto
 }
 
 func CloseProvider(cfg *config.Provider) {
-	key := cacheKey(cfg)
+	if cfg == nil {
+		return
+	}
 	providerCacheMu.Lock()
-	p, ok := providerCache[key]
-	if ok {
-		delete(providerCache, key)
+	var p providers.Provider
+	var ok bool
+	for key, provider := range providerCache {
+		if strings.HasPrefix(key, cfg.Type+"|"+cfg.Name+"|") {
+			p = provider
+			delete(providerCache, key)
+			ok = true
+			break
+		}
 	}
 	providerCacheMu.Unlock()
 	if ok {
+		log.Printf("[agent] Closing provider for %s/%s", cfg.Type, cfg.Name)
 		_ = p.Close()
 	}
 
 	mcpExecutorsMu.Lock()
-	if executor, ok := mcpExecutors[key]; ok {
-		delete(mcpExecutors, key)
-		_ = executor.Close()
+	var executor *mcp.MCPToolExecutor
+	for key, ex := range mcpExecutors {
+		if strings.HasPrefix(key, cfg.Type+"|"+cfg.Name+"|") {
+			executor = ex
+			delete(mcpExecutors, key)
+			break
+		}
 	}
 	mcpExecutorsMu.Unlock()
+	if executor != nil {
+		_ = executor.Close()
+	}
 }
 
 func GetProvider(cfg *config.Provider) (providers.Provider, error) {
