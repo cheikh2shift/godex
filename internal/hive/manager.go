@@ -23,14 +23,17 @@ const (
 )
 
 type Instance struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Model      string    `json:"model"`
-	MaxTokens  int       `json:"max_tokens"`
-	Port       int       `json:"port"`
-	StartedAt  time.Time `json:"started_at"`
-	PID        int       `json:"pid"`
-	MCPServers []string  `json:"mcp_servers"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Model        string    `json:"model"`
+	MaxTokens    int       `json:"max_tokens"`
+	Port         int       `json:"port"`
+	StartedAt    time.Time `json:"started_at"`
+	PID          int       `json:"pid"`
+	MCPServers   []string  `json:"mcp_servers"`
+	WorkingDir   string    `json:"working_dir"`
+	InputTokens  int       `json:"input_tokens"`
+	OutputTokens int       `json:"output_tokens"`
 }
 
 type Manager struct {
@@ -94,6 +97,7 @@ func NewManager(code string, baseDir string, model string, maxTokens int, mcpSer
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	codeHash := hashString(code)
+	wd, _ := os.Getwd()
 	inst := Instance{
 		ID:         id,
 		Name:       randomHumanName(),
@@ -103,6 +107,7 @@ func NewManager(code string, baseDir string, model string, maxTokens int, mcpSer
 		StartedAt:  time.Now(),
 		PID:        os.Getpid(),
 		MCPServers: mcpServers,
+		WorkingDir: wd,
 	}
 
 	m := &Manager{
@@ -174,6 +179,34 @@ func (m *Manager) RecordDelegate(prompt string) {
 	select {
 	case m.statsCh <- stats:
 	default:
+	}
+}
+
+func (m *Manager) SetWorkingDir(dir string) {
+	if m == nil {
+		return
+	}
+	m.statsMu.Lock()
+	if m.instance.WorkingDir != dir {
+		m.instance.WorkingDir = dir
+		m.statsMu.Unlock()
+		m.writeInstanceFile()
+	} else {
+		m.statsMu.Unlock()
+	}
+}
+
+func (m *Manager) SetTokenUsage(inputTokens, outputTokens int) {
+	if m == nil {
+		return
+	}
+	m.statsMu.Lock()
+	changed := m.instance.InputTokens != inputTokens || m.instance.OutputTokens != outputTokens
+	m.instance.InputTokens = inputTokens
+	m.instance.OutputTokens = outputTokens
+	m.statsMu.Unlock()
+	if changed {
+		m.writeInstanceFile()
 	}
 }
 

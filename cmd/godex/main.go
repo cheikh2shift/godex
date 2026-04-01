@@ -278,9 +278,16 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, func(toolName string) {
+			result, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, func(toolName string) {
 				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
 			})
+			if llmProvider != nil {
+				inputTokens, outputTokens := llmProvider.TokenUsage()
+				hiveMgr.SetTokenUsage(inputTokens, outputTokens)
+			}
+			currentWd, _ := os.Getwd()
+			hiveMgr.SetWorkingDir(currentWd)
+			return result, err
 		})
 		if err != nil {
 			fmt.Printf("[Hive] Failed to start hive manager: %v\n", err)
@@ -1753,7 +1760,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
 				}
-				continuePrompt := "continue"
+				continuePrompt := "You did not provide a valid tool call. Please provide your FINAL_ANSWER now based on the information you have. Include FINAL_ANSWER: to indicate it's the last message. Do NOT call any more tools."
 				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
 				continue
 			}
