@@ -882,11 +882,20 @@ type LlamaAsset struct {
 
 func parseOSFromFilename(filename string) (os, arch string) {
 	binMarker := "-bin-"
-	suffix := ".tar.gz"
 
 	binIdx := strings.Index(filename, binMarker)
-	suffixIdx := strings.Index(filename, suffix)
-	if binIdx == -1 || suffixIdx == -1 {
+	if binIdx == -1 {
+		return "", ""
+	}
+
+	suffixIdx := -1
+	for _, s := range []string{".tar.gz", ".zip"} {
+		idx := strings.Index(filename, s)
+		if idx != -1 && (suffixIdx == -1 || idx < suffixIdx) {
+			suffixIdx = idx
+		}
+	}
+	if suffixIdx == -1 {
 		return "", ""
 	}
 
@@ -954,7 +963,8 @@ func fetchLlamaReleases() ([]LlamaAsset, error) {
 
 	var assets []LlamaAsset
 	for _, asset := range release.Assets {
-		if strings.HasSuffix(asset.Name, ".tar.gz") && strings.Contains(asset.Name, "-bin-") {
+		isValidExtension := strings.HasSuffix(asset.Name, ".tar.gz") || strings.HasSuffix(asset.Name, ".zip")
+		if isValidExtension && strings.Contains(asset.Name, "-bin-") {
 			osName, arch := parseOSFromFilename(asset.Name)
 			if osName != "" && arch != "" {
 				assets = append(assets, LlamaAsset{
@@ -984,7 +994,7 @@ func getOSDisplayName(osName string) string {
 		return "Linux"
 	case osName == "darwin" || osName == "macos":
 		return "macOS"
-	case osName == "windows":
+	case osName == "windows" || strings.HasPrefix(osName, "win"):
 		return "Windows"
 	default:
 		return osName
@@ -1011,7 +1021,7 @@ func getOSKey(osName string) string {
 		return "linux"
 	case lower == "darwin" || lower == "macos":
 		return "darwin"
-	case lower == "windows":
+	case strings.HasPrefix(lower, "win"):
 		return "windows"
 	default:
 		return lower
