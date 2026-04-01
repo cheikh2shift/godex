@@ -50,16 +50,23 @@ type llamaProvider struct {
 	tools            []map[string]interface{}
 	pendingToolCalls map[string]string
 
-	serverCmd     *exec.Cmd
-	serverProcess *os.Process
-	serverPort    int
-	serverMu      sync.Mutex
-	serverReady   bool
-	serverStarted bool
-	startMu       sync.Mutex
+	serverCmd      *exec.Cmd
+	serverProcess  *os.Process
+	serverPort     int
+	serverPath     string
+	externalServer bool
+	serverMu       sync.Mutex
+	serverReady    bool
+	serverStarted  bool
+	startMu        sync.Mutex
 
 	OnDownloadProgress func(DownloadProgress)
 }
+
+var (
+	quantizationCacheMu sync.Mutex
+	quantizationCache   = map[string]string{}
+)
 
 func init() {
 	Register("llama", newLlamaProvider)
@@ -229,6 +236,14 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 	}
 
 	if selectedQuant == "" {
+		if cached, ok := getCachedQuantization(modelID); ok {
+			if _, exists := quantToFile[cached]; exists {
+				selectedQuant = cached
+			}
+		}
+	}
+
+	if selectedQuant == "" {
 		fmt.Printf("\nAvailable quantizations for %s:\n", modelID)
 		quants := SortQuantizationsKeys(quantToFile)
 		for i, q := range quants {
@@ -236,32 +251,16 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 			fmt.Printf("  %d. %s - %s\n", i+1, q, desc)
 		}
 
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("\nSelect quantization (default: 6 for Q4_K_M): ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if input == "" {
-			idx := slices.Index(quants, "Q4_K_M")
-			if idx >= 0 {
-				selectedQuant = quants[idx]
-			} else {
-				selectedQuant = quants[0]
-			}
-		} else {
-			idx, err := strconv.Atoi(input)
-			if err != nil || idx < 1 || idx > len(quants) {
-				fmt.Println("Invalid selection, using default Q4_K_M")
-				idx = slices.Index(quants, "Q4_K_M")
-				if idx >= 0 {
-					selectedQuant = quants[idx]
-				} else {
-					selectedQuant = quants[0]
-				}
-			} else {
-				selectedQuant = quants[idx-1]
-			}
+		idx := slices.Index(quants, "Q4_K_M")
+		defaultIdx := idx
+		if defaultIdx < 0 {
+			defaultIdx = 0
 		}
+		selectedIdx, err := promptQuantizationSelection(len(quants), defaultIdx)
+		if err != nil {
+			return "", "", false, err
+		}
+		selectedQuant = quants[selectedIdx]
 	}
 
 	selectedFile, ok := quantToFile[selectedQuant]
@@ -271,6 +270,10 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 			return "", "", false, fmt.Errorf("no suitable GGUF file found for %s", modelID)
 		}
 		fmt.Printf("Selected quantization %s not found, using %s\n", selectedQuant, selectedFile)
+	}
+
+	if selectedQuant != "" {
+		setCachedQuantization(modelID, selectedQuant)
 	}
 
 	homeDir, _ := os.UserHomeDir()
@@ -352,6 +355,40 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 	}
 
 	return destPath, modelWithQuant, true, nil
+}
+
+func promptQuantizationSelection(maxOptions int, defaultIdx int) (int, error) {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Printf("\nSelect quantization (default: %d for Q4_K_M): ", defaultIdx+1)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return 0, err
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return defaultIdx, nil
+		}
+		idx, err := strconv.Atoi(input)
+		if err != nil || idx < 1 || idx > maxOptions {
+			fmt.Println("Invalid selection, using default Q4_K_M")
+			return defaultIdx, nil
+		}
+		return idx - 1, nil
+	}
+}
+
+func getCachedQuantization(modelID string) (string, bool) {
+	quantizationCacheMu.Lock()
+	defer quantizationCacheMu.Unlock()
+	q, ok := quantizationCache[modelID]
+	return q, ok
+}
+
+func setCachedQuantization(modelID, quant string) {
+	quantizationCacheMu.Lock()
+	defer quantizationCacheMu.Unlock()
+	quantizationCache[modelID] = quant
 }
 
 type progressWriter struct {
@@ -484,6 +521,8 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		contextLimit:       cfg.ContextLimit,
 		pendingToolCalls:   make(map[string]string),
 		serverPort:         port,
+		serverPath:         serverPath,
+		externalServer:     externalURL != "",
 		serverReady:        serverReady,
 		serverStarted:      false,
 		OnDownloadProgress: downloadProgress,
@@ -506,13 +545,13 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 	}
 
 	if externalURL == "" {
-		p.startServerAsync(serverPath)
+		p.startServerAsync()
 	}
 
 	return p, nil
 }
 
-func (p *llamaProvider) startServerAsync(serverPath string) {
+func (p *llamaProvider) startServerAsync() {
 	p.startMu.Lock()
 	if p.serverStarted {
 		p.startMu.Unlock()
@@ -523,8 +562,11 @@ func (p *llamaProvider) startServerAsync(serverPath string) {
 
 	go func() {
 		log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
-		if err := p.startServerSync(serverPath); err != nil {
+		if err := p.startServerSync(); err != nil {
 			log.Printf("[llama.cpp] Server start failed: %v", err)
+			p.startMu.Lock()
+			p.serverStarted = false
+			p.startMu.Unlock()
 			return
 		}
 		p.serverReady = true
@@ -546,6 +588,7 @@ func (p *llamaProvider) killServer() {
 
 	if p.serverProcess != nil {
 		p.serverProcess.Signal(syscall.SIGTERM)
+		p.serverProcess.Wait()
 		p.serverProcess = nil
 	}
 	if p.serverCmd != nil {
@@ -554,7 +597,7 @@ func (p *llamaProvider) killServer() {
 	}
 }
 
-func (p *llamaProvider) startServerSync(serverPath string) error {
+func (p *llamaProvider) startServerSync() error {
 	p.serverMu.Lock()
 	defer p.serverMu.Unlock()
 
@@ -575,9 +618,9 @@ func (p *llamaProvider) startServerSync(serverPath string) error {
 	}
 	args = append(args, "--log-disable", "--jinja")
 
-	log.Printf("[llama.cpp] Running: %s %v", serverPath, args)
+	log.Printf("[llama.cpp] Running: %s %v", p.serverPath, args)
 
-	cmd := exec.Command(serverPath, args...)
+	cmd := exec.Command(p.serverPath, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
@@ -648,28 +691,8 @@ func (p *llamaProvider) fetchModelInfo(ctx context.Context) error {
 	return nil
 }
 
-func (p *llamaProvider) waitForServerReady(ctx context.Context) error {
-	if p.serverReady {
-		return nil
-	}
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if p.serverReady {
-				return nil
-			}
-		}
-	}
-}
-
 func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error) {
-	if err := p.waitForServerReady(ctx); err != nil {
+	if err := p.ensureServerReady(ctx); err != nil {
 		return "", fmt.Errorf("server not ready: %w", err)
 	}
 
@@ -738,6 +761,96 @@ func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error)
 	p.mu.Unlock()
 
 	return response, nil
+}
+
+func (p *llamaProvider) ensureServerReady(ctx context.Context) error {
+	if p.externalServer {
+		if err := p.checkHealth(ctx); err != nil {
+			return fmt.Errorf("llama-server health check failed: %w", err)
+		}
+		p.serverReady = true
+		return nil
+	}
+
+	if p.serverReady {
+		if err := p.checkHealth(ctx); err == nil {
+			return nil
+		}
+		log.Printf("[llama.cpp] Server health check failed, restarting")
+	}
+
+	if p.serverStarted {
+		if err := p.waitForHealth(ctx, 30*time.Second); err == nil {
+			p.serverReady = true
+			return nil
+		}
+		log.Printf("[llama.cpp] Server failed to become healthy, restarting")
+	}
+
+	p.startMu.Lock()
+	p.serverReady = false
+	p.serverStarted = true
+	p.startMu.Unlock()
+
+	p.killServer()
+
+	if p.serverPath == "" {
+		serverPath, err := detectLlamaServer()
+		if err != nil {
+			return fmt.Errorf("failed to detect llama-server: %w", err)
+		}
+		p.serverPath = serverPath
+	}
+
+	log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
+	if err := p.startServerSync(); err != nil {
+		log.Printf("[llama.cpp] Server start failed: %v", err)
+		p.startMu.Lock()
+		p.serverStarted = false
+		p.startMu.Unlock()
+		return err
+	}
+	p.serverReady = true
+	return nil
+}
+
+func (p *llamaProvider) checkHealth(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (p *llamaProvider) waitForHealth(ctx context.Context, timeout time.Duration) error {
+	waitCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		waitCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		case <-ticker.C:
+			if err := p.checkHealth(waitCtx); err == nil {
+				return nil
+			}
+		}
+	}
 }
 
 type llamaSendResult struct {
@@ -1092,11 +1205,15 @@ func (p *llamaProvider) SupportsNativeToolCalls() bool {
 
 func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	modelPath, isLocal, err := resolveModelPath(model)
 	if err != nil {
-		p.mu.Unlock()
 		return fmt.Errorf("failed to resolve model path: %w", err)
+	}
+
+	if p.model != "" && p.model == modelPath {
+		return nil
 	}
 
 	isHFModel := !isLocal && strings.Contains(model, "/")
@@ -1118,7 +1235,6 @@ func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 			if downloadProgressCh != nil {
 				close(downloadProgressCh)
 			}
-			p.mu.Unlock()
 			return fmt.Errorf("failed to download model: %w", err)
 		}
 		modelPath = downloadedPath
@@ -1131,7 +1247,11 @@ func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 	}
 
 	p.model = modelPath
-	p.modelIsHF = false
+	if isHFModel && !isLocal {
+		p.modelIsHF = true
+	} else {
+		p.modelIsHF = false
+	}
 	p.contextLimit = contextLimit
 	if p.cfg != nil {
 		p.cfg.Model = model
@@ -1144,15 +1264,18 @@ func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 		p.startMu.Lock()
 		p.serverStarted = false
 		p.startMu.Unlock()
+		time.Sleep(100 * time.Millisecond)
 	}
-	p.mu.Unlock()
 
 	if needsRestart {
-		serverPath, err := detectLlamaServer()
-		if err != nil {
-			return fmt.Errorf("failed to detect llama-server: %w", err)
+		if p.serverPath == "" {
+			serverPath, err := detectLlamaServer()
+			if err != nil {
+				return fmt.Errorf("failed to detect llama-server: %w", err)
+			}
+			p.serverPath = serverPath
 		}
-		p.startServerAsync(serverPath)
+		p.startServerAsync()
 	}
 
 	return nil

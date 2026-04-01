@@ -82,14 +82,17 @@ func CancelPrompt(provider *config.Provider) {
 	if provider == nil {
 		return
 	}
-	p, err := GetProvider(provider)
-	if err != nil {
+	key := cacheKey(provider)
+	providerCacheMu.Lock()
+	p, ok := providerCache[key]
+	providerCacheMu.Unlock()
+	if !ok {
 		return
 	}
 	p.Cancel()
 
 	mcpExecutorsMu.Lock()
-	key := cacheKey(provider)
+	key = cacheKey(provider)
 	if executor, ok := mcpExecutors[key]; ok {
 		delete(mcpExecutors, key)
 		executor.Close()

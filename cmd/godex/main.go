@@ -1481,7 +1481,7 @@ func handleModelSwitch(provider *config.Provider, llmProv providers.Provider, se
 	changed, model, contextLen := selectNewModel(provider, llmProv)
 	if changed {
 		fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
-		agent.SetProviderTools(provider, buildProviderTools(servers))
+		setProviderToolsOnInstance(llmProv, servers)
 	}
 }
 
@@ -1492,7 +1492,7 @@ func handleModelPersist(provider *config.Provider, llmProv providers.Provider, c
 	}
 
 	fmt.Printf("[Model] Switched to %s (context: %d)\n", model, contextLen)
-	agent.SetProviderTools(provider, buildProviderTools(servers))
+	setProviderToolsOnInstance(llmProv, servers)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -1513,6 +1513,17 @@ func handleModelPersist(provider *config.Provider, llmProv providers.Provider, c
 		return
 	}
 	fmt.Printf("[Model] Saved to %s\n", configPath)
+}
+
+func setProviderToolsOnInstance(llmProv providers.Provider, servers []MCPServer) {
+	if llmProv == nil {
+		return
+	}
+	pt, ok := llmProv.(interface{ SetTools([]providers.Tool) })
+	if !ok {
+		return
+	}
+	pt.SetTools(buildProviderTools(servers))
 }
 
 func printHelp() {
