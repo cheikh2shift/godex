@@ -795,6 +795,7 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 
 	selectedAsset := optionToAsset[choice]
 	downloadURL := selectedAsset.URL
+	isZip := strings.HasSuffix(selectedAsset.FileName, ".zip")
 
 	godexDir := filepath.Join(homeDir, ".godex")
 	installDir := filepath.Join(godexDir, "bin")
@@ -826,7 +827,11 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	}
 	fmt.Println()
 
-	tmpFile := filepath.Join(os.TempDir(), "llama-server.tar.gz")
+	ext := ".tar.gz"
+	if isZip {
+		ext = ".zip"
+	}
+	tmpFile := filepath.Join(os.TempDir(), "llama-server"+ext)
 	outFile, err := os.Create(tmpFile)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
@@ -855,16 +860,43 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 
 	fmt.Println("Download complete. Extracting...")
 
-	extractCmd := exec.Command("tar", "-xzf", tmpFile, "-C", installDir)
-	if err := extractCmd.Run(); err != nil {
-		os.Remove(tmpFile)
-		return fmt.Errorf("failed to extract: %w", err)
+	if isZip {
+		extractCmd := exec.Command("unzip", "-o", tmpFile, "-d", installDir)
+		if err := extractCmd.Run(); err != nil {
+			os.Remove(tmpFile)
+			return fmt.Errorf("failed to extract: %w", err)
+		}
+	} else {
+		extractCmd := exec.Command("tar", "-xzf", tmpFile, "-C", installDir)
+		if err := extractCmd.Run(); err != nil {
+			os.Remove(tmpFile)
+			return fmt.Errorf("failed to extract: %w", err)
+		}
 	}
 
 	os.Remove(tmpFile)
 
-	if err := os.Chmod(installPath, 0755); err != nil {
-		return fmt.Errorf("failed to set permissions: %w", err)
+	entries, err := os.ReadDir(installDir)
+	if err != nil {
+		return fmt.Errorf("failed to list extracted files: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.Contains(name, "llama-server") && !entry.IsDir() {
+			extractedPath := filepath.Join(installDir, name)
+			if installPath != extractedPath {
+				if err := os.Rename(extractedPath, installPath); err != nil {
+					if err := os.Chmod(extractedPath, 0755); err != nil {
+						return fmt.Errorf("failed to set permissions: %w", err)
+					}
+				}
+			}
+			if err := os.Chmod(installPath, 0755); err != nil {
+				return fmt.Errorf("failed to set permissions: %w", err)
+			}
+			break
+		}
 	}
 
 	fmt.Printf("llama-server installed to %s\n", installPath)

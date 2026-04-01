@@ -117,6 +117,33 @@ func detectLlamaServer() (string, error) {
 		}
 	}
 
+	if homeDir != "" {
+		binDir := filepath.Join(homeDir, ".godex", "bin")
+		if entries, err := os.ReadDir(binDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.Contains(strings.ToLower(entry.Name()), "llama-server") {
+					llamaPath := filepath.Join(binDir, entry.Name())
+					os.Chmod(llamaPath, 0755)
+					return llamaPath, nil
+				}
+			}
+			for _, entry := range entries {
+				if entry.IsDir() {
+					subDir := filepath.Join(binDir, entry.Name())
+					if subEntries, err := os.ReadDir(subDir); err == nil {
+						for _, subEntry := range subEntries {
+							if !subEntry.IsDir() && strings.Contains(strings.ToLower(subEntry.Name()), "llama-server") {
+								llamaPath := filepath.Join(subDir, subEntry.Name())
+								os.Chmod(llamaPath, 0755)
+								return llamaPath, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return "", fmt.Errorf("llama-server not found")
 }
 
