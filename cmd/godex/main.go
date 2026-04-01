@@ -1745,11 +1745,19 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		}
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
-			output := resp
-			if hasFinal {
-				output = finalResp
+			if !hasFinal {
+				if verbose {
+					thinkingText := extractThinkingText(resp)
+					if thinkingText != "" {
+						fmt.Println(renderThinking(thinkingText))
+					}
+					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
+				}
+				continuePrompt := "continue"
+				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
+				continue
 			}
-			return output, nil
+			return finalResp, nil
 		}
 
 		if verbose {
@@ -1865,6 +1873,19 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 	}
 
 	return "Max tool rounds reached", nil
+}
+
+func buildContinuePrompt(llmProvider providers.Provider, servers []MCPServer, originalInput, continuePrompt string, currentRound, maxRounds int) string {
+	if llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
+		return fmt.Sprintf("Continue from where you left off. %s\n\nProvide your FINAL_ANSWER now.", continuePrompt)
+	}
+	toolsDesc := getToolsDescription(servers)
+	toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
+	roundInfo := ""
+	if currentRound > 0 {
+		roundInfo = fmt.Sprintf("\n\nNOTE: You are on round %d/%d. Only call more tools if absolutely necessary.", currentRound, maxRounds)
+	}
+	return fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nContinue from where you left off. %s\n\nProvide your FINAL_ANSWER now.%s", toolsDesc, toolCallFormat, continuePrompt, roundInfo)
 }
 
 func getToolsDescription(servers []MCPServer) string {
