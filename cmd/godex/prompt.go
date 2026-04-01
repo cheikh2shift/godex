@@ -325,6 +325,8 @@ func (m promptModel) View() string {
 			meter.WriteString("]")
 			meter.WriteString(fmt.Sprintf(" %s/%s", formatNumber(m.contextUsage), formatNumber(m.contextLimit)))
 			rightContent = meter.String()
+		} else if m.contextUsage > 0 {
+			rightContent = fmt.Sprintf("tokens: %s", formatNumber(m.contextUsage))
 		}
 
 		grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))

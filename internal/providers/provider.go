@@ -8,6 +8,8 @@ import (
 	"github.com/cheikh2shift/godex/internal/config"
 )
 
+var DebugMode bool
+
 // Tool represents an executable tool.
 type Tool struct {
 	Name        string

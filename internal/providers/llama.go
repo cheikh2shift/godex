@@ -30,6 +30,12 @@ const (
 	llamaRetryDelay           = 5 * time.Second
 )
 
+func llamaDebug(format string, args ...interface{}) {
+	if DebugMode {
+		log.Printf("[llama.cpp] "+format, args...)
+	}
+}
+
 type llamaProvider struct {
 	baseURL          string
 	model            string
@@ -54,6 +60,7 @@ type llamaProvider struct {
 	serverProcess  *os.Process
 	serverPort     int
 	serverPath     string
+	tokenizePath   string
 	externalServer bool
 	serverMu       sync.Mutex
 	serverReady    bool
@@ -152,6 +159,66 @@ func detectLlamaServer() (string, error) {
 	}
 
 	return "", fmt.Errorf("llama-server not found")
+}
+
+func detectLlamaTokenize() (string, error) {
+	paths := []string{}
+
+	godexDir := os.Getenv("GODEX_DIR")
+	if godexDir != "" {
+		paths = append(paths, filepath.Join(godexDir, "llama-tokenize"))
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		paths = append(paths,
+			filepath.Join(homeDir, ".godex", "llama-tokenize"),
+			filepath.Join(homeDir, ".godex", "bin", "llama-tokenize"),
+		)
+	}
+
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			if err := os.Chmod(p, 0755); err == nil {
+				if _, err := exec.LookPath(p); err == nil || fileExists(p) {
+					return p, nil
+				}
+			}
+		}
+	}
+
+	if path, err := exec.LookPath("llama-tokenize"); err == nil {
+		return path, nil
+	}
+
+	for _, p := range paths {
+		if fileExists(p) {
+			return p, nil
+		}
+	}
+
+	if homeDir != "" {
+		binDir := filepath.Join(homeDir, ".godex", "bin")
+		if entries, err := os.ReadDir(binDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					subDir := filepath.Join(binDir, entry.Name())
+					if subEntries, err := os.ReadDir(subDir); err == nil {
+						for _, subEntry := range subEntries {
+							if !subEntry.IsDir() && subEntry.Name() == "llama-tokenize" {
+								tokenizePath := filepath.Join(subDir, subEntry.Name())
+								os.Chmod(tokenizePath, 0755)
+								llamaDebug("Found llama-tokenize at: %s", tokenizePath)
+								return tokenizePath, nil
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("llama-tokenize not found")
 }
 
 func fileExists(path string) bool {
@@ -292,7 +359,7 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 		return destPath, modelWithQuant, true, nil
 	}
 
-	log.Printf("[llama.cpp] Downloading model %s to %s", modelID, destPath)
+	llamaDebug("Downloading model %s to %s", modelID, destPath)
 	fmt.Printf("[llama.cpp] Downloading %s...\n", filename)
 
 	downloadURL := getDownloadURL(modelID, selectedFile)
@@ -478,18 +545,23 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 
 	var baseURL string
 	var serverPath string
+	var tokenizePath string
 	var port int
 	var serverReady bool
 
 	if externalURL != "" {
 		baseURL = externalURL
 		serverReady = true
-		log.Printf("[llama.cpp] Using external server at %s", baseURL)
+		llamaDebug("Using external server at %s", baseURL)
 	} else {
 		serverPath, err = detectLlamaServer()
 		if err != nil {
 			return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", err)
 		}
+
+		tokenizePath, _ = detectLlamaTokenize()
+		llamaDebug("tokenizePath detected: %s", tokenizePath)
+		llamaDebug("newLlamaProvider: modelPath=%s", modelPath)
 
 		port, err = findFreePort()
 		if err != nil {
@@ -522,6 +594,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		pendingToolCalls:   make(map[string]string),
 		serverPort:         port,
 		serverPath:         serverPath,
+		tokenizePath:       tokenizePath,
 		externalServer:     externalURL != "",
 		serverReady:        serverReady,
 		serverStarted:      false,
@@ -536,6 +609,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		}
 		p.model = modelPath
 		p.cfg.Model = modelWithQuant
+		llamaDebug("newLlamaProvider: HF model downloaded, final model=%s", modelPath)
 		if downloadProgress != nil {
 			downloadProgress(DownloadProgress{
 				Filename: filepath.Base(modelPath),
@@ -561,16 +635,16 @@ func (p *llamaProvider) startServerAsync() {
 	p.startMu.Unlock()
 
 	go func() {
-		log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
+		llamaDebug("Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
 		if err := p.startServerSync(); err != nil {
-			log.Printf("[llama.cpp] Server start failed: %v", err)
+			llamaDebug("Server start failed: %v", err)
 			p.startMu.Lock()
 			p.serverStarted = false
 			p.startMu.Unlock()
 			return
 		}
 		p.serverReady = true
-		//log.Printf("[llama.cpp] Server ready at %s\n", p.baseURL)
+		//llamaDebug("Server ready at %s\n", p.baseURL)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -583,12 +657,12 @@ func (p *llamaProvider) startServerAsync() {
 }
 
 func (p *llamaProvider) killServer() {
-	log.Printf("[llama.cpp] killServer() called, process=%v", p.serverProcess.Pid)
+	llamaDebug("killServer() called, process=%v", p.serverProcess.Pid)
 	p.serverMu.Lock()
 	defer p.serverMu.Unlock()
 
 	if p.serverProcess != nil {
-		log.Printf("[llama.cpp] Sending SIGTERM to pid %d", p.serverProcess.Pid)
+		llamaDebug("Sending SIGTERM to pid %d", p.serverProcess.Pid)
 		p.serverProcess.Signal(syscall.SIGTERM)
 		ch := make(chan struct{})
 		go func() {
@@ -597,9 +671,9 @@ func (p *llamaProvider) killServer() {
 		}()
 		select {
 		case <-ch:
-			log.Printf("[llama.cpp] Process terminated gracefully")
+			llamaDebug("Process terminated gracefully")
 		case <-time.After(2 * time.Second):
-			log.Printf("[llama.cpp] Process did not terminate, sending SIGKILL")
+			llamaDebug("Process did not terminate, sending SIGKILL")
 			p.serverProcess.Kill()
 		}
 		p.serverProcess = nil
@@ -631,7 +705,7 @@ func (p *llamaProvider) startServerSync() error {
 	}
 	args = append(args, "--log-disable", "--jinja")
 
-	log.Printf("[llama.cpp] Running: %s %v", p.serverPath, args)
+	llamaDebug("Running: %s %v", p.serverPath, args)
 
 	cmd := exec.Command(p.serverPath, args...)
 	cmd.Stdout = nil
@@ -671,6 +745,7 @@ func (p *llamaProvider) startServerSync() error {
 }
 
 func (p *llamaProvider) fetchModelInfo(ctx context.Context) error {
+	llamaDebug("fetchModelInfo: baseURL=%s model=%s", p.baseURL, p.model)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", nil)
 	if err != nil {
 		return err
@@ -697,8 +772,44 @@ func (p *llamaProvider) fetchModelInfo(ctx context.Context) error {
 		return err
 	}
 
-	if len(result.Data) > 0 {
+	if len(result.Data) > 0 && result.Data[0].ContextLength > 0 {
 		p.contextLimit = result.Data[0].ContextLength
+		p.promptTokens = p.countTokensFromMessages()
+		llamaDebug("fetchModelInfo: contextLimit=%d, promptTokens=%d", p.contextLimit, p.promptTokens)
+		return nil
+	}
+
+	return p.fetchContextFromProps(ctx)
+}
+
+func (p *llamaProvider) fetchContextFromProps(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/props", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		DefaultGenerationSettings struct {
+			NCtx int `json:"n_ctx"`
+		} `json:"default_generation_settings"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
+	}
+
+	if result.DefaultGenerationSettings.NCtx > 0 {
+		p.contextLimit = result.DefaultGenerationSettings.NCtx
 	}
 
 	return nil
@@ -789,7 +900,7 @@ func (p *llamaProvider) ensureServerReady(ctx context.Context) error {
 		if err := p.checkHealth(ctx); err == nil {
 			return nil
 		}
-		log.Printf("[llama.cpp] Server health check failed, restarting")
+		llamaDebug("Server health check failed, restarting")
 	}
 
 	if p.serverStarted {
@@ -797,7 +908,7 @@ func (p *llamaProvider) ensureServerReady(ctx context.Context) error {
 			p.serverReady = true
 			return nil
 		}
-		log.Printf("[llama.cpp] Server failed to become healthy, restarting")
+		llamaDebug("Server failed to become healthy, restarting")
 	}
 
 	p.startMu.Lock()
@@ -815,9 +926,9 @@ func (p *llamaProvider) ensureServerReady(ctx context.Context) error {
 		p.serverPath = serverPath
 	}
 
-	log.Printf("[llama.cpp] Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
+	llamaDebug("Starting server on port %d with model: %s (hf: %v)", p.serverPort, p.model, p.modelIsHF)
 	if err := p.startServerSync(); err != nil {
-		log.Printf("[llama.cpp] Server start failed: %v", err)
+		llamaDebug("Server start failed: %v", err)
 		p.startMu.Lock()
 		p.serverStarted = false
 		p.startMu.Unlock()
@@ -1091,7 +1202,7 @@ type llamaResponseToolCall struct {
 }
 
 func (p *llamaProvider) Close() error {
-	log.Printf("[llama.cpp] Close() called")
+	llamaDebug("Close() called")
 	p.sendMu.Lock()
 	defer p.sendMu.Unlock()
 
@@ -1146,7 +1257,142 @@ func (p *llamaProvider) ContextLimit() int {
 func (p *llamaProvider) TokenUsage() (int, int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.promptTokens, p.completionTokens
+
+	llamaDebug("TokenUsage: cached promptTokens=%d, completionTokens=%d", p.promptTokens, p.completionTokens)
+
+	if p.promptTokens > 0 || p.completionTokens > 0 {
+		return p.promptTokens, p.completionTokens
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	slots, err := p.getSlotInfo(ctx)
+	if err != nil {
+		llamaDebug("TokenUsage: getSlotInfo error: %v", err)
+		promptTokens := p.countTokensFromMessages()
+		llamaDebug("TokenUsage: using countTokensFromMessages: promptTokens=%d", promptTokens)
+		return promptTokens, 0
+	}
+
+	promptTokens := 0
+	var completionTokens int
+	for _, slot := range slots {
+		isActive := slot.IsProcessing || slot.IDTask != 0
+		hasTokens := false
+		for _, nt := range slot.NextToken {
+			if nt.NDecoded > 0 {
+				completionTokens += nt.NDecoded
+				hasTokens = true
+			}
+		}
+		llamaDebug("TokenUsage: slot id=%d is_processing=%v id_task=%d next_token=%v hasTokens=%v", slot.ID, slot.IsProcessing, slot.IDTask, slot.NextToken, hasTokens)
+		if isActive || hasTokens {
+			if p.contextLimit == 0 && slot.NCtx > 0 {
+				p.contextLimit = slot.NCtx
+			}
+		}
+	}
+
+	if promptTokens == 0 {
+		promptTokens = p.countTokensFromMessages()
+		llamaDebug("TokenUsage: using countTokensFromMessages: promptTokens=%d", promptTokens)
+	}
+
+	llamaDebug("TokenUsage: returning promptTokens=%d, completionTokens=%d", promptTokens, completionTokens)
+	return promptTokens, completionTokens
+}
+
+type slotInfo struct {
+	ID           int  `json:"id"`
+	IsProcessing bool `json:"is_processing"`
+	NCtx         int  `json:"n_ctx"`
+	IDTask       int  `json:"id_task"`
+	NextToken    []struct {
+		NDecoded int `json:"n_decoded"`
+	} `json:"next_token"`
+}
+
+func (p *llamaProvider) countTokens(text string) int {
+	llamaDebug("countTokens: tokenizePath=%s model=%s", p.tokenizePath, p.model)
+	if p.tokenizePath == "" || p.model == "" {
+		llamaDebug("countTokens: early return, tokenizePath or model empty")
+		return 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, p.tokenizePath, "-m", p.model, "-p", text, "--log-disable")
+	output, err := cmd.Output()
+	if err != nil {
+		llamaDebug("tokenize error: %v", err)
+		return 0
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "->") {
+			count++
+		}
+	}
+
+	llamaDebug("countTokens: text=%q count=%d output=%s", text, count, string(output))
+	return count
+}
+
+func (p *llamaProvider) countTokensFromMessages() int {
+	llamaDebug("countTokensFromMessages: tokenizePath=%s model=%s messagesCount=%d", p.tokenizePath, p.model, len(p.messages))
+	if p.tokenizePath == "" || p.model == "" {
+		return 0
+	}
+
+	var sb strings.Builder
+	for _, msg := range p.messages {
+		role, _ := msg["role"].(string)
+		content, _ := msg["content"].(string)
+		if role != "" && content != "" {
+			sb.WriteString(role)
+			sb.WriteString(": ")
+			sb.WriteString(content)
+			sb.WriteString("\n")
+		}
+	}
+
+	if sb.Len() == 0 {
+		return 0
+	}
+
+	return p.countTokens(sb.String())
+}
+
+func (p *llamaProvider) getSlotInfo(ctx context.Context) ([]slotInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/slots", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("slots endpoint returned %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	llamaDebug("/slots response: %s", string(body))
+
+	var slots []slotInfo
+	if err := json.Unmarshal(body, &slots); err != nil {
+		return nil, err
+	}
+
+	return slots, nil
 }
 
 func (p *llamaProvider) Reset() error {
@@ -1266,7 +1512,11 @@ func (p *llamaProvider) SetModel(model string, contextLimit int) error {
 	} else {
 		p.modelIsHF = false
 	}
-	p.contextLimit = contextLimit
+	if contextLimit > 0 {
+		p.contextLimit = contextLimit
+	} else {
+		p.contextLimit = 0
+	}
 	if p.cfg != nil {
 		p.cfg.Model = model
 	}

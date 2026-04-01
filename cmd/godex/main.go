@@ -195,6 +195,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create provider: %v", err)
 	}
+	providers.DebugMode = debugMode
 
 	if provider == nil {
 		log.Fatalf("no provider configured; use --wizard to create one")
