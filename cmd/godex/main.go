@@ -984,6 +984,10 @@ promptLoop:
 			hiveResultMu.Unlock()
 			for _, res := range results {
 				if res != nil {
+					select {
+					case promptCancelCh <- struct{}{}:
+					default:
+					}
 					workerLabel := res.FromName
 					if strings.TrimSpace(workerLabel) == "" {
 						workerLabel = res.FromID
