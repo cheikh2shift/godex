@@ -462,7 +462,7 @@ func (s *FileSystemServer) regexReplaceInFile(args map[string]interface{}) (stri
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	return fmt.Sprintf("Replaced %d occurrence(s) of pattern '%s' in %s", count, find, path), nil
+	return fmt.Sprintf("Replaced %d occurrence(s) of pattern %s in %s", count, find, path), nil
 }
 
 func (s *FileSystemServer) replaceLineRange(args map[string]interface{}) (string, error) {
