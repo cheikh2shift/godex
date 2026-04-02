@@ -774,7 +774,7 @@ promptLoop:
 
 		// Track tool calls across rounds to detect infinite loops
 		prevRoundToolCalls := make(map[string]bool)
-
+		prevNoTool := false
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
 			printedStreamed := false
@@ -849,18 +849,32 @@ promptLoop:
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
+			if len(toolCalls) > 0 && isToolCallResponse {
+				prevNoTool = false
+			}
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No valid tool calls - print thinking text and final response, then stop
-				if !printedStreamed {
+				if !printedStreamed && hasFinal {
 					thinkingText := extractThinkingText(preResp)
 					if thinkingText != "" {
 						fmt.Println(renderThinking(thinkingText))
 					}
 				}
+
+				if prevNoTool {
+					go playSound()
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+				}
+
+				prevNoTool = true
 				output := resp
 				if hasFinal {
 					output = finalResp
+				} else {
+					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, "continue", round+1, maxToolRounds)
+					continue
 				}
+
 				if strings.TrimSpace(output) != "" {
 					go playSound()
 					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
