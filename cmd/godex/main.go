@@ -60,12 +60,14 @@ type MCPServer interface {
 var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
 
 var (
-	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
-	orangeOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
-	purpleOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Render("●")
-	muted        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	debugMode    bool
-	pathPromptMu sync.Mutex
+	greenOrb         = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
+	orangeOrb        = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
+	purpleOrb        = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Render("●")
+	muted            = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	debugMode        bool
+	pathPromptMu     sync.Mutex
+	hivePendingStop  chan struct{}
+	summarisingStart chan struct{}
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -278,9 +280,16 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			return runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, func(toolName string) {
+			result, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, false, func(toolName string) {
 				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
 			})
+			if llmProvider != nil {
+				inputTokens, outputTokens := llmProvider.TokenUsage()
+				hiveMgr.SetTokenUsage(inputTokens, outputTokens)
+			}
+			currentWd, _ := os.Getwd()
+			hiveMgr.SetWorkingDir(currentWd)
+			return result, err
 		})
 		if err != nil {
 			fmt.Printf("[Hive] Failed to start hive manager: %v\n", err)
@@ -326,22 +335,72 @@ func main() {
 	var commitContextRef string
 
 	var hiveResultMu sync.Mutex
-	var pendingHiveResult *hive.HiveResult
+	var pendingHiveResults []*hive.HiveResult
 	hiveResultReady := make(chan struct{}, 1)
+	hivePendingStop = make(chan struct{}, 1)
+	summarisingStart = make(chan struct{}, 1)
 
 	if hiveMgr != nil {
 		go func() {
 			for res := range hiveMgr.Results() {
 				hiveResultMu.Lock()
-				pendingHiveResult = &res
+				pendingHiveResults = append(pendingHiveResults, &res)
 				hiveResultMu.Unlock()
 				select {
 				case hiveResultReady <- struct{}{}:
 				default:
 				}
+				select {
+				case hivePendingStop <- struct{}{}:
+				default:
+				}
+				select {
+				case summarisingStart <- struct{}{}:
+				default:
+				}
 			}
 		}()
 	}
+
+	go func() {
+		var ticker *time.Ticker
+		var start time.Time
+		active := false
+		for {
+			if active && ticker != nil {
+				select {
+				case <-summarisingStart:
+					ticker.Stop()
+					start = time.Now()
+					ticker = time.NewTicker(1 * time.Second)
+				case <-ticker.C:
+					elapsed := time.Since(start)
+					minutes := int(elapsed.Seconds()) / 60
+					seconds := int(elapsed.Seconds()) % 60
+					var timeStr string
+					if minutes > 0 {
+						timeStr = fmt.Sprintf("%dm%02ds", minutes, seconds)
+					} else {
+						timeStr = fmt.Sprintf("%ds", seconds)
+					}
+					fmt.Printf("\r%s - Summarising - %s", purpleOrb, timeStr)
+				case <-hivePendingStop:
+					ticker.Stop()
+					ticker = nil
+					active = false
+					fmt.Print("\r               \r")
+				}
+			} else {
+				select {
+				case <-summarisingStart:
+					start = time.Now()
+					ticker = time.NewTicker(1 * time.Second)
+					active = true
+				case <-hivePendingStop:
+				}
+			}
+		}
+	}()
 
 	// Track session for summary
 	var sessionEntries []sessionEntry
@@ -394,8 +453,12 @@ promptLoop:
 			err = result.err
 		case <-hiveResultReady:
 			hiveResultMu.Lock()
-			res := pendingHiveResult
-			pendingHiveResult = nil
+			if len(pendingHiveResults) == 0 {
+				hiveResultMu.Unlock()
+				continue
+			}
+			res := pendingHiveResults[0]
+			pendingHiveResults = pendingHiveResults[1:]
 			hiveResultMu.Unlock()
 			select {
 			case promptCancelCh <- struct{}{}:
@@ -430,8 +493,11 @@ promptLoop:
 				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 					toolTimeout = *provider.ToolTimeout
 				}
-				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
-				fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
+
+				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, true, nil)
+				if debugMode {
+					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
+				}
 				hiveMgr.Status("Hive: idle")
 				continue
 			}
@@ -708,7 +774,7 @@ promptLoop:
 
 		// Track tool calls across rounds to detect infinite loops
 		prevRoundToolCalls := make(map[string]bool)
-
+		prevNoTool := false
 		for round := 0; round < maxToolRounds; round++ {
 			var streamed strings.Builder
 			printedStreamed := false
@@ -783,18 +849,33 @@ promptLoop:
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
+			if len(toolCalls) > 0 && isToolCallResponse {
+				prevNoTool = false
+			}
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No valid tool calls - print thinking text and final response, then stop
-				if !printedStreamed {
+				if !printedStreamed && hasFinal {
 					thinkingText := extractThinkingText(preResp)
 					if thinkingText != "" {
 						fmt.Println(renderThinking(thinkingText))
 					}
 				}
+
+				if prevNoTool {
+					go playSound()
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					break
+				}
+
+				prevNoTool = true
 				output := resp
 				if hasFinal {
 					output = finalResp
+				} else {
+					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, "continue", round+1, maxToolRounds)
+					continue
 				}
+
 				if strings.TrimSpace(output) != "" {
 					go playSound()
 					fmt.Printf("\n\n%s\n%s\n", renderSuccessBar(), renderMarkdown(output))
@@ -964,22 +1045,28 @@ promptLoop:
 			})
 		}
 
-		// Process any pending hive results after the prompt completes
+		// Process all pending hive results after the prompt completes
 		if hiveMgr != nil {
-			select {
-			case <-hiveResultReady:
-				hiveResultMu.Lock()
-				res := pendingHiveResult
-				pendingHiveResult = nil
-				hiveResultMu.Unlock()
+			hiveResultMu.Lock()
+			results := pendingHiveResults
+			pendingHiveResults = nil
+			hiveResultMu.Unlock()
+			for _, res := range results {
 				if res != nil {
+					select {
+					case promptCancelCh <- struct{}{}:
+					default:
+					}
 					workerLabel := res.FromName
 					if strings.TrimSpace(workerLabel) == "" {
 						workerLabel = res.FromID
 					}
-					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
-					if res.Error != "" {
-						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+
+					if debugMode {
+						fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
+						if res.Error != "" {
+							fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+						}
 					}
 					fmt.Printf("%s %s\n\n", purpleOrb, muted.Render("Sending output to LLM..."))
 					payload := res.Result
@@ -1006,10 +1093,9 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, true, nil)
 					hiveMgr.Status("Hive: idle")
 				}
-			default:
 			}
 		}
 	}
@@ -1629,7 +1715,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, nil)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, false, nil)
 	if err != nil {
 		return err
 	}
@@ -1703,7 +1789,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 User request: %s`, strings.TrimSpace(base), input)
 }
 
-func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, onToolCall func(string)) (string, error) {
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, nocont bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
 	toolsDesc := ""
 	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
@@ -1711,6 +1797,20 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 	}
 
 	for round := 0; round < maxToolRounds; round++ {
+		if nocont {
+			if hivePendingStop != nil {
+				select {
+				case hivePendingStop <- struct{}{}:
+				default:
+				}
+				select {
+				case summarisingStart <- struct{}{}:
+				default:
+				}
+
+			}
+		}
+
 		var resp string
 		var err error
 		if verbose {
@@ -1722,6 +1822,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		} else {
 			resp, err = llmProvider.Send(ctx, fullPrompt)
 		}
+		select {
+		case hivePendingStop <- struct{}{}:
+		default:
+		}
 		if err != nil {
 			return "", err
 		}
@@ -1732,8 +1836,9 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if verbose && len(missingTools) > 0 {
 			fmt.Printf("\n[Ignored unknown tool(s): %s]\n", strings.Join(missingTools, ", "))
 		}
+
 		if verbose {
-			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+			fmt.Printf("[TL Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 		}
 		if debug {
 			for _, tc := range toolCalls {
@@ -1745,11 +1850,27 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		}
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
-			output := resp
-			if hasFinal {
-				output = finalResp
+			if !hasFinal {
+
+				if strings.TrimSpace(resp) != "" && nocont {
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					return resp, nil
+				}
+
+				if verbose {
+					thinkingText := extractThinkingText(resp)
+					if thinkingText != "" {
+						fmt.Println(renderThinking(thinkingText))
+					}
+					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
+				}
+				continuePrompt := "continue."
+
+				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
+
+				continue
 			}
-			return output, nil
+			return finalResp, nil
 		}
 
 		if verbose {
@@ -1865,6 +1986,19 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 	}
 
 	return "Max tool rounds reached", nil
+}
+
+func buildContinuePrompt(llmProvider providers.Provider, servers []MCPServer, originalInput, continuePrompt string, currentRound, maxRounds int) string {
+	if llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
+		return fmt.Sprintf("Continue from where you left off. %s\n\nProvide your FINAL_ANSWER now.", continuePrompt)
+	}
+	toolsDesc := getToolsDescription(servers)
+	toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
+	roundInfo := ""
+	if currentRound > 0 {
+		roundInfo = fmt.Sprintf("\n\nNOTE: You are on round %d/%d. Only call more tools if absolutely necessary.", currentRound, maxRounds)
+	}
+	return fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nContinue from where you left off. %s\n\nProvide your FINAL_ANSWER now.%s", toolsDesc, toolCallFormat, continuePrompt, roundInfo)
 }
 
 func getToolsDescription(servers []MCPServer) string {
