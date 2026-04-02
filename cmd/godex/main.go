@@ -60,12 +60,14 @@ type MCPServer interface {
 var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
 
 var (
-	greenOrb     = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
-	orangeOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
-	purpleOrb    = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Render("●")
-	muted        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	debugMode    bool
-	pathPromptMu sync.Mutex
+	greenOrb         = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
+	orangeOrb        = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("●")
+	purpleOrb        = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Render("●")
+	muted            = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	debugMode        bool
+	pathPromptMu     sync.Mutex
+	hivePendingStop  chan struct{}
+	summarisingStart chan struct{}
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -335,6 +337,8 @@ func main() {
 	var hiveResultMu sync.Mutex
 	var pendingHiveResults []*hive.HiveResult
 	hiveResultReady := make(chan struct{}, 1)
+	hivePendingStop = make(chan struct{}, 1)
+	summarisingStart = make(chan struct{}, 1)
 
 	if hiveMgr != nil {
 		go func() {
@@ -346,9 +350,57 @@ func main() {
 				case hiveResultReady <- struct{}{}:
 				default:
 				}
+				select {
+				case hivePendingStop <- struct{}{}:
+				default:
+				}
+				select {
+				case summarisingStart <- struct{}{}:
+				default:
+				}
 			}
 		}()
 	}
+
+	go func() {
+		var ticker *time.Ticker
+		var start time.Time
+		active := false
+		for {
+			if active && ticker != nil {
+				select {
+				case <-summarisingStart:
+					ticker.Stop()
+					start = time.Now()
+					ticker = time.NewTicker(1 * time.Second)
+				case <-ticker.C:
+					elapsed := time.Since(start)
+					minutes := int(elapsed.Seconds()) / 60
+					seconds := int(elapsed.Seconds()) % 60
+					var timeStr string
+					if minutes > 0 {
+						timeStr = fmt.Sprintf("%dm%02ds", minutes, seconds)
+					} else {
+						timeStr = fmt.Sprintf("%ds", seconds)
+					}
+					fmt.Printf("\r%s - Summarising - %s", purpleOrb, timeStr)
+				case <-hivePendingStop:
+					ticker.Stop()
+					ticker = nil
+					active = false
+					fmt.Print("\r               \r")
+				}
+			} else {
+				select {
+				case <-summarisingStart:
+					start = time.Now()
+					ticker = time.NewTicker(1 * time.Second)
+					active = true
+				case <-hivePendingStop:
+				}
+			}
+		}
+	}()
 
 	// Track session for summary
 	var sessionEntries []sessionEntry
@@ -1730,6 +1782,20 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 	}
 
 	for round := 0; round < maxToolRounds; round++ {
+		if nocont {
+			if hivePendingStop != nil {
+				select {
+				case hivePendingStop <- struct{}{}:
+				default:
+				}
+				select {
+				case summarisingStart <- struct{}{}:
+				default:
+				}
+
+			}
+		}
+
 		var resp string
 		var err error
 		if verbose {
@@ -1740,6 +1806,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 			llmProvider.SetThinkCallback(nil)
 		} else {
 			resp, err = llmProvider.Send(ctx, fullPrompt)
+		}
+		select {
+		case hivePendingStop <- struct{}{}:
+		default:
 		}
 		if err != nil {
 			return "", err
@@ -1769,10 +1839,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 
 				if strings.TrimSpace(resp) != "" && nocont {
 					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
-					//if verbose {
-					//	log.Println("Returning response without final answer (nocont=true)")
-					//}
-					return finalResp, nil
+					return resp, nil
 				}
 
 				if verbose {
