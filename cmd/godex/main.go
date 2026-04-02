@@ -443,7 +443,9 @@ promptLoop:
 				}
 
 				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, true, nil)
-				fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
+				if debugMode {
+					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
+				}
 				hiveMgr.Status("Hive: idle")
 				continue
 			}
@@ -992,9 +994,12 @@ promptLoop:
 					if strings.TrimSpace(workerLabel) == "" {
 						workerLabel = res.FromID
 					}
-					fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
-					if res.Error != "" {
-						fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+
+					if debugMode {
+						fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(res.Result))
+						if res.Error != "" {
+							fmt.Printf("[%s] Hive worker error: %s\n\n", workerLabel, res.Error)
+						}
 					}
 					fmt.Printf("%s %s\n\n", purpleOrb, muted.Render("Sending output to LLM..."))
 					payload := res.Result
