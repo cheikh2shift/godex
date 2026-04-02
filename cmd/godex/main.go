@@ -864,6 +864,7 @@ promptLoop:
 				if prevNoTool {
 					go playSound()
 					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					break
 				}
 
 				prevNoTool = true
