@@ -79,9 +79,14 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end"]}`),
 			},
 			{
-				Name:        "delete_line_range",
-				Description: "Delete a range of lines from a file",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end"]}`),
+				Name:        "regex_replace_in_file",
+				Description: "Replace text in a file using regex patterns. Use this instead of line-based edits when you need to match specific text content - patterns don't shift when other edits are made",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"find":{"type":"string","description":"Regex pattern to find (supports capture groups)"},"replace":{"type":"string","description":"Replacement text (supports capture groups $1, $2, etc.)"},"all":{"type":"boolean","description":"Replace all matches (default: true)"}},"required":["path","find","replace"]}`),
+			},
+			{
+				Name:        "replace_line_range",
+				Description: "Delete a range of lines and insert new content at that location in a file",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"new_content":{"type":"string","description":"New content to insert at the deleted location"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end","new_content"]}`),
 			},
 			{
 				Name:        "insert_at_line",
@@ -135,8 +140,10 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.getFileInfo(arguments)
 	case "read_file_line_range":
 		return s.readFileLineRange(arguments)
-	case "delete_line_range":
-		return s.deleteLineRange(arguments)
+	case "regex_replace_in_file":
+		return s.regexReplaceInFile(arguments)
+	case "replace_line_range":
+		return s.replaceLineRange(arguments)
 	case "insert_at_line":
 		return s.insertAtLine(arguments)
 	case "search_file_text":
@@ -402,7 +409,63 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 	return strings.Join(lines[startIdx:endIdx], "\n"), nil
 }
 
-func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) regexReplaceInFile(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
+	}
+
+	find, ok := args["find"].(string)
+	if !ok || find == "" {
+		return "", fmt.Errorf("find pattern is required")
+	}
+
+	replace, ok := args["replace"].(string)
+	if !ok {
+		return "", fmt.Errorf("replace is required")
+	}
+
+	replaceAll := true
+	if all, ok := args["all"].(bool); ok {
+		replaceAll = all
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	re, err := regexp.Compile(find)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex pattern: %w", err)
+	}
+
+	var replaced string
+	var count int
+	if replaceAll {
+		replaced = re.ReplaceAllString(string(content), replace)
+		count = len(re.FindAllStringIndex(string(content), -1))
+	} else {
+		replaced = re.ReplaceAllString(string(content), replace)
+		count = 1
+	}
+
+	if count == 0 {
+		return fmt.Sprintf("No matches found for pattern: %s", find), nil
+	}
+
+	if err := os.WriteFile(path, []byte(replaced), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return fmt.Sprintf("Replaced %d occurrence(s) of pattern '%s' in %s", count, find, path), nil
+}
+
+func (s *FileSystemServer) replaceLineRange(args map[string]interface{}) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -426,6 +489,10 @@ func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string,
 	if !ok {
 		return "", fmt.Errorf("end is required")
 	}
+	newContent, ok := args["new_content"].(string)
+	if !ok {
+		return "", fmt.Errorf("new_content is required")
+	}
 
 	startIdx := int(start) - 1
 	endIdx := int(end)
@@ -440,13 +507,16 @@ func (s *FileSystemServer) deleteLineRange(args map[string]interface{}) (string,
 		endIdx = len(lines)
 	}
 
-	lines = append(lines[:startIdx], lines[endIdx:]...)
+	deletedLines := endIdx - startIdx
+	newLines := strings.Split(newContent, "\n")
 
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	result := append(lines[:startIdx], append(newLines, lines[endIdx:]...)...)
+
+	if err := os.WriteFile(path, []byte(strings.Join(result, "\n")), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	return fmt.Sprintf("Deleted lines %d-%d from %s", int(start), int(end), path), nil
+	return fmt.Sprintf("Replaced lines %d-%d (%d lines deleted) with %d lines in %s", int(start), int(end), deletedLines, len(newLines), path), nil
 }
 
 func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, error) {
