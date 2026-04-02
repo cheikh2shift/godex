@@ -872,7 +872,8 @@ promptLoop:
 				if hasFinal {
 					output = finalResp
 				} else {
-					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, "continue", round+1, maxToolRounds)
+					cprompt := fmt.Sprintf("The assistant gave the following response:\n%s\n\nSince there are no tool calls to execute, please provide a final answer based on this response.", resp)
+					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, cprompt, round+1, maxToolRounds)
 					continue
 				}
 

@@ -700,6 +700,14 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	paths := []string{}
 
+	godexDir := os.Getenv("GODEX_DIR")
+	if godexDir != "" {
+		paths = append(paths,
+			filepath.Join(godexDir, "llama-server"),
+			filepath.Join(godexDir, "bin", "llama-server"),
+		)
+	}
+
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
 		paths = append(paths,
@@ -718,6 +726,35 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 
 	if _, err := exec.LookPath("llama-server"); err == nil {
 		return nil
+	}
+
+	searchDirs := []string{}
+	if godexDir != "" {
+		searchDirs = append(searchDirs, filepath.Join(godexDir, "bin"))
+	}
+	if homeDir != "" {
+		searchDirs = append(searchDirs, filepath.Join(homeDir, ".godex", "bin"))
+	}
+
+	for _, dir := range searchDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(strings.ToLower(entry.Name()), "llama") {
+				subDir := filepath.Join(dir, entry.Name())
+				if subEntries, err := os.ReadDir(subDir); err == nil {
+					for _, subEntry := range subEntries {
+						if !subEntry.IsDir() && strings.Contains(strings.ToLower(subEntry.Name()), "llama-server") {
+							llamaPath := filepath.Join(subDir, subEntry.Name())
+							os.Chmod(llamaPath, 0755)
+							return nil
+						}
+					}
+				}
+			}
+		}
 	}
 
 	fmt.Println()
@@ -797,7 +834,7 @@ func checkOrInstallLlamaServer(reader *bufio.Reader) error {
 	downloadURL := selectedAsset.URL
 	isZip := strings.HasSuffix(selectedAsset.FileName, ".zip")
 
-	godexDir := filepath.Join(homeDir, ".godex")
+	godexDir = filepath.Join(homeDir, ".godex")
 	installDir := filepath.Join(godexDir, "bin")
 
 	if err := os.MkdirAll(installDir, 0755); err != nil {
