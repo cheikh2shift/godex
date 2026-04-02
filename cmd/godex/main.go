@@ -278,7 +278,7 @@ func main() {
 			if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 				toolTimeout = *provider.ToolTimeout
 			}
-			result, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, func(toolName string) {
+			result, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxRounds, toolTimeout, llmProvider, false, debugMode, true, false, func(toolName string) {
 				hiveMgr.Status(fmt.Sprintf("Hive: %s", toolName))
 			})
 			if llmProvider != nil {
@@ -333,14 +333,14 @@ func main() {
 	var commitContextRef string
 
 	var hiveResultMu sync.Mutex
-	var pendingHiveResult *hive.HiveResult
+	var pendingHiveResults []*hive.HiveResult
 	hiveResultReady := make(chan struct{}, 1)
 
 	if hiveMgr != nil {
 		go func() {
 			for res := range hiveMgr.Results() {
 				hiveResultMu.Lock()
-				pendingHiveResult = &res
+				pendingHiveResults = append(pendingHiveResults, &res)
 				hiveResultMu.Unlock()
 				select {
 				case hiveResultReady <- struct{}{}:
@@ -401,8 +401,12 @@ promptLoop:
 			err = result.err
 		case <-hiveResultReady:
 			hiveResultMu.Lock()
-			res := pendingHiveResult
-			pendingHiveResult = nil
+			if len(pendingHiveResults) == 0 {
+				hiveResultMu.Unlock()
+				continue
+			}
+			res := pendingHiveResults[0]
+			pendingHiveResults = pendingHiveResults[1:]
 			hiveResultMu.Unlock()
 			select {
 			case promptCancelCh <- struct{}{}:
@@ -437,7 +441,8 @@ promptLoop:
 				if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 					toolTimeout = *provider.ToolTimeout
 				}
-				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
+
+				_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, true, nil)
 				fmt.Printf("\n[%s] Hive worker completed:\n%s\n\n", workerLabel, renderMarkdown(payload))
 				hiveMgr.Status("Hive: idle")
 				continue
@@ -971,14 +976,13 @@ promptLoop:
 			})
 		}
 
-		// Process any pending hive results after the prompt completes
+		// Process all pending hive results after the prompt completes
 		if hiveMgr != nil {
-			select {
-			case <-hiveResultReady:
-				hiveResultMu.Lock()
-				res := pendingHiveResult
-				pendingHiveResult = nil
-				hiveResultMu.Unlock()
+			hiveResultMu.Lock()
+			results := pendingHiveResults
+			pendingHiveResults = nil
+			hiveResultMu.Unlock()
+			for _, res := range results {
 				if res != nil {
 					workerLabel := res.FromName
 					if strings.TrimSpace(workerLabel) == "" {
@@ -1013,10 +1017,9 @@ promptLoop:
 					if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
 						toolTimeout = *provider.ToolTimeout
 					}
-					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, nil)
+					_, _ = runToolLoop(ctx, provider, servers, fullPrompt, completionMsg, maxRounds, toolTimeout, llmProvider, true, false, true, true, nil)
 					hiveMgr.Status("Hive: idle")
 				}
-			default:
 			}
 		}
 	}
@@ -1636,7 +1639,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, nil)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, false, nil)
 	if err != nil {
 		return err
 	}
@@ -1710,7 +1713,7 @@ IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then p
 User request: %s`, strings.TrimSpace(base), input)
 }
 
-func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, onToolCall func(string)) (string, error) {
+func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, nocont bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
 	toolsDesc := ""
 	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
@@ -1739,8 +1742,9 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if verbose && len(missingTools) > 0 {
 			fmt.Printf("\n[Ignored unknown tool(s): %s]\n", strings.Join(missingTools, ", "))
 		}
+
 		if verbose {
-			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
+			fmt.Printf("[TL Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 		}
 		if debug {
 			for _, tc := range toolCalls {
@@ -1753,6 +1757,15 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
+
+				if strings.TrimSpace(resp) != "" && nocont {
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					//if verbose {
+					//	log.Println("Returning response without final answer (nocont=true)")
+					//}
+					return finalResp, nil
+				}
+
 				if verbose {
 					thinkingText := extractThinkingText(resp)
 					if thinkingText != "" {
@@ -1760,8 +1773,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
 				}
-				continuePrompt := "You did not provide a valid tool call. Please provide your FINAL_ANSWER now based on the information you have. Include FINAL_ANSWER: to indicate it's the last message. Do NOT call any more tools."
+				continuePrompt := "continue."
+
 				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
+
 				continue
 			}
 			return finalResp, nil

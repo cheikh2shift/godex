@@ -274,10 +274,7 @@ func (m *Manager) DelegateAsync(ctx context.Context, targetID, prompt string) er
 		if err != nil {
 			h.Error = err.Error()
 		}
-		select {
-		case m.results <- h:
-		default:
-		}
+		m.results <- h
 	}()
 	return nil
 }
