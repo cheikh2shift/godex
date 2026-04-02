@@ -854,7 +854,7 @@ promptLoop:
 			}
 			if !isToolCallResponse || len(toolCalls) == 0 {
 				// No valid tool calls - print thinking text and final response, then stop
-				if !printedStreamed {
+				if !printedStreamed && !prevNoTool {
 					thinkingText := extractThinkingText(preResp)
 					if thinkingText != "" {
 						fmt.Println(renderThinking(thinkingText))
