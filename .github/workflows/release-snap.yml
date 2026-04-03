@@ -82,7 +82,7 @@ jobs:
         run: |
           cd packaging/snap
           sed "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml > snapcraft-loaded.yaml
-          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/.*|source: ${GITHUB_WORKSPACE}/../snap-build/godex-${VERSION}-linux-amd64.tar.gz|" snapcraft-loaded.yaml
+          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/[^/]*|source: ${GITHUB_WORKSPACE}/snap-build/godex-${VERSION}-linux-amd64.tar.gz|" snapcraft-loaded.yaml
           snapcraft --destructive-mode snapcraft-loaded.yaml
 
       - name: Upload Snap to Store
