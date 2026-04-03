@@ -38,6 +38,8 @@ parts:
   launcher:
     plugin: nil
     source: .
+    stage-packages:
+      - xterm
     override-build: |
       mkdir -p "$CRAFT_PART_INSTALL/bin" "$CRAFT_PART_INSTALL/gui"
       cp -a "$CRAFT_PART_SRC/bin/godex-launch" "$CRAFT_PART_INSTALL/bin/godex-launch"
