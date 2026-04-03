@@ -1,7 +1,6 @@
 name: godex-ai-agent
 base: core22
 adopt-info: godex-ai-agent
-display: "Godex: AI coding agent"
 icon: gui/godex-ai-agent.png
 summary: Lightweight AI agent with TUI for Ollama, llama.cpp, OpenRouter and more
 description: |
@@ -18,17 +17,6 @@ description: |
 
 grade: stable
 confinement: strict
-
-images:
-  screen3:
-    type: file
-    filename: screen3.gif
-  screen2:
-    type: file
-    filename: screen2.gif
-  screen1:
-    type: file
-    filename: scrreen.gif
 
 parts:
   godex:
