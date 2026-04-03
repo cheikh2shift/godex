@@ -64,6 +64,12 @@ jobs:
         run: |
           sudo snap install snapcraft --classic
 
+      - name: Ensure snapd and core22
+        run: |
+          sudo systemctl start snapd
+          sudo snap wait system seed.loaded
+          sudo snap install core22 --channel=latest/stable
+
       - name: Configure Snapcraft credentials
         env:
           SNAP_CREDENTIALS: ${{ secrets.SNAP_CREDENTIALS }}
