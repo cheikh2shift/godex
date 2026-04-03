@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Godex
-Comment=Godex AI coding agent (terminal)
+Comment=Launch from Applications or run: godex-ai-agent.godex
 Exec=godex-ai-agent.godex
 TryExec=godex-ai-agent.godex
 Terminal=true
