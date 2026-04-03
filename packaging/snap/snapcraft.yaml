@@ -17,7 +17,10 @@ description: |
 
   ## Troubleshooting
 
-  - Clicking on `open` in the App Store will not start the agent. Search for `Godex` in your applications folder (pressing win key to open on wayland)  
+  - Clicking on `open` in the App Store will not start the agent:
+    -  Launch in a terminal with command `godex-ai-agent.godex-terminal`
+    -  Or use `snap run godex-ai-agent.godex-terminal`
+    -  Search for `Godex` in your applications folder (pressing win key to open on wayland)  
 
 grade: stable
 confinement: strict
@@ -38,31 +41,20 @@ parts:
   launcher:
     plugin: nil
     source: .
-    build-packages:
-      - gcc
-      - pkg-config
-      - libgtk-3-dev
-      - libvte-2.91-dev
     stage-packages:
-      - libgtk-3-0
-      - libvte-2.91-0
+      - zenity
     override-build: |
       mkdir -p "$CRAFT_PART_INSTALL/bin" "$CRAFT_PART_INSTALL/gui"
-      gcc -O2 -o "$CRAFT_PART_INSTALL/bin/godex-gui" \
-        "$CRAFT_PART_SRC/bin/godex-gui.c" \
-        $(pkg-config --cflags --libs gtk+-3.0 vte-2.91)
       cp -a "$CRAFT_PART_SRC/bin/godex-launch" "$CRAFT_PART_INSTALL/bin/godex-launch"
       cp -a "$CRAFT_PART_SRC/gui/godex-ai-agent.png" "$CRAFT_PART_INSTALL/gui/godex-ai-agent.png"
       cp -a "$CRAFT_PART_SRC/gui/godex.desktop" "$CRAFT_PART_INSTALL/gui/godex.desktop"
     stage:
-      - bin/godex-gui
       - bin/godex-launch
       - gui/godex-ai-agent.png
       - gui/godex.desktop
       - usr/lib/**
       - usr/share/**
     prime:
-      - bin/godex-gui
       - bin/godex-launch
       - gui/godex-ai-agent.png
       - gui/godex.desktop
@@ -71,7 +63,9 @@ parts:
 
 apps:
   godex:
-    command: bin/godex-gui
+    command: bin/godex
+    command-chain:
+      - bin/godex-launch
     desktop: gui/godex.desktop
     plugs:
       - home

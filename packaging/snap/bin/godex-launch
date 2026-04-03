@@ -67,4 +67,13 @@ if command -v kitty >/dev/null 2>&1; then
   exec kitty -e "$cmd" "$@"
 fi
 
-exec "$cmd" "$@"
+fallback_cmd="godex-ai-agent.godex-terminal"
+if command -v zenity >/dev/null 2>&1; then
+  zenity --entry \
+    --title="Godex: terminal not found" \
+    --text="No terminal emulator was found for this launcher.\nCopy this command and run it in a terminal:" \
+    --entry-text="$fallback_cmd" >/dev/null 2>&1 || true
+fi
+
+echo "No terminal emulator found. Run: $fallback_cmd" >&2
+exit 1
