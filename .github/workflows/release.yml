@@ -1,46 +1,37 @@
-name: Release
+name: Release to Snap Store
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.2.3)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  SNAP_CHANNEL: stable
+
 jobs:
-  release:
+  build-and-publish-snap:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Run tests
-        run: go test -short ./...
-
-      - name: Get tag
+      - name: Get version
         id: get_tag
-        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Generate changelog
-        id: changelog
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            CHANGES=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
-          else
-            CHANGES=$(git log --pretty=format:"- %s (%h)" --max-count=50)
-          fi
-          echo "CHANGES<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          TAG="${{ inputs.version }}"
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Build Linux AMD64
         env:
@@ -48,80 +39,83 @@ jobs:
           GOARCH: amd64
           CGO_ENABLED: 0
           TAG: ${{ steps.get_tag.outputs.TAG }}
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-linux-amd64 ./cmd/godex
+          mkdir -p dist
+          go build -ldflags="-s -w -X main.version=${VERSION} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o dist/godex ./cmd/godex
 
-      - name: Build Linux ARM64
+      - name: Create tarball for snap
         env:
-          GOOS: linux
-          GOARCH: arm64
-          CGO_ENABLED: 0
-          TAG: ${{ steps.get_tag.outputs.TAG }}
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-linux-arm64 ./cmd/godex
+          mkdir -p snap-build/godex-${VERSION}-linux-amd64
+          cp dist/godex snap-build/godex-${VERSION}-linux-amd64/godex
+          chmod +x snap-build/godex-${VERSION}-linux-amd64/godex
+          tar -czf godex-${VERSION}-linux-amd64.tar.gz -C snap-build godex-${VERSION}-linux-amd64
 
-      - name: Build macOS AMD64
-        env:
-          GOOS: darwin
-          GOARCH: amd64
-          CGO_ENABLED: 0
-          TAG: ${{ steps.get_tag.outputs.TAG }}
-        run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-amd64 ./cmd/godex
-
-      - name: Build macOS ARM64
-        env:
-          GOOS: darwin
-          GOARCH: arm64
-          CGO_ENABLED: 0
-          TAG: ${{ steps.get_tag.outputs.TAG }}
-        run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-darwin-arm64 ./cmd/godex
-
-      - name: Build Windows AMD64
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: 0
-          TAG: ${{ steps.get_tag.outputs.TAG }}
-        run: |
-          go build -ldflags="-s -w -X main.version=${TAG} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o godex-windows-amd64.exe ./cmd/godex
-
-      - name: Generate SHA256 checksums
-        run: |
-          sha256sum godex-linux-amd64 > godex-linux-amd64.sha256
-          sha256sum godex-linux-arm64 > godex-linux-arm64.sha256
-          sha256sum godex-darwin-amd64 > godex-darwin-amd64.sha256
-          sha256sum godex-darwin-arm64 > godex-darwin-arm64.sha256
-          sha256sum godex-windows-amd64.exe > godex-windows-amd64.exe.sha256
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Checkout snap packaging
+        uses: actions/checkout@v4
         with:
-          tag_name: ${{ steps.get_tag.outputs.TAG }}
-          name: Release ${{ steps.get_tag.outputs.TAG }}
-          body: |
-            ## Changes
-            ${{ steps.changelog.outputs.CHANGES }}
-            
-            ## Installation
-            Download the appropriate binary for your platform and run the install script:
-            ```bash
-            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
-            ```
-            
-            ## Verification
-            Each binary includes a SHA256 checksum file for verification.
-          files: |
-            godex-linux-amd64
-            godex-linux-amd64.sha256
-            godex-linux-arm64
-            godex-linux-arm64.sha256
-            godex-darwin-amd64
-            godex-darwin-amd64.sha256
-            godex-darwin-arm64
-            godex-darwin-arm64.sha256
-            godex-windows-amd64.exe
-            godex-windows-amd64.exe.sha256
+          sparse-checkout: |
+            packaging/snap
+          sparse-checkout-cone-mode: false
+
+      - name: Copy assets for snap
+        run: |
+          mkdir -p packaging/snap/gui
+          cp packaging/snap/logo.png packaging/snap/gui/godex-ai-agent.png
+          cp *.gif packaging/snap/
+
+      - name: Install Snapcraft
+        run: |
+          sudo snap install snapcraft --classic
+
+      - name: Configure Snapcraft credentials
+        env:
+          SNAP_CREDENTIALS: ${{ secrets.SNAP_CREDENTIALS }}
+        run: |
+          mkdir -p ~/.config/snapcraft
+          echo "$SNAP_CREDENTIALS" > ~/.config/snapcraft/snapcraft.cfg
+
+      - name: Build Snap
+        env:
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          cd packaging/snap
+          sed "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml > snapcraft-loaded.yaml
+          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/.*|source: ${GITHUB_WORKSPACE}/../snap-build/godex-${VERSION}-linux-amd64.tar.gz|" snapcraft-loaded.yaml
+          snapcraft --destructive-mode snapcraft-loaded.yaml
+
+      - name: Upload Snap to Store
+        env:
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
+        run: |
+          snap_name=$(ls *.snap 2>/dev/null | head -1)
+          if [ -n "$snap_name" ]; then
+            echo "Uploading $snap_name to Snap Store..."
+            snapcraft upload "$snap_name" --release "${SNAP_CHANNEL}"
+          else
+            echo "No snap file found"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          TAG: ${{ steps.get_tag.outputs.TAG }}
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
+        run: |
+          snap_file=$(ls *.snap | head -1)
+          tar_file=$(ls *.tar.gz | head -1)
+          
+          # Generate checksums
+          echo "$snap_file" | xargs sha256sum > SHA256SUMS
+          echo "$tar_file" | xargs sha256sum >> SHA256SUMS
+          
+          gh release create "$TAG" \
+            --title "Release $TAG" \
+            --draft \
+            --notes "See https://github.com/anomalyco/godex/releases" \
+            "$snap_file" "$tar_file" SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
