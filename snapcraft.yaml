@@ -2,18 +2,19 @@ name: godex-ai-agent
 base: core22
 adopt-info: godex
 icon: packaging/snap/gui/godex-ai-agent.png
-summary: Lightweight AI agent with TUI for Ollama, llama.cpp, OpenRouter and more
+summary: Lightweight AI agent harness with support for Ollama, llama.cpp, OpenRouter
 description: |
   Godex is a lightweight AI agent with an interactive TUI that interfaces
   with Ollama, llama.cpp,, OpenRouter and other LLM providers.
-  
+
   Features:
   - Chat history with persistent conversation context
+  - Agent state management with Git like commands
   - Parallel agent execution with fully isolated context per agent
   - Efficient token usage with intelligent context management
   - Automatically downloads and bootstraps llama.cpp for local inference
   - Built-in MCP server support for tool integration
-  - Clean TUI for seamless interaction across multiple providers
+  - Clean TUI for interacting with your LLM of choice
 
 grade: stable
 confinement: strict
@@ -36,7 +37,7 @@ parts:
       craftctl set version="$version"
     override-build: |
       mkdir -p "$CRAFT_PART_INSTALL/bin"
-      go build -ldflags="-s -w -X main.version=$(craftctl get version) -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o "$CRAFT_PART_INSTALL/bin/godex" ./cmd/godex
+      CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(craftctl get version) -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o "$CRAFT_PART_INSTALL/bin/godex" ./cmd/godex
 
 apps:
   godex:
