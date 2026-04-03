@@ -1,8 +1,9 @@
+[![godex-ai-agent](https://snapcraft.io/godex-ai-agent/badge.svg)](https://snapcraft.io/godex-ai-agent)
+[![godex-ai-agent](https://snapcraft.io/godex-ai-agent/trending.svg?name=0)](https://snapcraft.io/godex-ai-agent)
+
 # GoDex - AI Agent
 
-![GoDex Screenshot](screen3.gif)
-
-GoDex is an AI agent that interfaces with Ollama, llama.cpp, Gemini, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
+GoDex is an AI coding agent that interfaces with Ollama, llama.cpp, Gemini, OpenRouter (and other LLM providers) through a TUI, with built-in MCP support.
 
 Orchestration and parallel tasks? open another terminal tab and start a new instance of `godex`.
 
