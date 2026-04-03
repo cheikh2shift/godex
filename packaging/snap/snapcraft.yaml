@@ -59,11 +59,15 @@ parts:
       - bin/godex-launch
       - gui/godex-ai-agent.png
       - gui/godex.desktop
+      - usr/lib/**
+      - usr/share/**
     prime:
       - bin/godex-gui
       - bin/godex-launch
       - gui/godex-ai-agent.png
       - gui/godex.desktop
+      - usr/lib/**
+      - usr/share/**
 
 apps:
   godex:
