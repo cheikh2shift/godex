@@ -104,6 +104,7 @@ jobs:
         env:
           TAG: ${{ steps.get_tag.outputs.TAG }}
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           snap_file=$(ls *.snap | head -1)
           tar_file=$(ls *.tar.gz | head -1)
@@ -117,5 +118,3 @@ jobs:
             --draft \
             --notes "See https://github.com/anomalyco/godex/releases" \
             "$snap_file" "$tar_file" SHA256SUMS
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
