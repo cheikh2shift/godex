@@ -38,6 +38,10 @@ parts:
       bin/godex-launch: bin/godex-launch
       gui/godex-ai-agent.png: gui/godex-ai-agent.png
       gui/godex.desktop: gui/godex.desktop
+    stage:
+      - bin/godex-launch
+      - gui/godex-ai-agent.png
+      - gui/godex.desktop
     prime:
       - bin/godex-launch
       - gui/godex-ai-agent.png
