@@ -55,7 +55,9 @@ apps:
       - home
       - network
   godex-terminal:
-    command: bin/godex-launch
+    command: bin/godex
+    command-chain:
+      - bin/godex-launch
     desktop: gui/godex.desktop
     plugs:
       - home

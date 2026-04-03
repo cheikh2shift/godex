@@ -4,6 +4,7 @@ Name=Godex
 Comment=Godex AI coding agent (terminal)
 Exec=godex-ai-agent.godex-terminal
 TryExec=godex-ai-agent.godex-terminal
+Terminal=true
 Icon=${SNAP}/gui/godex-ai-agent.png
 Terminal=false
 Categories=Development;Utility;
