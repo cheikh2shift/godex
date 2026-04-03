@@ -68,11 +68,20 @@ if command -v kitty >/dev/null 2>&1; then
 fi
 
 fallback_cmd="godex-ai-agent.godex-terminal"
-if command -v zenity >/dev/null 2>&1; then
-  zenity --entry \
-    --title="Godex: terminal not found" \
-    --text="No terminal emulator was found for this launcher.\nCopy this command and run it in a terminal:" \
-    --entry-text="$fallback_cmd" >/dev/null 2>&1 || true
+
+msg_file="${SNAP_USER_COMMON:-$HOME}/godex-open-in-terminal.txt"
+mkdir -p "$(dirname "$msg_file")"
+cat >"$msg_file" <<EOF
+Godex could not find a terminal emulator when launched from this context.
+
+Run this command in a terminal:
+$fallback_cmd
+EOF
+
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$msg_file" >/dev/null 2>&1 || true
+elif command -v gio >/dev/null 2>&1; then
+  gio open "$msg_file" >/dev/null 2>&1 || true
 fi
 
 echo "No terminal emulator found. Run: $fallback_cmd" >&2
