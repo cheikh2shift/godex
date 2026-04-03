@@ -19,6 +19,20 @@ int main(int argc, char **argv) {
 	g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
 	VteTerminal *terminal = VTE_TERMINAL(vte_terminal_new());
+	PangoFontDescription *font = pango_font_description_from_string("Monospace 12");
+	vte_terminal_set_font(terminal, font);
+	pango_font_description_free(font);
+
+	GdkRGBA fg = {0};
+	GdkRGBA bg = {0};
+	gdk_rgba_parse(&fg, "#E6E6E6");
+	gdk_rgba_parse(&bg, "#0F1115");
+	vte_terminal_set_colors(terminal, &fg, &bg, NULL, 0);
+	vte_terminal_set_cursor_blink_mode(terminal, VTE_CURSOR_BLINK_ON);
+	vte_terminal_set_cursor_shape(terminal, VTE_CURSOR_SHAPE_BLOCK);
+	vte_terminal_set_scrollback_lines(terminal, 10000);
+	vte_terminal_set_bold_is_bright(terminal, TRUE);
+
 	gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(terminal));
 	gtk_widget_show_all(window);
 
