@@ -62,8 +62,7 @@ jobs:
 
       - name: Copy assets for snap
         run: |
-          mkdir -p packaging/snap/gui
-          cp packaging/snap/logo.png packaging/snap/gui/godex-ai-agent.png
+          cp packaging/snap/gui/godex-ai-agent.png packaging/snap/
           cp *.gif packaging/snap/
 
       - name: Install Snapcraft
