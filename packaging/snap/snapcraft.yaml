@@ -36,9 +36,9 @@ parts:
     source: .
     override-build: |
       mkdir -p "$CRAFT_PART_INSTALL/bin" "$CRAFT_PART_INSTALL/gui"
-      cp -a bin/godex-launch "$CRAFT_PART_INSTALL/bin/godex-launch"
-      cp -a gui/godex-ai-agent.png "$CRAFT_PART_INSTALL/gui/godex-ai-agent.png"
-      cp -a gui/godex.desktop "$CRAFT_PART_INSTALL/gui/godex.desktop"
+      cp -a "$CRAFT_PART_SRC/bin/godex-launch" "$CRAFT_PART_INSTALL/bin/godex-launch"
+      cp -a "$CRAFT_PART_SRC/gui/godex-ai-agent.png" "$CRAFT_PART_INSTALL/gui/godex-ai-agent.png"
+      cp -a "$CRAFT_PART_SRC/gui/godex.desktop" "$CRAFT_PART_INSTALL/gui/godex.desktop"
     stage:
       - bin/godex-launch
       - gui/godex-ai-agent.png
