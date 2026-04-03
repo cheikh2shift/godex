@@ -19,6 +19,14 @@ if command -v x-terminal-emulator >/dev/null 2>&1; then
   exec x-terminal-emulator -e "$cmd" "$@"
 fi
 
+if command -v kgx >/dev/null 2>&1; then
+  exec kgx -- "$cmd" "$@"
+fi
+
+if command -v gnome-console >/dev/null 2>&1; then
+  exec gnome-console -- "$cmd" "$@"
+fi
+
 if command -v gnome-terminal >/dev/null 2>&1; then
   exec gnome-terminal -- "$cmd" "$@"
 fi
@@ -29,6 +37,22 @@ fi
 
 if command -v xfce4-terminal >/dev/null 2>&1; then
   exec xfce4-terminal -e "$cmd" "$@"
+fi
+
+if command -v mate-terminal >/dev/null 2>&1; then
+  exec mate-terminal -e "$cmd" "$@"
+fi
+
+if command -v tilix >/dev/null 2>&1; then
+  exec tilix -e "$cmd" "$@"
+fi
+
+if command -v lxterminal >/dev/null 2>&1; then
+  exec lxterminal -e "$cmd" "$@"
+fi
+
+if command -v qterminal >/dev/null 2>&1; then
+  exec qterminal -e "$cmd" "$@"
 fi
 
 if command -v xterm >/dev/null 2>&1; then

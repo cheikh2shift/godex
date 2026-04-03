@@ -70,7 +70,6 @@ apps:
     command: bin/godex
     command-chain:
       - bin/godex-launch
-    desktop: gui/godex.desktop
     plugs:
       - home
       - network
