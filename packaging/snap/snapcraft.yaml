@@ -15,6 +15,10 @@ description: |
   - Built-in MCP server support for tool integration
   - Clean TUI for seamless interaction across multiple providers
 
+  ## Troubleshooting
+
+  - Clicking on `open` in the App Store will not start the agent. Search for `Godex` in your applications folder (pressing win key to open on wayland)  
+
 grade: stable
 confinement: strict
 
