@@ -88,7 +88,7 @@ jobs:
             echo "Missing tarball: $tarball"
             exit 1
           fi
-          sed -i "s|^\\s*source: .*|source: ${tarball}|" snapcraft.yaml
+          sed -i "s|^\\(\\s*\\)source: .*|\\1source: ${tarball}|" snapcraft.yaml
           sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
           snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
       
