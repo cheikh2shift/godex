@@ -85,6 +85,22 @@ jobs:
           sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
           sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/[^/]*|source: ../../godex-${VERSION}-linux-amd64.tar.gz|" snapcraft.yaml
           snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
+      
+      - name: Dump Snapcraft logs on failure
+        if: failure()
+        run: |
+          echo "=== Snapcraft logs ==="
+          log_dir="$HOME/.local/state/snapcraft/log"
+          if [ -d "$log_dir" ]; then
+            ls -1t "$log_dir" | head -5
+            latest_log=$(ls -1t "$log_dir" | head -1)
+            if [ -n "$latest_log" ]; then
+              echo "--- $log_dir/$latest_log ---"
+              cat "$log_dir/$latest_log"
+            fi
+          else
+            echo "No snapcraft log directory found at $log_dir"
+          fi
 
       - name: Upload Snap to Store
         env:
