@@ -43,16 +43,4 @@ if command -v kitty >/dev/null 2>&1; then
   exec kitty -e "$cmd" "$@"
 fi
 
-if command -v gtk-launch >/dev/null 2>&1; then
-  for desktop_id in org.gnome.Terminal org.kde.konsole xfce4-terminal xterm; do
-    if gtk-launch "$desktop_id" 2>/dev/null; then
-      exit 0
-    fi
-  done
-fi
-
-if command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "terminal://"
-fi
-
 exec "$cmd" "$@"
