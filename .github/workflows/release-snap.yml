@@ -43,16 +43,32 @@ jobs:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
           mkdir -p dist
-          go build -ldflags="-s -w -X main.version=${VERSION} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o dist/godex ./cmd/godex
+          go build -ldflags="-s -w -X main.version=${VERSION} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o dist/godex-amd64 ./cmd/godex
 
-      - name: Create tarball for snap
+      - name: Build Linux ARM64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0
+          TAG: ${{ steps.get_tag.outputs.TAG }}
+          VERSION: ${{ steps.get_tag.outputs.VERSION }}
+        run: |
+          mkdir -p dist
+          go build -ldflags="-s -w -X main.version=${VERSION} -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o dist/godex-arm64 ./cmd/godex
+
+      - name: Create tarballs for snap
         env:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
           mkdir -p snap-build/godex-${VERSION}-linux-amd64
-          cp dist/godex snap-build/godex-${VERSION}-linux-amd64/godex
+          cp dist/godex-amd64 snap-build/godex-${VERSION}-linux-amd64/godex
           chmod +x snap-build/godex-${VERSION}-linux-amd64/godex
           tar -czf godex-${VERSION}-linux-amd64.tar.gz -C snap-build godex-${VERSION}-linux-amd64
+
+          mkdir -p snap-build/godex-${VERSION}-linux-arm64
+          cp dist/godex-arm64 snap-build/godex-${VERSION}-linux-arm64/godex
+          chmod +x snap-build/godex-${VERSION}-linux-arm64/godex
+          tar -czf godex-${VERSION}-linux-arm64.tar.gz -C snap-build godex-${VERSION}-linux-arm64
 
       - name: Copy assets for snap
         run: |
@@ -78,20 +94,22 @@ jobs:
             exit 1
           fi
 
-      - name: Build Snap
+      - name: Build Snaps
         env:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
         working-directory: packaging/snap
         run: |
-          tarball="$GITHUB_WORKSPACE/godex-${VERSION}-linux-amd64.tar.gz"
-          if [ ! -f "$tarball" ]; then
-            echo "Missing tarball: $tarball"
-            exit 1
-          fi
-          sed -i "s|^\\(\\s*\\)source: .*|\\1source: ${tarball}|" snapcraft.yaml
-          sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
-          snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
+          for arch in amd64 arm64; do
+            tarball="$GITHUB_WORKSPACE/godex-${VERSION}-linux-${arch}.tar.gz"
+            if [ ! -f "$tarball" ]; then
+              echo "Missing tarball: $tarball"
+              exit 1
+            fi
+            sed -i "s|^\\(\\s*\\)source: .*|\\1source: ${tarball}|" snapcraft.yaml
+            sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
+            snapcraft pack --destructive-mode --build-for="$arch" --output "$GITHUB_WORKSPACE/godex_${VERSION}_${arch}.snap"
+          done
       
       - name: Dump Snapcraft logs on failure
         if: failure()
@@ -113,14 +131,15 @@ jobs:
         env:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
-          snap_name=$(ls *.snap 2>/dev/null | head -1)
-          if [ -n "$snap_name" ]; then
-            echo "Uploading $snap_name to Snap Store..."
-            snapcraft upload "$snap_name" --release "${SNAP_CHANNEL}"
-          else
-            echo "No snap file found"
+          snap_files=$(ls *.snap 2>/dev/null || true)
+          if [ -z "$snap_files" ]; then
+            echo "No snap files found"
             exit 1
           fi
+          for snap_name in $snap_files; do
+            echo "Uploading $snap_name to Snap Store..."
+            snapcraft upload "$snap_name" --release "${SNAP_CHANNEL}"
+          done
 
       - name: Create GitHub Release
         env:
@@ -128,15 +147,17 @@ jobs:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          snap_file=$(ls *.snap | head -1)
-          tar_file=$(ls *.tar.gz | head -1)
+          snap_files=$(ls *.snap 2>/dev/null || true)
+          tar_files=$(ls *.tar.gz 2>/dev/null || true)
           
           # Generate checksums
-          echo "$snap_file" | xargs sha256sum > SHA256SUMS
-          echo "$tar_file" | xargs sha256sum >> SHA256SUMS
+          : > SHA256SUMS
+          for f in $snap_files $tar_files; do
+            sha256sum "$f" >> SHA256SUMS
+          done
           
           gh release create "$TAG" \
             --title "Release $TAG" \
             --draft \
             --notes "See https://github.com/anomalyco/godex/releases" \
-            "$snap_file" "$tar_file" SHA256SUMS
+            $snap_files $tar_files SHA256SUMS
