@@ -88,8 +88,8 @@ jobs:
             echo "Missing tarball: $tarball"
             exit 1
           fi
+          sed -i "s|^\\s*source: .*|source: ${tarball}|" snapcraft.yaml
           sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
-          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/[^/]*|source: ../../godex-${VERSION}-linux-amd64.tar.gz|" snapcraft.yaml
           snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
       
       - name: Dump Snapcraft logs on failure
