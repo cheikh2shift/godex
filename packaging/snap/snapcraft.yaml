@@ -1,0 +1,34 @@
+name: godex-ai-agent
+base: core22
+version: $SNAPCRAFT_PROJECT_VERSION
+icon: gui/godex-ai-agent.png
+summary: Lightweight AI agent with TUI for Ollama, llama.cpp, OpenRouter and more
+description: |
+  Godex is a lightweight AI agent with an interactive TUI that interfaces
+  with Ollama, llama.cpp,, OpenRouter and other LLM providers.
+  
+  Features:
+  - Chat history with persistent conversation context
+  - Parallel agent execution with fully isolated context per agent
+  - Efficient token usage with intelligent context management
+  - Automatically downloads and bootstraps llama.cpp for local inference
+  - Built-in MCP server support for tool integration
+  - Clean TUI for seamless interaction across multiple providers
+
+grade: stable
+confinement: strict
+
+parts:
+  godex:
+    plugin: dump
+    source: https://github.com/anomalyco/godex/releases/download/v$SNAPCRAFT_PROJECT_VERSION/godex-linux-amd64.tar.gz
+    source-type: tar
+    organize:
+      godex: bin/godex
+
+apps:
+  godex:
+    command: bin/godex
+    plugs:
+      - home
+      - network
