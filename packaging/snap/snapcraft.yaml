@@ -51,6 +51,18 @@ parts:
 apps:
   godex:
     command: bin/godex
+    command-chain:
+      - bin/godex-launch
+    desktop: gui/godex.desktop
+    plugs:
+      - home
+      - network
+      - desktop
+      - desktop-legacy
+      - x11
+      - wayland
+  godex-cli:
+    command: bin/godex
     plugs:
       - home
       - network

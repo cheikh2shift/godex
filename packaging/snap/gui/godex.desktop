@@ -2,8 +2,8 @@
 Type=Application
 Name=Godex
 Comment=Godex AI coding agent (terminal)
-Exec=godex-ai-agent.godex-terminal
-TryExec=godex-ai-agent.godex-terminal
+Exec=godex-ai-agent.godex
+TryExec=godex-ai-agent.godex
 Terminal=true
 Icon=${SNAP}/gui/godex-ai-agent.png
 Categories=Development;Utility;
