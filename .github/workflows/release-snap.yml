@@ -53,16 +53,12 @@ jobs:
           chmod +x snap-build/godex-${VERSION}-linux-amd64/godex
           tar -czf godex-${VERSION}-linux-amd64.tar.gz -C snap-build godex-${VERSION}-linux-amd64
 
-      - name: Checkout snap packaging
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            packaging/snap
-          sparse-checkout-cone-mode: false
-
       - name: Copy assets for snap
         run: |
           cp packaging/snap/gui/godex-ai-agent.png packaging/snap/
+          cp screen3.gif packaging/snap/
+          cp screen2.gif packaging/snap/
+          cp scrreen.gif packaging/snap/
 
       - name: Install Snapcraft
         run: |
@@ -79,11 +75,16 @@ jobs:
         env:
           VERSION: ${{ steps.get_tag.outputs.VERSION }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+        working-directory: packaging/snap
         run: |
-          cd packaging/snap
-          sed "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml > snapcraft-loaded.yaml
-          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/[^/]*|source: ../../godex-${VERSION}-linux-amd64.tar.gz|" snapcraft-loaded.yaml
-          snapcraft --destructive-mode snapcraft-loaded.yaml
+          tarball="$GITHUB_WORKSPACE/godex-${VERSION}-linux-amd64.tar.gz"
+          if [ ! -f "$tarball" ]; then
+            echo "Missing tarball: $tarball"
+            exit 1
+          fi
+          sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
+          sed -i "s|source: https://github.com/anomalyco/godex/releases/download/v\$SNAPCRAFT_PROJECT_VERSION/[^/]*|source: ../../godex-${VERSION}-linux-amd64.tar.gz|" snapcraft.yaml
+          snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
 
       - name: Upload Snap to Store
         env:
