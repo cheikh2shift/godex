@@ -54,13 +54,6 @@ jobs:
           chmod +x snap-build/godex-${VERSION}-linux-amd64/godex
           tar -czf godex-${VERSION}-linux-amd64.tar.gz -C snap-build godex-${VERSION}-linux-amd64
 
-      - name: Copy assets for snap
-        run: |
-          cp packaging/snap/gui/godex-ai-agent.png packaging/snap/
-          cp screen3.gif packaging/snap/
-          cp screen2.gif packaging/snap/
-          cp scrreen.gif packaging/snap/
-
       - name: Install Snapcraft
         run: |
           sudo snap install snapcraft --classic
@@ -80,18 +73,9 @@ jobs:
 
       - name: Build Snap
         env:
-          VERSION: ${{ steps.get_tag.outputs.VERSION }}
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-        working-directory: packaging/snap
+          SNAPCRAFT_PROJECT_VERSION: ${{ steps.get_tag.outputs.VERSION }}
         run: |
-          tarball="$GITHUB_WORKSPACE/godex-${VERSION}-linux-amd64.tar.gz"
-          if [ ! -f "$tarball" ]; then
-            echo "Missing tarball: $tarball"
-            exit 1
-          fi
-          sed -i "s|^\\(\\s*\\)source: .*|\\1source: ${tarball}|" snapcraft.yaml
-          sed -i "s/\$SNAPCRAFT_PROJECT_VERSION/${VERSION}/g" snapcraft.yaml
-          snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${VERSION}_amd64.snap"
+          snapcraft pack --destructive-mode --output "$GITHUB_WORKSPACE/godex_${SNAPCRAFT_PROJECT_VERSION}_amd64.snap"
       
       - name: Dump Snapcraft logs on failure
         if: failure()

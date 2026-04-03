@@ -1,7 +1,7 @@
 name: godex-ai-agent
 base: core22
-version: $SNAPCRAFT_PROJECT_VERSION
-icon: gui/godex-ai-agent.png
+adopt-info: godex
+icon: packaging/snap/gui/godex-ai-agent.png
 summary: Lightweight AI agent with TUI for Ollama, llama.cpp, OpenRouter and more
 description: |
   Godex is a lightweight AI agent with an interactive TUI that interfaces
@@ -20,11 +20,23 @@ confinement: strict
 
 parts:
   godex:
-    plugin: dump
-    source: https://github.com/anomalyco/godex/releases/download/v$SNAPCRAFT_PROJECT_VERSION/godex-linux-amd64.tar.gz
-    source-type: tar
-    organize:
-      godex: bin/godex
+    plugin: nil
+    source: .
+    build-packages:
+      - git
+      - golang-go
+    override-pull: |
+      craftctl default
+      if [ -n "$SNAPCRAFT_PROJECT_VERSION" ]; then
+        version="$SNAPCRAFT_PROJECT_VERSION"
+      else
+        version="$(git describe --tags --always --dirty)"
+        version="${version#v}"
+      fi
+      craftctl set version="$version"
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/bin"
+      go build -ldflags="-s -w -X main.version=$(craftctl get version) -X main.buildTime=$(date -u +"%Y-%m-%d_%H:%M:%S")" -o "$CRAFT_PART_INSTALL/bin/godex" ./cmd/godex
 
 apps:
   godex:
