@@ -32,12 +32,13 @@ parts:
     organize:
       godex: bin/godex
   launcher:
-    plugin: dump
+    plugin: nil
     source: .
-    organize:
-      bin/godex-launch: bin/godex-launch
-      gui/godex-ai-agent.png: gui/godex-ai-agent.png
-      gui/godex.desktop: gui/godex.desktop
+    override-build: |
+      mkdir -p "$CRAFT_PART_INSTALL/bin" "$CRAFT_PART_INSTALL/gui"
+      cp -a bin/godex-launch "$CRAFT_PART_INSTALL/bin/godex-launch"
+      cp -a gui/godex-ai-agent.png "$CRAFT_PART_INSTALL/gui/godex-ai-agent.png"
+      cp -a gui/godex.desktop "$CRAFT_PART_INSTALL/gui/godex.desktop"
     stage:
       - bin/godex-launch
       - gui/godex-ai-agent.png
