@@ -31,6 +31,17 @@ parts:
     source-type: tar
     organize:
       godex: bin/godex
+  launcher:
+    plugin: dump
+    source: .
+    organize:
+      bin/godex-launch: bin/godex-launch
+      gui/godex-ai-agent.png: gui/godex-ai-agent.png
+      gui/godex.desktop: gui/godex.desktop
+    prime:
+      - bin/godex-launch
+      - gui/godex-ai-agent.png
+      - gui/godex.desktop
 
 apps:
   godex:
@@ -38,3 +49,13 @@ apps:
     plugs:
       - home
       - network
+  godex-terminal:
+    command: bin/godex-launch
+    desktop: gui/godex.desktop
+    plugs:
+      - home
+      - network
+      - desktop
+      - desktop-legacy
+      - x11
+      - wayland

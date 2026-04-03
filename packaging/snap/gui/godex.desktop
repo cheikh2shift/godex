@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Godex
+Comment=Godex AI coding agent (terminal)
+Exec=godex-terminal
+Icon=${SNAP}/gui/godex-ai-agent.png
+Terminal=false
+Categories=Development;Utility;

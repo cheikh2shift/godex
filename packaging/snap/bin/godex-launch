@@ -1,0 +1,38 @@
+#!/bin/sh
+set -eu
+
+cmd="${SNAP}/bin/godex"
+
+if command -v xdg-terminal-exec >/dev/null 2>&1; then
+  exec xdg-terminal-exec -- "$cmd"
+fi
+
+if command -v x-terminal-emulator >/dev/null 2>&1; then
+  exec x-terminal-emulator -e "$cmd"
+fi
+
+if command -v gnome-terminal >/dev/null 2>&1; then
+  exec gnome-terminal -- "$cmd"
+fi
+
+if command -v konsole >/dev/null 2>&1; then
+  exec konsole -e "$cmd"
+fi
+
+if command -v xfce4-terminal >/dev/null 2>&1; then
+  exec xfce4-terminal -e "$cmd"
+fi
+
+if command -v xterm >/dev/null 2>&1; then
+  exec xterm -e "$cmd"
+fi
+
+if command -v alacritty >/dev/null 2>&1; then
+  exec alacritty -e "$cmd"
+fi
+
+if command -v kitty >/dev/null 2>&1; then
+  exec kitty -e "$cmd"
+fi
+
+exec "$cmd"
