@@ -1797,6 +1797,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		toolsDesc = getToolsDescription(servers)
 	}
 
+	prevNoTool := false
 	for round := 0; round < maxToolRounds; round++ {
 		if nocont {
 			if hivePendingStop != nil {
@@ -1853,11 +1854,14 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
 
-				if strings.TrimSpace(resp) != "" && nocont {
-					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+				if strings.TrimSpace(resp) != "" && (nocont || prevNoTool) {
+					if nocont {
+						fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					}
 					return resp, nil
 				}
 
+				prevNoTool = true
 				if verbose {
 					thinkingText := extractThinkingText(resp)
 					if thinkingText != "" {
@@ -1865,7 +1869,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
 				}
-				continuePrompt := "continue."
+				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have. Do NOT call any tools, just provide the final answer.", resp)
 
 				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
 
@@ -1874,6 +1878,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 			return finalResp, nil
 		}
 
+		prevNoTool = false
 		if verbose {
 			fmt.Printf("\n")
 			if round == 0 {
