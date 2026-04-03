@@ -13,6 +13,7 @@ permissions:
 
 env:
   SNAP_CHANNEL: stable
+  SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAP_CREDENTIALS }}
 
 jobs:
   build-and-publish-snap:
@@ -70,12 +71,12 @@ jobs:
           sudo snap wait system seed.loaded
           sudo snap install core22 --channel=latest/stable
 
-      - name: Configure Snapcraft credentials
-        env:
-          SNAP_CREDENTIALS: ${{ secrets.SNAP_CREDENTIALS }}
+      - name: Validate Snapcraft credentials
         run: |
-          mkdir -p ~/.config/snapcraft
-          echo "$SNAP_CREDENTIALS" > ~/.config/snapcraft/snapcraft.cfg
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "SNAP_CREDENTIALS secret is empty or unavailable."
+            exit 1
+          fi
 
       - name: Build Snap
         env:
