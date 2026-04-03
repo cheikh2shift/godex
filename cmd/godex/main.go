@@ -967,7 +967,7 @@ promptLoop:
 						toolResults = append(toolResults, errMsg)
 						hasError = true
 					} else {
-						toolResults = append(toolResults, truncate(result, 2500))
+						toolResults = append(toolResults, truncate(result, 5000))
 					}
 				}
 				toolExecError = hasError
@@ -1938,7 +1938,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					toolResults = append(toolResults, truncate(result, 2500))
+					toolResults = append(toolResults, truncate(result, 5000))
 				}
 			}
 			toolExecError = hasError
@@ -2313,7 +2313,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 			results[result.index] = fmt.Sprintf("ERROR: %v", result.err)
 			hasError = true
 		} else {
-			results[result.index] = truncate(result.result, 2500)
+			results[result.index] = truncate(result.result, 5000)
 		}
 	}
 
