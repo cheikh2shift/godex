@@ -81,6 +81,12 @@ jobs:
         run: |
           sudo snap install snapcraft --classic
 
+      - name: Install snap build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libgtk-3-dev libvte-2.91-dev
+
       - name: Ensure snapd and core22
         run: |
           sudo systemctl start snapd
