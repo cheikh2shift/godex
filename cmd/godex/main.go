@@ -872,7 +872,7 @@ promptLoop:
 				if hasFinal {
 					output = finalResp
 				} else {
-					cprompt := fmt.Sprintf("The assistant gave the following response:\n%s\n\nSince there are no tool calls to execute, please provide a final answer based on this response.", resp)
+					cprompt := fmt.Sprintf("The assistant gave the following response:\n%s\n\nSince there are no tool calls to execute, please provide a final answer based on this response. Don't mention you already provided a previous answer", resp)
 					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, cprompt, round+1, maxToolRounds)
 					continue
 				}
@@ -1883,7 +1883,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
 				}
-				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have. Do NOT call any tools, just provide the final answer.", resp)
+				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have. Do NOT call any tools, just provide the final answer.Don't mention you already provided a previous answer", resp)
 
 				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
 
