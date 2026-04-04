@@ -880,7 +880,7 @@ func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error)
 		"role":    "assistant",
 		"content": response,
 	})
-	p.promptTokens = totalPromptTokens
+	p.promptTokens += totalPromptTokens
 	p.completionTokens = totalCompletionTokens
 	p.mu.Unlock()
 
