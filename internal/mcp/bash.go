@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -430,9 +429,7 @@ func (s *BashServer) runBackgroundJob(ctx context.Context, command string, timeo
 	jobID := s.jobTracker.Add(job)
 
 	cmd := exec.CommandContext(jobCtx, "sh", "-c", command)
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	setProcessGroup(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}

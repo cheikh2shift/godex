@@ -32,6 +32,13 @@ func killProcessGroup(targetPID int, removeTracking func()) (string, error) {
 	return "", nil
 }
 
+func setProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
 // GetUnixTools returns the list of tools that are only available on Unix systems (mac, linux)
 func GetUnixTools() []Tool {
 	return []Tool{

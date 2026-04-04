@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"syscall"
 )
 
@@ -26,6 +27,16 @@ func killProcessGroup(targetPID int, removeTracking func()) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("Killed process %d", targetPID), nil
+}
+
+func setProcessGroup(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
 }
 
 
