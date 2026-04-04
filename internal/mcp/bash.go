@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,100 +23,151 @@ func GetWorkingDir() (string, error) {
 
 var runCmdMu sync.Mutex
 
+// Job represents a running background job managed by a goroutine
+type Job struct {
+	ID       string
+	Command  string
+	PID      int
+	Ctx      context.Context
+	Cancel   context.CancelFunc
+	Done     chan struct{}
+	Output   strings.Builder
+	Mu       sync.Mutex
+	ExitCode int
+	Exited   bool
+	ExitedAt time.Time
+	Started  time.Time
+}
+
+// JobTracker manages all background jobs
+type JobTracker struct {
+	jobs   map[string]*Job
+	mu     sync.RWMutex
+	nextID int
+}
+
+func NewJobTracker() *JobTracker {
+	return &JobTracker{
+		jobs:   make(map[string]*Job),
+		nextID: 1,
+	}
+}
+
+func (t *JobTracker) Add(job *Job) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	job.ID = fmt.Sprintf("job%d", t.nextID)
+	t.nextID++
+	t.jobs[job.ID] = job
+	return job.ID
+}
+
+func (t *JobTracker) Get(id string) (*Job, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	job, ok := t.jobs[id]
+	return job, ok
+}
+
+func (t *JobTracker) List() []*Job {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	jobs := make([]*Job, 0, len(t.jobs))
+	for _, job := range t.jobs {
+		jobs = append(jobs, job)
+	}
+	return jobs
+}
+
+func (t *JobTracker) Remove(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.jobs, id)
+}
+
+func (t *JobTracker) RemoveByPID(pid int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, job := range t.jobs {
+		if job.PID == pid {
+			delete(t.jobs, id)
+			return id
+		}
+	}
+	return ""
+}
+
+func (t *JobTracker) Kill(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	job, ok := t.jobs[id]
+	if !ok {
+		return false
+	}
+	job.Cancel()
+	if job.PID > 0 {
+		if proc, err := os.FindProcess(job.PID); err == nil {
+			proc.Kill()
+		}
+	}
+	return true
+}
+
+func (t *JobTracker) KillAll() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var killed []string
+	for id, job := range t.jobs {
+		job.Cancel()
+		if job.PID > 0 {
+			if proc, err := os.FindProcess(job.PID); err == nil {
+				proc.Kill()
+			}
+		}
+		killed = append(killed, id)
+	}
+	t.jobs = make(map[string]*Job)
+	return killed
+}
+
+func (t *JobTracker) Count() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return len(t.jobs)
+}
+
+func (t *JobTracker) JobStatus(id string) (string, bool) {
+	t.mu.RLock()
+	job, ok := t.jobs[id]
+	if !ok {
+		t.mu.RUnlock()
+		return "", false
+	}
+	output := job.Output.String()
+	exited := job.Exited
+	exitCode := job.ExitCode
+	t.mu.RUnlock()
+
+	status := "Running"
+	if exited {
+		status = fmt.Sprintf("Exited (code: %d)", exitCode)
+	}
+	return status + "\\nOutput:\\n" + output, true
+}
+
 type BashServer struct {
 	allowedPaths   []string
 	tools          []Tool
-	backgroundPIDs []bgProcess
+	jobTracker     *JobTracker
 	autoConfirm    bool
-}
-
-type bgProcess struct {
-	PID     int
-	Command string
-}
-
-func NewBashServer(allowedPaths []string, autoConfirm bool) *BashServer {
-	allowedPaths = sanitizeAllowedPaths(allowedPaths)
-	allowedPaths = withDefaultCwd(allowedPaths)
-
-	server := &BashServer{
-		allowedPaths: allowedPaths,
-		autoConfirm:  autoConfirm,
-		tools: []Tool{
-			{
-				Name:        "run_command",
-				Description: "Run a shell command and return its output. Use background: true to run in background with nohup.",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"},"background":{"type":"boolean","description":"Run in background using nohup (default false)"}},"required":["command"]}`),
-			},
-			{
-				Name:        "kill_command",
-				Description: "Kill a background process by PID (returned from run_command with background: true)",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"pid":{"type":"number","description":"Process ID to kill"}},"required":["pid"]}`),
-			},
-			{
-				Name:        "run_python",
-				Description: "Run a Python script and return its output",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Python code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 30)"}},"required":["code"]}`),
-			},
-			{
-				Name:        "run_node",
-				Description: "Run a Node.js script and return its output",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Node.js code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 30)"}},"required":["code"]}`),
-			},
-		},
-	}
-
-	// Add Unix-only tools (mac, linux)
-	unixTools := GetUnixTools()
-	server.tools = append(server.tools, unixTools...)
-
-	return server
-}
-
-func (s *BashServer) Name() string {
-	return "bash"
-}
-
-func (s *BashServer) Tools() []Tool {
-	return s.tools
-}
-
-func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
-	switch name {
-	case "run_command":
-		runCmdMu.Lock()
-		defer runCmdMu.Unlock()
-		return s.runCommand(ctx, arguments)
-	case "kill_command":
-		return s.killCommand(arguments)
-	case "kill_all_background":
-		return s.killAllBackground(arguments)
-	case "run_python":
-		return s.runPython(ctx, arguments)
-	case "run_node":
-		return s.runNode(ctx, arguments)
-	case "run_bash_script":
-		return s.HandleRunBashScript(ctx, arguments)
-	default:
-		return "", fmt.Errorf("unknown tool: %s", name)
-	}
-}
-
-func (s *BashServer) isPathAllowed(path string) bool {
-	if path == "" {
-		return true
-	}
-	for _, allowed := range s.allowedPaths {
-		if strings.HasPrefix(path, allowed) || path == allowed {
-			return true
-		}
-	}
-	return false
+	mu             sync.RWMutex
+	failedMu       sync.Mutex
+	failedStarts   []string
 }
 
 var (
 	cdRegex          = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
-	interpreterRegex = regexp.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|node|nodejs|ruby|perl|php|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
+	interpreterRegex = regexp.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|ruby|perl|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
 	pathRegex        = regexp.MustCompile(`(?:^|\s)([/\\]+[^\s/\\]+(?:/[^\s/\\]*)*|[\.]{1,2}[/\\]|(?:~|\$(?:HOME|\w+))[/\\][^\s/\\]+)`)
 )
 
@@ -198,6 +248,86 @@ func (s *BashServer) checkCommandPaths(command string) (bool, string) {
 	return s.extractAndCheckPaths(command)
 }
 
+func NewBashServer(allowedPaths []string, autoConfirm bool) *BashServer {
+	allowedPaths = sanitizeAllowedPaths(allowedPaths)
+	allowedPaths = withDefaultCwd(allowedPaths)
+
+	server := &BashServer{
+		allowedPaths: allowedPaths,
+		autoConfirm:  autoConfirm,
+		jobTracker:   NewJobTracker(),
+		tools: []Tool{
+			{
+				Name:        "run_command",
+				Description: "Run a shell command and return its output. For servers/services/long-running processes, you MUST set background: true (killable via /kill or /killbg).",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 180)"},"background":{"type":"boolean","description":"Run in background as a goroutine (default false)"}},"required":["command"]}`),
+			},
+			{
+				Name:        "kill_command",
+				Description: "Kill a background job by ID or PID (returned from run_command with background: true)",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","description":"Job ID to kill (e.g., job1)"},"pid":{"type":"number","description":"Process ID to kill"}},"required":["job_id"]}`),
+			},
+			{
+				Name:        "run_python",
+				Description: "Run a Python script and return its output",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Python code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 30)"}},"required":["code"]}`),
+			},
+			{
+				Name:        "run_node",
+				Description: "Run a Node.js script and return its output",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Node.js code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 30)"}},"required":["code"]}`),
+			},
+		},
+	}
+
+	// Add Unix-only tools (mac, linux)
+	unixTools := GetUnixTools()
+	server.tools = append(server.tools, unixTools...)
+
+	return server
+}
+
+func (s *BashServer) Name() string {
+	return "bash"
+}
+
+func (s *BashServer) Tools() []Tool {
+	return s.tools
+}
+
+func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+	switch name {
+	case "run_command":
+		runCmdMu.Lock()
+		defer runCmdMu.Unlock()
+		return s.runCommand(ctx, arguments)
+	case "kill_command":
+		return s.killCommand(arguments)
+	case "kill_all_background":
+		return s.killAllBackground(arguments)
+	case "run_python":
+		return s.runPython(ctx, arguments)
+	case "run_node":
+		return s.runNode(ctx, arguments)
+	case "run_bash_script":
+		return s.HandleRunBashScript(ctx, arguments)
+	default:
+		return "", fmt.Errorf("unknown tool: %s", name)
+	}
+}
+
+func (s *BashServer) isPathAllowed(path string) bool {
+	if path == "" {
+		return true
+	}
+	for _, allowed := range s.allowedPaths {
+		if strings.HasPrefix(path, allowed) || path == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
@@ -206,7 +336,7 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 
 	if !s.isCommandAllowed(command) {
 		if interpreterRegex.MatchString(command) {
-			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, node, ruby, php, etc.) are not allowed in run_command. Use run_python or run_node instead.")
+			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, ruby, perl, etc.) are not allowed in run_command. Use run_python or run_node instead.")
 		}
 		allowed, restrictedPath := s.checkCommandPaths(command)
 		if !allowed && restrictedPath != "" {
@@ -246,34 +376,161 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 		command = strings.TrimSuffix(trimmed, "&")
 	}
 
-	// Run in background with nohup
+	// Run in background with goroutine
 	if background {
-		ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-		defer cancel()
-
-		// Use nohup to run in background, redirect output to nohup.out, and capture the PID.
-		// Wrap the command in sh -c so shell operators like `cd` work.
-		cmd := exec.CommandContext(ctx, "sh", "-c", "nohup sh -c \"$1\" > nohup.out 2>&1 & echo $!", "sh", command)
-		cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("failed to start background command: %v (output: %s)", err, strings.TrimSpace(string(output)))
-		}
-
-		pidStr := strings.TrimSpace(string(output))
-		pid, err := strconv.Atoi(pidStr)
-		if err != nil || pid <= 0 {
-			return "", fmt.Errorf("failed to parse background PID from output: %q", pidStr)
-		}
-
-		s.backgroundPIDs = append(s.backgroundPIDs, bgProcess{
-			PID:     pid,
-			Command: strings.TrimSpace(command),
-		})
-		return fmt.Sprintf("Started background process (PID: %d)\nOutput will be in nohup.out", pid), nil
+		return s.runBackgroundJob(ctx, command, timeout)
 	}
 
+	// Run synchronously with timeout
+	return s.runSyncCommand(ctx, command, timeout)
+}
+
+func (s *BashServer) runBackgroundJob(ctx context.Context, command string, timeout int) (string, error) {
+	if ctx.Err() != nil {
+		s.recordFailedStart(command, "context canceled")
+		return "", fmt.Errorf("failed to start background command: context canceled")
+	}
+
+	// Detach background jobs from the request context to avoid accidental cancellation
+	jobCtx, jobCancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+
+	// Create a job struct to track this background command
+	job := &Job{
+		Command: command,
+		Ctx:     jobCtx,
+		Cancel:  jobCancel,
+		Done:    make(chan struct{}),
+		Started: time.Now(),
+	}
+
+	// Add to tracker and get job ID
+	jobID := s.jobTracker.Add(job)
+
+	cmd := exec.CommandContext(jobCtx, "sh", "-c", command)
+	cmd.Stdin = nil
+
+	// Set up output capture with a pipe
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		s.jobTracker.Remove(jobID)
+		jobCancel()
+		s.recordFailedStart(command, fmt.Sprintf("stdout pipe error: %v", err))
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		s.jobTracker.Remove(jobID)
+		jobCancel()
+		s.recordFailedStart(command, fmt.Sprintf("stderr pipe error: %v", err))
+		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		s.jobTracker.Remove(jobID)
+		jobCancel()
+		s.recordFailedStart(command, err.Error())
+		return "", fmt.Errorf("failed to start background command: %w", err)
+	}
+
+	// Record PID
+	job.PID = cmd.Process.Pid
+
+	// Monitor the command in a goroutine
+	go func() {
+		defer close(job.Done)
+		defer jobCancel()
+
+		// Copy output in separate goroutines
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			buf := make([]byte, 4096)
+			for {
+				select {
+				case <-jobCtx.Done():
+					return
+				default:
+					n, err := stdout.Read(buf)
+					if n > 0 {
+						job.Mu.Lock()
+						job.Output.Write(buf[:n])
+						job.Mu.Unlock()
+					}
+					if err != nil {
+						return
+					}
+				}
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			buf := make([]byte, 4096)
+			for {
+				select {
+				case <-jobCtx.Done():
+					return
+				default:
+					n, err := stderr.Read(buf)
+					if n > 0 {
+						job.Mu.Lock()
+						job.Output.Write(buf[:n])
+						job.Mu.Unlock()
+					}
+					if err != nil {
+						return
+					}
+				}
+			}
+		}()
+
+		// Wait for output copy goroutines
+		wg.Wait()
+
+		// Wait for command to finish
+		err = cmd.Wait()
+
+		// Record exit status
+		job.Mu.Lock()
+		job.Exited = true
+		job.ExitedAt = time.Now()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+					job.ExitCode = status.ExitStatus()
+				} else {
+					job.ExitCode = 1
+				}
+			} else {
+				// Check if it was killed by context
+				if jobCtx.Err() == context.DeadlineExceeded {
+					job.Output.WriteString("\n[Job killed due to timeout]\n")
+				} else if jobCtx.Err() == context.Canceled {
+					job.Output.WriteString("\n[Job killed by user]\n")
+				}
+				job.ExitCode = 1
+			}
+		} else {
+			job.ExitCode = 0
+		}
+		job.Mu.Unlock()
+
+		// Clean up from tracker after a delay (to allow status checks)
+		go func() {
+			time.Sleep(5 * time.Minute)
+			s.jobTracker.Remove(jobID)
+		}()
+	}()
+
+	return fmt.Sprintf("Background job started: [%s] PID=%d\nCommand: %s\nTimeout: %ds\nCheck output with /bg command",
+		jobID, job.PID, command, timeout), nil
+}
+
+func (s *BashServer) runSyncCommand(ctx context.Context, command string, timeout int) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
@@ -317,84 +574,129 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 }
 
 func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
-	pid, ok := args["pid"].(float64)
-	if !ok {
-		return "", fmt.Errorf("pid is required")
-	}
+	// Try job_id first (new format)
+	jobID, hasJobID := args["job_id"].(string)
 
-	targetPID := int(pid)
-	removeTracking := func() {
-		for i, p := range s.backgroundPIDs {
-			if p.PID == targetPID {
-				s.backgroundPIDs = append(s.backgroundPIDs[:i], s.backgroundPIDs[i+1:]...)
-				break
+	// Try pid (deprecated but still supported)
+	if pidVal, ok := args["pid"].(float64); ok {
+		pid := int(pidVal)
+		foundID := s.jobTracker.RemoveByPID(pid)
+		if foundID != "" {
+			jobID = foundID
+			hasJobID = true
+		} else {
+			// PID not found in tracker, try to kill process directly
+			proc, err := os.FindProcess(pid)
+			if err != nil {
+				return fmt.Sprintf("Process %d not found", pid), nil
 			}
+			err = proc.Kill()
+			if err != nil {
+				if errors.Is(err, syscall.ESRCH) {
+					return fmt.Sprintf("Process %d already terminated", pid), nil
+				}
+				return "", fmt.Errorf("failed to kill process %d: %v", pid, err)
+			}
+			return fmt.Sprintf("Killed process %d", pid), nil
 		}
 	}
-	msg, err := killProcessGroup(targetPID, removeTracking)
-	if err == nil {
-		return msg, nil
-	}
-	// Fallback to regular process kill if process group kill failed
-	proc, err := os.FindProcess(targetPID)
-	if err != nil {
-		removeTracking()
-		return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
+
+	if !hasJobID || jobID == "" {
+		return "", fmt.Errorf("job_id or pid is required")
 	}
 
-	err = proc.Kill()
-	if err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			removeTracking()
-			return fmt.Sprintf("Process %d not running; removed from tracking", targetPID), nil
-		}
-		return "", fmt.Errorf("failed to kill process: %v", err)
+	// Kill the job
+	if !s.jobTracker.Kill(jobID) {
+		return fmt.Sprintf("Job %s not found", jobID), nil
 	}
 
-	removeTracking()
-	return fmt.Sprintf("Killed process %d", targetPID), nil
+	return fmt.Sprintf("Killed job %s", jobID), nil
 }
 
 func (s *BashServer) killAllBackground(args map[string]interface{}) (string, error) {
-	if len(s.backgroundPIDs) == 0 {
-		return "No background processes running", nil
+	killed := s.jobTracker.KillAll()
+	if len(killed) == 0 {
+		return "No background jobs running", nil
 	}
-
-	var killed []int
-	var failed []int
-	for _, procInfo := range s.backgroundPIDs {
-		msg, err := killProcessGroup(procInfo.PID, func() {})
-		if err == nil {
-			killed = append(killed, procInfo.PID)
-			_ = msg
-			continue
-		}
-
-		proc, err := os.FindProcess(procInfo.PID)
-		if err == nil {
-			if err := proc.Kill(); err == nil {
-				killed = append(killed, procInfo.PID)
-			} else if errors.Is(err, syscall.ESRCH) {
-				killed = append(killed, procInfo.PID)
-			} else {
-				failed = append(failed, procInfo.PID)
-			}
-		} else {
-			failed = append(failed, procInfo.PID)
-		}
-	}
-
-	s.backgroundPIDs = nil
-
-	msg := fmt.Sprintf("Killed %d processes: %v", len(killed), killed)
-	if len(failed) > 0 {
-		msg += fmt.Sprintf("\nFailed to kill: %v", failed)
-	}
-	return msg, nil
+	return fmt.Sprintf("Killed %d jobs: %s", len(killed), strings.Join(killed, ", ")), nil
 }
 
 func (s *BashServer) KillAllBackground() (string, error) {
 	return s.killAllBackground(nil)
+}
+
+func (s *BashServer) ListBackgroundJobs() string {
+	jobs := s.jobTracker.List()
+	failed := s.consumeFailedStarts()
+	if len(jobs) == 0 && len(failed) == 0 {
+		return "No background jobs running"
+	}
+
+	var lines []string
+	if len(jobs) > 0 {
+		lines = append(lines, fmt.Sprintf("Background Jobs (%d running):\n", len(jobs)))
+	}
+
+	for _, job := range jobs {
+		job.Mu.Lock()
+		status := "Running"
+		if job.Exited {
+			status = fmt.Sprintf("Exited (code: %d)", job.ExitCode)
+		}
+		elapsed := time.Since(job.Started).Round(time.Second)
+		output := job.Output.String()
+		if len(output) > 200 {
+			output = output[:200] + "..."
+		}
+		lines = append(lines, fmt.Sprintf("[%s] PID=%d Status=%s Elapsed=%s\n  Command: %s\n  Output: %s",
+			job.ID, job.PID, status, elapsed, job.Command, output))
+		job.Mu.Unlock()
+	}
+
+	if len(failed) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "Failed Starts (showing once):")
+		for _, entry := range failed {
+			lines = append(lines, "  "+entry)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (s *BashServer) recordFailedStart(command, reason string) {
+	if command == "" {
+		command = "(unknown command)"
+	}
+	if reason == "" {
+		reason = "unknown error"
+	}
+	entry := fmt.Sprintf("%s — %s", command, reason)
+	s.failedMu.Lock()
+	s.failedStarts = append(s.failedStarts, entry)
+	s.failedMu.Unlock()
+}
+
+func (s *BashServer) consumeFailedStarts() []string {
+	s.failedMu.Lock()
+	defer s.failedMu.Unlock()
+	if len(s.failedStarts) == 0 {
+		return nil
+	}
+	out := make([]string, len(s.failedStarts))
+	copy(out, s.failedStarts)
+	s.failedStarts = nil
+	return out
+}
+
+func (s *BashServer) GetJobOutput(jobID string) (string, bool) {
+	return s.jobTracker.JobStatus(jobID)
+}
+
+func (s *BashServer) GetJob(jobID string) (*Job, bool) {
+	return s.jobTracker.Get(jobID)
 }
 
 func (s *BashServer) runPython(ctx context.Context, args map[string]interface{}) (string, error) {
@@ -484,9 +786,6 @@ func (s *BashServer) AddURL(ctx context.Context, url string) error {
 
 func (s *BashServer) RemovePath(ctx context.Context, path string) error {
 	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
 	for i, p := range s.allowedPaths {
 		if p == path {
 			s.allowedPaths = append(s.allowedPaths[:i], s.allowedPaths[i+1:]...)
@@ -505,62 +804,27 @@ func (s *BashServer) AllowedPaths() []string {
 }
 
 func (s *BashServer) Close() error {
+	// Kill all background jobs on close
+	s.KillAllBackground()
 	return nil
 }
 
+func (s *BashServer) SetAllowedPaths(paths []string) {
+	s.allowedPaths = sanitizeAllowedPaths(paths)
+}
+
+func (s *BashServer) AllowedPathsUpdated() {}
+
+
+// Aliases for backwards compatibility with main.go
 func (s *BashServer) ListBackground() (string, error) {
-	if len(s.backgroundPIDs) == 0 {
-		return "No background processes", nil
-	}
-	var pids []string
-	for _, procInfo := range s.backgroundPIDs {
-		proc, err := os.FindProcess(procInfo.PID)
-		if err == nil {
-			err = proc.Signal(nil) // Check if process is alive
-			status := "running"
-			if err != nil {
-				status = "not running"
-			}
-			if procInfo.Command != "" {
-				pids = append(pids, fmt.Sprintf("PID %d (%s) - %s", procInfo.PID, status, procInfo.Command))
-			} else {
-				pids = append(pids, fmt.Sprintf("PID %d (%s)", procInfo.PID, status))
-			}
-		} else {
-			if procInfo.Command != "" {
-				pids = append(pids, fmt.Sprintf("PID %d - %s", procInfo.PID, procInfo.Command))
-			} else {
-				pids = append(pids, fmt.Sprintf("PID %d", procInfo.PID))
-			}
-		}
-	}
-	if len(pids) == 0 {
-		return "No background processes", nil
-	}
-	return "Background processes: " + strings.Join(pids, ", "), nil
+	return s.ListBackgroundJobs(), nil
 }
 
 func (s *BashServer) BackgroundCount() int {
-	return len(s.backgroundPIDs)
+	return s.jobTracker.Count()
 }
 
-func (s *BashServer) PruneBackground() ([]int, error) {
-	var alive []bgProcess
-	var removed []int
-	for _, procInfo := range s.backgroundPIDs {
-		proc, err := os.FindProcess(procInfo.PID)
-		if err != nil {
-			removed = append(removed, procInfo.PID)
-			continue
-		}
-		if err := proc.Signal(nil); err != nil {
-			if errors.Is(err, syscall.ESRCH) || errors.Is(err, os.ErrProcessDone) {
-				removed = append(removed, procInfo.PID)
-				continue
-			}
-		}
-		alive = append(alive, procInfo)
-	}
-	s.backgroundPIDs = alive
-	return removed, nil
+func (s *BashServer) PruneBackground() ([]string, error) {
+	return nil, nil // No-op, jobs auto-prune after 5 minutes
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -36,8 +37,8 @@ func GetUnixTools() []Tool {
 	return []Tool{
 		{
 			Name:        "run_bash_script",
-			Description: "Run a bash script and return its output. Only available on macOS and Linux.",
-			InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Bash code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"}},"required":["code"]}`),
+			Description: "Run a bash script and return its output. For servers/services/long-running scripts, you MUST set background: true. Only available on macOS and Linux.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"code":{"type":"string","description":"Bash code to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 60)"},"background":{"type":"boolean","description":"Run in background as a goroutine (default false)"}},"required":["code"]}`),
 		},
 	}
 }
@@ -53,6 +54,26 @@ func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]in
 	timeout := 60
 	if timeoutVal, ok := args["timeout"].(float64); ok {
 		timeout = int(timeoutVal)
+	}
+	// Cap at 5 minutes max to prevent hanging
+	if timeout > 300 {
+		timeout = 300
+	}
+
+	background := false
+	if b, ok := args["background"].(bool); ok {
+		background = b
+	}
+
+	// Detect manual background operator (& at end)
+	trimmed := strings.TrimSpace(code)
+	if strings.HasSuffix(trimmed, "&") {
+		background = true
+		code = strings.TrimSpace(strings.TrimSuffix(trimmed, "&"))
+	}
+
+	if background {
+		return s.runBackgroundJob(ctx, "bash -c "+shellQuote(code), timeout)
 	}
 
 	// Run the bash code
@@ -72,4 +93,14 @@ func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]in
 	}
 
 	return string(output), nil
+}
+
+func shellQuote(input string) string {
+	if input == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(input, " \t\n'\"\\$&;|<>`(){}[]*?!") {
+		return input
+	}
+	return "'" + strings.ReplaceAll(input, "'", `'\'\'`) + "'"
 }

@@ -150,7 +150,7 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 		contextLimit:     contextLimit,
 		pendingToolCalls: make(map[string]string),
 		client: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 5 * time.Minute,
 		},
 	}, nil
 }

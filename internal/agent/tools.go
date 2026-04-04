@@ -23,6 +23,7 @@ Example:
 ` + "```" + `
 
 IMPORTANT: Execute tools FIRST, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
+If you need to start a server/service or any long-running process, you MUST use background: true and continue.
 
 Project tree:
 %s
