@@ -192,7 +192,7 @@ func RunWizard(destination string) error {
 
 	provider.Description, _ = prompt(reader, "Description", getDefault("description", "This model is red"))
 
-	tempStr, _ := prompt(reader, "Temperature (0.0-1.0). The higher the value, the more random the output.", getDefault("temperature", "0.5"))
+	tempStr, _ := prompt(reader, "Temperature (0.0-1.0). The higher the value, the more random the output.", getDefault("temperature", "0.2"))
 	if tempStr != "" {
 		if val, err := strconv.ParseFloat(tempStr, 64); err == nil {
 			provider.Temperature = &val
