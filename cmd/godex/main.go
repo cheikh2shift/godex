@@ -1693,6 +1693,16 @@ func getServerNames(servers []MCPServer) []string {
 	return names
 }
 
+func isOllamaPromptTooLong(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ollama responded with 400") &&
+		strings.Contains(msg, "prompt too long") &&
+		strings.Contains(msg, "max context length")
+}
+
 func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
 	tree, _ := godexcontext.BuildTree(".")
 	wd, _ := os.Getwd()
@@ -1829,6 +1839,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		default:
 		}
 		if err != nil {
+			if isOllamaPromptTooLong(err) {
+				fmt.Println("\n[Ollama] Prompt exceeded the model context limit.")
+				fmt.Println("Switch to a larger model to continue, or run `/commit`, then `/clear-context`, then `/commit-pull` to resume with a clean context window.")
+			}
 			return "", err
 		}
 

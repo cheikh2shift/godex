@@ -30,6 +30,7 @@ type ollamaProvider struct {
 	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
+	systemPrompt     string
 	messages         []map[string]string
 	mu               sync.Mutex
 	sendMu           sync.Mutex
@@ -217,10 +218,22 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 	defer o.sendMu.Unlock()
 
 	o.mu.Lock()
-	o.messages = append(o.messages, map[string]string{
-		"role":    "user",
-		"content": prompt,
-	})
+	systemPrompt, userInput := splitSystemUserPrompt(prompt)
+	if systemPrompt != "" {
+		o.systemPrompt = systemPrompt
+	}
+	if o.systemPrompt != "" {
+		o.ensureSystemMessage(o.systemPrompt)
+	}
+	if userInput == "" {
+		userInput = strings.TrimSpace(prompt)
+	}
+	if userInput != "" {
+		o.messages = append(o.messages, map[string]string{
+			"role":    "user",
+			"content": userInput,
+		})
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	o.cancelGen++
@@ -295,6 +308,22 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 	o.mu.Unlock()
 
 	return response, nil
+}
+
+func (o *ollamaProvider) ensureSystemMessage(system string) {
+	if strings.TrimSpace(system) == "" {
+		return
+	}
+	if len(o.messages) > 0 {
+		if role := o.messages[0]["role"]; role == "system" {
+			if o.messages[0]["content"] == system {
+				return
+			}
+			o.messages[0]["content"] = system
+			return
+		}
+	}
+	o.messages = append([]map[string]string{{"role": "system", "content": system}}, o.messages...)
 }
 
 type sendResult struct {
