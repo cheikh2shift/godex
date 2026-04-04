@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -106,10 +107,18 @@ func (t *JobTracker) Kill(id string) bool {
 	}
 	job.Cancel()
 	if job.PID > 0 {
+		_, _ = killProcessGroup(job.PID, func() {
+			delete(t.jobs, id)
+		})
 		if proc, err := os.FindProcess(job.PID); err == nil {
-			proc.Kill()
+			_ = proc.Kill()
 		}
 	}
+	job.Mu.Lock()
+	job.Exited = true
+	job.ExitedAt = time.Now()
+	job.ExitCode = 1
+	job.Mu.Unlock()
 	return true
 }
 
@@ -120,10 +129,18 @@ func (t *JobTracker) KillAll() []string {
 	for id, job := range t.jobs {
 		job.Cancel()
 		if job.PID > 0 {
+			_, _ = killProcessGroup(job.PID, func() {
+				delete(t.jobs, id)
+			})
 			if proc, err := os.FindProcess(job.PID); err == nil {
-				proc.Kill()
+				_ = proc.Kill()
 			}
 		}
+		job.Mu.Lock()
+		job.Exited = true
+		job.ExitedAt = time.Now()
+		job.ExitCode = 1
+		job.Mu.Unlock()
 		killed = append(killed, id)
 	}
 	t.jobs = make(map[string]*Job)
@@ -391,6 +408,12 @@ func (s *BashServer) runBackgroundJob(ctx context.Context, command string, timeo
 		return "", fmt.Errorf("failed to start background command: context canceled")
 	}
 
+	workingDir := ""
+	if dir, rest, ok := splitLeadingCd(command); ok {
+		workingDir = dir
+		command = rest
+	}
+
 	// Detach background jobs from the request context to avoid accidental cancellation
 	jobCtx, jobCancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 
@@ -407,6 +430,12 @@ func (s *BashServer) runBackgroundJob(ctx context.Context, command string, timeo
 	jobID := s.jobTracker.Add(job)
 
 	cmd := exec.CommandContext(jobCtx, "sh", "-c", command)
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
 	cmd.Stdin = nil
 
 	// Set up output capture with a pipe
@@ -526,6 +555,36 @@ func (s *BashServer) runBackgroundJob(ctx context.Context, command string, timeo
 
 	return fmt.Sprintf("Background job started: [%s] PID=%d\nCommand: %s\nTimeout: %ds\nCheck output with /bg command",
 		jobID, job.PID, command, timeout), nil
+}
+
+func splitLeadingCd(command string) (string, string, bool) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return "", "", false
+	}
+	if !strings.HasPrefix(strings.ToLower(trimmed), "cd ") {
+		return "", "", false
+	}
+
+	rest := strings.TrimSpace(trimmed[2:])
+	sepIdx := strings.Index(rest, "&&")
+	sepLen := 2
+	if sepIdx == -1 {
+		sepIdx = strings.Index(rest, ";")
+		sepLen = 1
+	}
+	if sepIdx == -1 {
+		return "", "", false
+	}
+
+	dirPart := strings.TrimSpace(rest[:sepIdx])
+	cmdPart := strings.TrimSpace(rest[sepIdx+sepLen:])
+	if dirPart == "" || cmdPart == "" {
+		return "", "", false
+	}
+	dirPart = strings.Trim(dirPart, `"'`)
+	resolved := resolvePath(dirPart)
+	return resolved, cmdPart, true
 }
 
 func (s *BashServer) runSyncCommand(ctx context.Context, command string, timeout int) (string, error) {
