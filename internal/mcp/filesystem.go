@@ -79,9 +79,9 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end"]}`),
 			},
 			{
-				Name:        "regex_replace_in_file",
-				Description: "Replace text in a file using regex patterns. Use this instead of line-based edits when you need to match specific text content - patterns don't shift when other edits are made",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"find":{"type":"string","description":"Regex pattern to find (supports capture groups)"},"replace":{"type":"string","description":"Replacement text (supports capture groups $1, $2, etc.)"},"all":{"type":"boolean","description":"Replace all matches (default: true)"}},"required":["path","find","replace"]}`),
+				Name:        "replace_first_in_file",
+				Description: "Replace the first occurrence of a text string in a file",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"find":{"type":"string","description":"Text to find (plain string, not regex)"},"replace":{"type":"string","description":"Replacement text"}},"required":["path","find","replace"]}`),
 			},
 			{
 				Name:        "replace_line_range",
@@ -140,8 +140,8 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.getFileInfo(arguments)
 	case "read_file_line_range":
 		return s.readFileLineRange(arguments)
-	case "regex_replace_in_file":
-		return s.regexReplaceInFile(arguments)
+	case "replace_first_in_file":
+		return s.replaceFirstInFile(arguments)
 	case "replace_line_range":
 		return s.replaceLineRange(arguments)
 	case "insert_at_line":
@@ -409,7 +409,7 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 	return strings.Join(lines[startIdx:endIdx], "\n"), nil
 }
 
-func (s *FileSystemServer) regexReplaceInFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) replaceFirstInFile(args map[string]interface{}) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -421,7 +421,7 @@ func (s *FileSystemServer) regexReplaceInFile(args map[string]interface{}) (stri
 
 	find, ok := args["find"].(string)
 	if !ok || find == "" {
-		return "", fmt.Errorf("find pattern is required")
+		return "", fmt.Errorf("find text is required")
 	}
 
 	replace, ok := args["replace"].(string)
@@ -429,40 +429,24 @@ func (s *FileSystemServer) regexReplaceInFile(args map[string]interface{}) (stri
 		return "", fmt.Errorf("replace is required")
 	}
 
-	replaceAll := true
-	if all, ok := args["all"].(bool); ok {
-		replaceAll = all
-	}
-
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
-	re, err := regexp.Compile(find)
-	if err != nil {
-		return "", fmt.Errorf("invalid regex pattern: %w", err)
+	contentStr := string(content)
+	idx := strings.Index(contentStr, find)
+	if idx == -1 {
+		return fmt.Sprintf("No matches found for text: %s", find), nil
 	}
 
-	var replaced string
-	var count int
-	if replaceAll {
-		replaced = re.ReplaceAllString(string(content), replace)
-		count = len(re.FindAllStringIndex(string(content), -1))
-	} else {
-		replaced = re.ReplaceAllString(string(content), replace)
-		count = 1
-	}
-
-	if count == 0 {
-		return fmt.Sprintf("No matches found for pattern: %s", find), nil
-	}
+	replaced := contentStr[:idx] + replace + contentStr[idx+len(find):]
 
 	if err := os.WriteFile(path, []byte(replaced), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	return fmt.Sprintf("Replaced %d occurrence(s) of pattern %s in %s", count, find, path), nil
+	return fmt.Sprintf("Replaced first occurrence of %s in %s", find, path), nil
 }
 
 func (s *FileSystemServer) replaceLineRange(args map[string]interface{}) (string, error) {
