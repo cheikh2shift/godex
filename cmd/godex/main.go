@@ -872,7 +872,7 @@ promptLoop:
 				if hasFinal {
 					output = finalResp
 				} else {
-					cprompt := fmt.Sprintf("The assistant gave the following response:\n%s\n\nSince there are no tool calls to execute, please provide a final answer based on this response.", resp)
+					cprompt := fmt.Sprintf("The assistant gave the following response:\n%s\n\nSince there are no tool calls to execute, please provide a final answer based on this response. Don't mention you already provided a previous answer", resp)
 					fullPrompt = buildContinuePrompt(llmProvider, servers, fullPrompt, cprompt, round+1, maxToolRounds)
 					continue
 				}
@@ -1693,6 +1693,16 @@ func getServerNames(servers []MCPServer) []string {
 	return names
 }
 
+func isOllamaPromptTooLong(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ollama responded with 400") &&
+		strings.Contains(msg, "prompt too long") &&
+		strings.Contains(msg, "max context length")
+}
+
 func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
 	tree, _ := godexcontext.BuildTree(".")
 	wd, _ := os.Getwd()
@@ -1829,6 +1839,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		default:
 		}
 		if err != nil {
+			if isOllamaPromptTooLong(err) {
+				fmt.Println("\n[Ollama] Prompt exceeded the model context limit.")
+				fmt.Println("Switch to a larger model to continue, or run `/commit`, then `/clear-context`, then `/commit-pull` to resume with a clean context window.")
+			}
 			return "", err
 		}
 
@@ -1869,7 +1883,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					}
 					fmt.Printf("\n[No valid tool calls detected, asking for final answer...]\n")
 				}
-				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have. Do NOT call any tools, just provide the final answer.", resp)
+				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have. Do NOT call any tools, just provide the final answer.Don't mention you already provided a previous answer", resp)
 
 				fullPrompt = buildContinuePrompt(llmProvider, servers, input, continuePrompt, round+1, maxToolRounds)
 

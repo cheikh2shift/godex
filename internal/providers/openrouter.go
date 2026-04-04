@@ -68,6 +68,7 @@ type openRouterProvider struct {
 	apiKey           string
 	temperature      *float64
 	client           *http.Client
+	systemPrompt     string
 	messages         []map[string]interface{}
 	pendingToolCalls map[string]string // tool_call_id -> function_name for tracking
 	tools            []map[string]interface{}
@@ -155,15 +156,22 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
-	// Extract the actual user input from the prompt (everything after "User request:" or "User asked:")
-	userInput := extractUserInput(prompt)
+	systemPrompt, userInput := splitSystemUserPrompt(prompt)
+	if userInput == "" {
+		userInput = strings.TrimSpace(prompt)
+	}
 
 	p.mu.Lock()
+	if systemPrompt != "" {
+		p.systemPrompt = systemPrompt
+	}
 	// Track only the user input in history
-	p.messages = append(p.messages, map[string]interface{}{
-		"role":    "user",
-		"content": userInput,
-	})
+	if userInput != "" {
+		p.messages = append(p.messages, map[string]interface{}{
+			"role":    "user",
+			"content": userInput,
+		})
+	}
 	// Sliding window: keep only the last N messages (negative = unlimited)
 	maxHistory := getMaxHistoryMessages()
 	if maxHistory > 0 && len(p.messages) > maxHistory {
@@ -173,7 +181,10 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	copy(messages, p.messages)
 	p.mu.Unlock()
 
-	systemMsg := buildSystemWorkingDirMessage(prompt)
+	systemMsg := p.systemPrompt
+	if systemMsg == "" {
+		systemMsg = buildSystemWorkingDirMessage(prompt)
+	}
 	if systemMsg != "" {
 		messages = prependSystemMessage(messages, systemMsg)
 	}
