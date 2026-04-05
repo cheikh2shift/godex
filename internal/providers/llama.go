@@ -302,41 +302,50 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 		}
 	}
 
-	if selectedQuant == "" {
-		if cached, ok := getCachedQuantization(modelID); ok {
-			if _, exists := quantToFile[cached]; exists {
-				selectedQuant = cached
-			}
-		}
-	}
-
-	if selectedQuant == "" {
-		fmt.Printf("\nAvailable quantizations for %s:\n", modelID)
-		quants := SortQuantizationsKeys(quantToFile)
-		for i, q := range quants {
-			desc := GetQuantizationDescription(q)
-			fmt.Printf("  %d. %s - %s\n", i+1, q, desc)
-		}
-
-		idx := slices.Index(quants, "Q4_K_M")
-		defaultIdx := idx
-		if defaultIdx < 0 {
-			defaultIdx = 0
-		}
-		selectedIdx, err := promptQuantizationSelection(len(quants), defaultIdx)
-		if err != nil {
-			return "", "", false, err
-		}
-		selectedQuant = quants[selectedIdx]
-	}
-
-	selectedFile, ok := quantToFile[selectedQuant]
-	if !ok {
+	var selectedFile string
+	if selectedQuant == "" && len(quantToFile) == 0 {
 		selectedFile = selectBestGGUF(ggufFiles)
 		if selectedFile == "" {
 			return "", "", false, fmt.Errorf("no suitable GGUF file found for %s", modelID)
 		}
-		fmt.Printf("Selected quantization %s not found, using %s\n", selectedQuant, selectedFile)
+	} else {
+		if selectedQuant == "" {
+			if cached, ok := getCachedQuantization(modelID); ok {
+				if _, exists := quantToFile[cached]; exists {
+					selectedQuant = cached
+				}
+			}
+		}
+
+		if selectedQuant == "" {
+			fmt.Printf("\nAvailable quantizations for %s:\n", modelID)
+			quants := SortQuantizationsKeys(quantToFile)
+			for i, q := range quants {
+				desc := GetQuantizationDescription(q)
+				fmt.Printf("  %d. %s - %s\n", i+1, q, desc)
+			}
+
+			idx := slices.Index(quants, "Q4_K_M")
+			defaultIdx := idx
+			if defaultIdx < 0 {
+				defaultIdx = 0
+			}
+			selectedIdx, err := promptQuantizationSelection(len(quants), defaultIdx)
+			if err != nil {
+				return "", "", false, err
+			}
+			selectedQuant = quants[selectedIdx]
+		}
+
+		var ok bool
+		selectedFile, ok = quantToFile[selectedQuant]
+		if !ok {
+			selectedFile = selectBestGGUF(ggufFiles)
+			if selectedFile == "" {
+				return "", "", false, fmt.Errorf("no suitable GGUF file found for %s", modelID)
+			}
+			fmt.Printf("Selected quantization %s not found, using %s\n", selectedQuant, selectedFile)
+		}
 	}
 
 	if selectedQuant != "" {
@@ -352,7 +361,10 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 	filename := filepath.Base(selectedFile)
 	destPath := filepath.Join(modelsDir, filename)
 
-	modelWithQuant := modelID + ":" + selectedQuant
+	modelWithQuant := modelID
+	if selectedQuant != "" {
+		modelWithQuant = modelID + ":" + selectedQuant
+	}
 
 	if fileExists(destPath) {
 		fmt.Printf("[llama.cpp] Using cached model: %s\n", filename)
@@ -425,6 +437,9 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 }
 
 func promptQuantizationSelection(maxOptions int, defaultIdx int) (int, error) {
+	if maxOptions <= 0 {
+		return 0, fmt.Errorf("no quantization options available")
+	}
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Printf("\nSelect quantization (default: %d for Q4_K_M): ", defaultIdx+1)
