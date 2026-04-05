@@ -16,13 +16,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasi
+          targets: wasm32-wasip1
 
       - name: Build vision.wasm
         working-directory: packaging/vision
         run: |
-          cargo build --release --target wasm32-wasi
-          cp target/wasm32-wasi/release/vision.wasm ../vision.wasm
+          cargo build --release --target wasm32-wasip1
+          cp target/wasm32-wasip1/release/vision.wasm ../vision.wasm
 
       - name: Commit vision.wasm
         run: |
