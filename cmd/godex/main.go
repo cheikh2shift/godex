@@ -32,6 +32,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/hive"
 	"github.com/cheikh2shift/godex/internal/mcp"
 	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/vision"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
 )
@@ -193,6 +194,11 @@ func main() {
 	if strings.TrimSpace(llamaServerURL) != "" {
 		provider.LlamaServerURL = strings.TrimSpace(llamaServerURL)
 	}
+
+	if err := vision.EnsureRuntime(context.Background()); err != nil {
+		log.Printf("[Vision] Setup failed, continuing without vision: %v", err)
+	}
+
 	llmProvider, err := agent.GetProvider(provider)
 	if err != nil {
 		log.Fatalf("failed to create provider: %v", err)
@@ -924,13 +930,19 @@ promptLoop:
 			var toolExecError bool
 
 			if len(toolCalls) > 1 && llmProvider != nil {
-				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), true, false)
+				toolResults, toolExecError = executeToolCallsInParallel(roundCtx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), true, false, input)
 
 			} else {
 				hasError := false
 				for _, tc := range toolCalls {
 					toolName := tc["name"].(string)
 					args := tc["arguments"].(map[string]interface{})
+
+					if toolName == "read_image" && input != "" {
+						if _, ok := args["prompt"]; !ok {
+							args["prompt"] = input
+						}
+					}
 
 					toolDesc := getToolDescription(servers, toolName)
 					if toolDesc != "" {
@@ -981,7 +993,11 @@ promptLoop:
 						toolResults = append(toolResults, errMsg)
 						hasError = true
 					} else {
-						toolResults = append(toolResults, truncate(result, 2500))
+						if toolName == "read_image" {
+							toolResults = append(toolResults, result)
+						} else {
+							toolResults = append(toolResults, truncate(result, 2500))
+						}
 					}
 				}
 				toolExecError = hasError
@@ -1921,12 +1937,18 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		var toolResults []string
 		var toolExecError bool
 		if len(toolCalls) > 1 && llmProvider != nil {
-			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), verbose, autoDenyRestrictedPaths)
+			toolResults, toolExecError = executeToolCallsInParallel(ctx, servers, toolCalls, toolTimeout, llmProvider.SupportsNativeToolCalls(), verbose, autoDenyRestrictedPaths, input)
 		} else {
 			hasError := false
 			for _, tc := range toolCalls {
 				toolName := tc["name"].(string)
 				args := tc["arguments"].(map[string]interface{})
+
+				if toolName == "read_image" && input != "" {
+					if _, ok := args["prompt"]; !ok {
+						args["prompt"] = input
+					}
+				}
 
 				if onToolCall != nil {
 					onToolCall(toolName)
@@ -1966,7 +1988,11 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					toolResults = append(toolResults, truncate(result, 2500))
+					if toolName == "read_image" {
+						toolResults = append(toolResults, result)
+					} else {
+						toolResults = append(toolResults, truncate(result, 2500))
+					}
 				}
 			}
 			toolExecError = hasError
@@ -2252,7 +2278,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 	return "", fmt.Errorf("tool %s not found", name)
 }
 
-func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool, autoDenyRestrictedPaths bool) ([]string, bool) {
+func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool, autoDenyRestrictedPaths bool, promptContext string) ([]string, bool) {
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
@@ -2294,6 +2320,12 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 			toolName := call["name"].(string)
 			args := call["arguments"].(map[string]interface{})
+
+			if toolName == "read_image" && promptContext != "" {
+				if _, ok := args["prompt"]; !ok {
+					args["prompt"] = promptContext
+				}
+			}
 
 			if supportsNativeToolCalls && toolName == "run_command" {
 				if cmd, ok := args["command"].(string); ok {
@@ -2341,7 +2373,11 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 			results[result.index] = fmt.Sprintf("ERROR: %v", result.err)
 			hasError = true
 		} else {
-			results[result.index] = truncate(result.result, 2500)
+			if toolCalls[result.index]["name"].(string) == "read_image" {
+				results[result.index] = result.result
+			} else {
+				results[result.index] = truncate(result.result, 2500)
+			}
 		}
 	}
 
@@ -2435,7 +2471,7 @@ func normalizeToolPathArgs(toolName string, args map[string]interface{}) {
 
 func isFilesystemTool(toolName string) bool {
 	switch toolName {
-	case "read_file", "write_file", "list_directory", "create_directory", "delete_file", "search_files", "get_file_info":
+	case "read_file", "read_image", "write_file", "list_directory", "create_directory", "delete_file", "search_files", "get_file_info":
 		return true
 	default:
 		return false

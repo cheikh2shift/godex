@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/cheikh2shift/godex/internal/vision"
 )
 
 func getIntArg(args map[string]interface{}, key, alias string) (float64, bool) {
@@ -42,6 +45,11 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 				Name:        "read_file",
 				Description: "Read contents of a file",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"}},"required":["path"]}`),
+			},
+			{
+				Name:        "read_image",
+				Description: "Analyze an image locally and return a summary for the LLM. Optional prompt adds relevance.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"},"prompt":{"type":"string","description":"User prompt for relevance (optional)"}},"required":["path"]}`),
 			},
 			{
 				Name:        "write_file",
@@ -126,6 +134,8 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 	switch name {
 	case "read_file":
 		return s.readFile(arguments)
+	case "read_image":
+		return s.readImage(arguments)
 	case "write_file":
 		return s.writeFile(arguments)
 	case "list_directory":
@@ -203,6 +213,27 @@ func (s *FileSystemServer) readFile(args map[string]interface{}) (string, error)
 	}
 
 	return string(content), nil
+}
+
+func (s *FileSystemServer) readImage(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
+	}
+
+	prompt, _ := args["prompt"].(string)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	summary, err := vision.SummarizeImage(ctx, prompt, path)
+	if err != nil {
+		return "", err
+	}
+	return summary, nil
 }
 
 func (s *FileSystemServer) writeFile(args map[string]interface{}) (string, error) {

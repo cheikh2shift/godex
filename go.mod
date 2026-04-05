@@ -10,6 +10,7 @@ require (
 	github.com/chromedp/chromedp v0.14.2
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
+	github.com/tetratelabs/wazero v1.11.0
 	golang.org/x/net v0.48.0
 	golang.org/x/term v0.38.0
 	google.golang.org/genai v1.49.0
