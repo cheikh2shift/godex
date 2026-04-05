@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use image::{imageops::FilterType, GenericImageView};
+use image::imageops::FilterType;
 use ndarray::Array4;
 use serde::Serialize;
 use std::env;
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
         .into_optimized()?
         .into_runnable()?;
 
-    let result = model.run(tvec!(input.into()))?;
+    let result = model.run(tvec!(Tensor::from(input)))?;
     let scores = result[0].to_array_view::<f32>()?;
     let scores = scores.iter().cloned().collect::<Vec<f32>>();
 
