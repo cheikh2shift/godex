@@ -571,7 +571,13 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 	} else {
 		serverPath, err = detectLlamaServer()
 		if err != nil {
-			return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", err)
+			if installErr := CheckOrInstallLlamaServer(bufio.NewReader(os.Stdin)); installErr != nil {
+				return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", installErr)
+			}
+			serverPath, err = detectLlamaServer()
+			if err != nil {
+				return nil, fmt.Errorf("llama.cpp provider requires llama-server: %w", err)
+			}
 		}
 
 		tokenizePath, _ = detectLlamaTokenize()
