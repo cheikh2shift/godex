@@ -41,6 +41,8 @@ type ollamaProvider struct {
 	promptTokens     int
 	completionTokens int
 	statusCh         chan<- string
+	visionChecked    bool
+	visionSupported  bool
 }
 
 func init() {
@@ -499,6 +501,8 @@ func (o *ollamaProvider) Reset() error {
 	o.messages = []map[string]string{}
 	o.promptTokens = 0
 	o.completionTokens = 0
+	o.visionChecked = false
+	o.visionSupported = false
 	return nil
 }
 
@@ -563,5 +567,65 @@ func (o *ollamaProvider) SetModel(model string, contextLimit int) error {
 	defer o.mu.Unlock()
 	o.model = model
 	o.contextLimit = contextLimit
+	o.visionChecked = false
+	o.visionSupported = false
 	return nil
+}
+
+func (o *ollamaProvider) SupportsVision(ctx context.Context) (bool, error) {
+	o.mu.Lock()
+	if o.visionChecked {
+		supported := o.visionSupported
+		o.mu.Unlock()
+		return supported, nil
+	}
+	o.mu.Unlock()
+
+	supported, err := o.detectVisionSupport(ctx)
+	o.mu.Lock()
+	o.visionChecked = true
+	o.visionSupported = supported
+	o.mu.Unlock()
+	return supported, err
+}
+
+func (o *ollamaProvider) detectVisionSupport(ctx context.Context) (bool, error) {
+	endpoint := o.baseURL
+	if endpoint == "" {
+		endpoint = defaultOllamaBase
+	}
+	endpoint = strings.TrimRight(endpoint, "/") + "/api/show"
+
+	reqBody := map[string]string{
+		"name": o.model,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return false, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to fetch model info: HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+	for _, cap := range result.Capabilities {
+		if strings.EqualFold(cap, "vision") {
+			return true, nil
+		}
+	}
+	return false, nil
 }

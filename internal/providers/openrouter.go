@@ -32,8 +32,12 @@ func getMaxHistoryMessages() int {
 
 type openRouterModelInfo struct {
 	ID            string  `json:"id"`
+	CanonicalSlug string  `json:"canonical_slug"`
 	Name          string  `json:"name"`
 	ContextLength float64 `json:"context_length"`
+	Architecture  struct {
+		InputModalities []string `json:"input_modalities"`
+	} `json:"architecture"`
 }
 
 type openRouterModelsResponse struct {
@@ -78,6 +82,8 @@ type openRouterProvider struct {
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
+	visionChecked    bool
+	visionSupported  bool
 	OnThink          func(string)
 	mu               sync.Mutex
 	statusCh         chan<- string
@@ -489,6 +495,8 @@ func (p *openRouterProvider) Reset() error {
 	p.pendingToolCalls = make(map[string]string)
 	p.promptTokens = 0
 	p.completionTokens = 0
+	p.visionChecked = false
+	p.visionSupported = false
 	return nil
 }
 
@@ -762,5 +770,67 @@ func (p *openRouterProvider) SetModel(model string, contextLimit int) error {
 	defer p.mu.Unlock()
 	p.model = model
 	p.contextLimit = contextLimit
+	p.visionChecked = false
+	p.visionSupported = false
 	return nil
+}
+
+func (p *openRouterProvider) SupportsVision(ctx context.Context) (bool, error) {
+	p.mu.Lock()
+	if p.visionChecked {
+		supported := p.visionSupported
+		p.mu.Unlock()
+		return supported, nil
+	}
+	p.mu.Unlock()
+
+	supported, err := openRouterModelSupportsVision(ctx, p.baseURL, p.model, p.apiKey)
+	p.mu.Lock()
+	p.visionChecked = true
+	p.visionSupported = supported
+	p.mu.Unlock()
+	return supported, err
+}
+
+func openRouterModelSupportsVision(ctx context.Context, baseURL, model, apiKey string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("failed to fetch models: status %d", resp.StatusCode)
+	}
+
+	var result openRouterModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+
+	modelLower := strings.ToLower(model)
+	for _, m := range result.Data {
+		if strings.ToLower(m.ID) == modelLower ||
+			strings.ToLower(m.CanonicalSlug) == modelLower ||
+			strings.ToLower(m.Name) == modelLower {
+			for _, modality := range m.Architecture.InputModalities {
+				if strings.EqualFold(modality, "image") {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
+	}
+
+	return false, fmt.Errorf("model not found: %s", model)
 }

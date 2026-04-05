@@ -427,6 +427,20 @@ promptLoop:
 
 		// log.Println("[DEBUG] Context limit:", contextLimit, "Input tokens:", inputTokens, "Output tokens:", outputTokens)
 
+		modelLabel := provider.Model
+		if llmProvider != nil {
+			if vs, ok := llmProvider.(interface {
+				SupportsVision(context.Context) (bool, error)
+			}); ok {
+				visionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				supported, err := vs.SupportsVision(visionCtx)
+				cancel()
+				if err == nil && supported {
+					modelLabel = modelLabel + " [V]"
+				}
+			}
+		}
+
 		var delegateCh <-chan hive.HiveStats
 		if hiveMgr != nil {
 			delegateCh = hiveMgr.Stats()
@@ -440,7 +454,7 @@ promptLoop:
 		promptResultCh := make(chan promptResult, 1)
 
 		go func() {
-			input, err := readPrompt(promptStr, history, provider.Model, inputTokens+outputTokens, contextLimit, historyDB, wd, statusCh, delegateCh, promptCancelCh)
+			input, err := readPrompt(promptStr, history, modelLabel, inputTokens+outputTokens, contextLimit, historyDB, wd, statusCh, delegateCh, promptCancelCh)
 			promptResultCh <- promptResult{input: input, err: err}
 		}()
 
