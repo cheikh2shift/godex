@@ -12,8 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cheikh2shift/godex/internal/ocr"
-	"github.com/cheikh2shift/godex/internal/vision"
+	"github.com/cheikh2shift/godex/internal/ml"
 )
 
 func getIntArg(args map[string]interface{}, key, alias string) (float64, bool) {
@@ -49,12 +48,22 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 			},
 			{
 				Name:        "read_image",
-				Description: "Analyze an image to classify what's in it (object, scene, etc.). Returns classification labels with confidence scores.",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"},"prompt":{"type":"string","description":"User prompt for relevance (optional)"}},"required":["path"]}`),
+				Description: "Extract text from an image. Use this tool ONLY to extract and transcribe text from images - for OCR, reading screenshots, documents, or any image containing text.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"}},"required":["path"]}`),
 			},
 			{
 				Name:        "read_text",
 				Description: "Extract text from an image using OCR. Use this when you need to read text, numbers, or written content from images.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"}},"required":["path"]}`),
+			},
+			{
+				Name:        "read_pdf",
+				Description: "Extract text from a PDF file. Use 'pages' to specify page range (e.g., '1-5' or '1,3,5').",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the PDF file"},"pages":{"type":"string","description":"Page range to extract (e.g., '1-5' or '1,3,5'). Leave empty for all pages"}},"required":["path"]}`),
+			},
+			{
+				Name:        "read_text",
+				Description: "Extract text from an image using OCR.",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"}},"required":["path"]}`),
 			},
 			{
@@ -144,6 +153,8 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.readImage(arguments)
 	case "read_text":
 		return s.readText(arguments)
+	case "read_pdf":
+		return s.readPdf(arguments)
 	case "write_file":
 		return s.writeFile(arguments)
 	case "list_directory":
@@ -233,11 +244,10 @@ func (s *FileSystemServer) readImage(args map[string]interface{}) (string, error
 		return "", err
 	}
 
-	prompt, _ := args["prompt"].(string)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	summary, err := vision.SummarizeImage(ctx, prompt, path)
+	summary, err := ml.QueryImage(ctx, path, "")
 	if err != nil {
 		return "", err
 	}
@@ -254,10 +264,32 @@ func (s *FileSystemServer) readText(args map[string]interface{}) (string, error)
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	text, err := ocr.ExtractText(ctx, path)
+	text, err := ml.QueryImage(ctx, path, "Extract all text visible in this image. List each piece of text you see.")
+	if err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
+func (s *FileSystemServer) readPdf(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
+	}
+
+	pages, _ := args["pages"].(string)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	text, err := ml.ExtractPDF(ctx, path, pages)
 	if err != nil {
 		return "", err
 	}

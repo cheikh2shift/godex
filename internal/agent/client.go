@@ -341,6 +341,23 @@ func LaunchToolsInParallel(ctx context.Context, provider *config.Provider, toolC
 		}
 
 		resultPreview := resp.Result
+		toolName := toolCalls[i].Name
+
+		if toolName == "read_image" {
+			// Full output for read_image
+			resultPreview = resp.Result
+		} else if toolName == "read_pdf" {
+			// Truncate read_pdf but with higher limit
+			if len(resultPreview) > 5000 {
+				resultPreview = resultPreview[:5000] + "\n... (truncated)"
+			}
+		} else {
+			// Truncate other tools
+			if len(resultPreview) > 2500 {
+				resultPreview = resultPreview[:2500] + "\n... (truncated)"
+			}
+		}
+
 		if len(resultPreview) > 60 {
 			resultPreview = resultPreview[:60] + "..."
 		}

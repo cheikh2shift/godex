@@ -31,8 +31,8 @@ import (
 	"github.com/cheikh2shift/godex/internal/history"
 	"github.com/cheikh2shift/godex/internal/hive"
 	"github.com/cheikh2shift/godex/internal/mcp"
+	"github.com/cheikh2shift/godex/internal/ml"
 	"github.com/cheikh2shift/godex/internal/providers"
-	"github.com/cheikh2shift/godex/internal/vision"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
 )
@@ -195,8 +195,67 @@ func main() {
 		provider.LlamaServerURL = strings.TrimSpace(llamaServerURL)
 	}
 
-	if err := vision.EnsureRuntime(context.Background()); err != nil {
-		log.Printf("[Vision] Setup failed, continuing without vision: %v", err)
+	if cfg.VisionEnabled == nil {
+		fmt.Print("Enable vision features (image analysis)? (y/N): ")
+		var response string
+		fmt.Scanln(&response)
+		enabled := strings.ToLower(strings.TrimSpace(response)) == "y"
+		cfg.VisionEnabled = &enabled
+		if err := config.Save(configPath, cfg); err != nil {
+			log.Printf("failed to save vision preference: %v", err)
+		}
+	}
+
+	if cfg.VisionEnabled != nil && *cfg.VisionEnabled {
+		if !cfg.VisionCLIDownloaded {
+			fmt.Println("Vision/OCR requires Tesseract to be installed.")
+			fmt.Println("")
+
+			var installCmd string
+			switch runtime.GOOS {
+			case "darwin":
+				installCmd = "brew install tesseract"
+			case "linux":
+				installCmd = "sudo apt-get update && sudo apt-get install -y tesseract-ocr"
+			case "windows":
+				installCmd = "Download from: https://github.com/UB-Mannheim/tesseract/wiki"
+			default:
+				installCmd = "Install tesseract-ocr via your package manager"
+			}
+
+			fmt.Printf("To install, run:\n  %s\n", installCmd)
+			fmt.Println("")
+			fmt.Print("Install tesseract now? (y/N): ")
+
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(strings.TrimSpace(response)) == "y" {
+				cfg.VisionCLIDownloaded = true
+				if err := ml.DownloadVisionServer(context.Background()); err != nil {
+					log.Printf("[Vision] Setup failed: %v", err)
+					cfg.VisionCLIDownloaded = false
+				}
+				if err := config.Save(configPath, cfg); err != nil {
+					log.Printf("failed to save vision preference: %v", err)
+				}
+			} else {
+				fmt.Println("Vision disabled. You can enable it later in config.")
+				*cfg.VisionEnabled = false
+				if err := config.Save(configPath, cfg); err != nil {
+					log.Printf("failed to save vision preference: %v", err)
+				}
+			}
+		}
+
+		if cfg.VisionCLIDownloaded {
+			if err := ml.EnsureVisionModel(context.Background()); err != nil {
+				log.Printf("[Vision] Model setup failed: %v", err)
+			} else {
+				if err := ml.StartVisionServer(context.Background()); err != nil {
+					log.Printf("[Vision] Server start failed: %v", err)
+				}
+			}
+		}
 	}
 
 	llmProvider, err := agent.GetProvider(provider)
@@ -204,12 +263,20 @@ func main() {
 		log.Fatalf("failed to create provider: %v", err)
 	}
 	providers.DebugMode = debugMode
+	ml.DebugMode = debugMode
+	ml.PromptInstall = func(tool string) bool {
+		fmt.Printf("Tool '%s' is needed. Install now? (y/N): ", tool)
+		var response string
+		fmt.Scanln(&response)
+		return strings.ToLower(strings.TrimSpace(response)) == "y"
+	}
 
 	if provider == nil {
 		log.Fatalf("no provider configured; use --wizard to create one")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer ml.StopVisionServer()
 
 	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
 	statusCh := make(chan string, 8)
@@ -993,8 +1060,10 @@ promptLoop:
 						toolResults = append(toolResults, errMsg)
 						hasError = true
 					} else {
-						if toolName == "read_image" {
+						if toolName == "read_image" || toolName == "read_text" {
 							toolResults = append(toolResults, result)
+						} else if toolName == "read_pdf" {
+							toolResults = append(toolResults, truncate(result, 5000))
 						} else {
 							toolResults = append(toolResults, truncate(result, 2500))
 						}
@@ -1988,8 +2057,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					toolResults = append(toolResults, errMsg)
 					hasError = true
 				} else {
-					if toolName == "read_image" {
+					if toolName == "read_image" || toolName == "read_text" {
 						toolResults = append(toolResults, result)
+					} else if toolName == "read_pdf" {
+						toolResults = append(toolResults, truncate(result, 5000))
 					} else {
 						toolResults = append(toolResults, truncate(result, 2500))
 					}
@@ -2375,6 +2446,8 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 		} else {
 			if toolCalls[result.index]["name"].(string) == "read_image" {
 				results[result.index] = result.result
+			} else if toolCalls[result.index]["name"].(string) == "read_pdf" {
+				results[result.index] = truncate(result.result, 5000)
 			} else {
 				results[result.index] = truncate(result.result, 2500)
 			}

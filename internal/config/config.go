@@ -37,8 +37,10 @@ type Provider struct {
 
 // Config is a list of providers, with a default provider name for the CLI.
 type Config struct {
-	Providers       []Provider `yaml:"providers"`
-	DefaultProvider string     `yaml:"default_provider,omitempty"`
+	Providers           []Provider `yaml:"providers"`
+	DefaultProvider     string     `yaml:"default_provider,omitempty"`
+	VisionEnabled       *bool      `yaml:"vision_enabled,omitempty"`
+	VisionCLIDownloaded bool       `yaml:"vision_cli_downloaded,omitempty"`
 }
 
 // Load reads the YAML configuration from the provided path.
