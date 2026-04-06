@@ -1,3 +1,5 @@
+//go:build !linux || (linux && !noclipboard)
+
 package main
 
 import (
@@ -15,7 +17,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cheikh2shift/godex/internal/history"
 	"github.com/cheikh2shift/godex/internal/hive"
-	clipboard "golang.design/x/clipboard"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -472,9 +473,9 @@ func (m *promptModel) handlePaste(paste string) {
 }
 
 func (m *promptModel) handleImagePaste(_ string) (*promptModel, tea.Cmd) {
-	imgData := clipboard.Read(clipboard.FmtImage)
+	imgData := readClipboardImage()
 	if len(imgData) == 0 {
-		textData := clipboard.Read(clipboard.FmtText)
+		textData := readClipboardText()
 		if len(textData) > 0 {
 			m.handlePaste(string(textData))
 		}

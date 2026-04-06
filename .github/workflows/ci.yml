@@ -21,6 +21,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install X11 dev library
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+
       - name: Run unit tests
         run: go test -short ./...
 

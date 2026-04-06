@@ -1,3 +1,5 @@
+//go:build !linux || (linux && !noclipboard)
+
 package main
 
 import (
@@ -23,7 +25,6 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	clipboard "golang.design/x/clipboard"
 	"golang.org/x/term"
 
 	"github.com/cheikh2shift/godex/internal/agent"
@@ -37,6 +38,8 @@ import (
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
 )
+
+var clipboardAvailable = true
 
 const (
 	defaultConfigFile = "providers.yaml"
@@ -278,10 +281,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer ml.StopVisionServer()
-
-	if err := clipboard.Init(); err != nil {
-		log.Printf("[Clipboard] Warning: clipboard initialization failed: %v", err)
-	}
+	initClipboard()
 
 	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
 	statusCh := make(chan string, 8)
