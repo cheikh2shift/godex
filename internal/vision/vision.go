@@ -24,7 +24,7 @@ import (
 
 const (
 	wasmURL   = "https://raw.githubusercontent.com/cheikh2shift/godex/main/packaging/vision/vision.wasm"
-	modelURL  = "https://huggingface.co/onnxmodelzoo/efficientnet-lite4-11/resolve/main/model/efficientnet-lite4-11.onnx"
+	modelURL  = "https://huggingface.co/onnxmodelzoo/efficientnet-lite4-11/resolve/main/efficientnet-lite4-11.onnx"
 	labelsURL = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
 )
 
@@ -109,7 +109,7 @@ func requiredPaths() (runtimePaths, error) {
 	return runtimePaths{
 		BaseDir:    base,
 		WasmPath:   filepath.Join(base, "vision.wasm"),
-		ModelPath:  filepath.Join(base, "mobilenetv2-10.onnx"),
+		ModelPath:  filepath.Join(base, "efficientnet-lite4.onnx"),
 		LabelsPath: filepath.Join(base, "labels.json"),
 	}, nil
 }
