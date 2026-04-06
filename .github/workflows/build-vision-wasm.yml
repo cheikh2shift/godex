@@ -22,13 +22,13 @@ jobs:
         working-directory: packaging/vision
         run: |
           cargo build --release --target wasm32-wasip1
-          cp target/wasm32-wasip1/release/vision.wasm ../vision.wasm
+          cp target/wasm32-wasip1/release/vision.wasm ./vision.wasm
 
       - name: Commit vision.wasm
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          git add packaging/vision/vision.wasm
+          git add vision.wasm
           git add packaging/vision/README.md packaging/vision/Cargo.toml packaging/vision/src/main.rs
           if git diff --cached --quiet; then
             echo "No changes to commit"
