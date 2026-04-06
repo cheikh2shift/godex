@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
 use image::imageops::FilterType;
-use ndarray::Array4;
 use serde::Serialize;
 use std::env;
 use std::fs;
@@ -41,7 +40,7 @@ fn main() -> Result<()> {
         .into_optimized()?
         .into_runnable()?;
 
-    let result = model.run(tvec!(Tensor::from(input)))?;
+    let result = model.run(tvec!(input.into()))?;
     let scores = result[0].to_array_view::<f32>()?;
     let scores = scores.iter().cloned().collect::<Vec<f32>>();
 
@@ -81,7 +80,7 @@ fn load_labels<P: AsRef<Path>>(path: P) -> Result<Vec<String>> {
     Ok(labels)
 }
 
-fn load_image<P: AsRef<Path>>(path: P) -> Result<Array4<f32>> {
+fn load_image<P: AsRef<Path>>(path: P) -> Result<Tensor> {
     let img = image::open(&path).with_context(|| format!("failed to open image: {:?}", path.as_ref()))?;
     let img = img.to_rgb8();
     let img = image::imageops::resize(&img, INPUT_SIZE, INPUT_SIZE, FilterType::Triangle);
@@ -91,17 +90,26 @@ fn load_image<P: AsRef<Path>>(path: P) -> Result<Array4<f32>> {
         bail!("failed to resize image");
     }
 
-    let mut array = Array4::<f32>::zeros((1, 3, INPUT_SIZE as usize, INPUT_SIZE as usize));
+    let mut data = vec![0f32; 3 * INPUT_SIZE as usize * INPUT_SIZE as usize];
     for y in 0..INPUT_SIZE {
         for x in 0..INPUT_SIZE {
             let pixel = img.get_pixel(x, y);
-            let r = pixel[0] as f32 / 255.0;
-            let g = pixel[1] as f32 / 255.0;
-            let b = pixel[2] as f32 / 255.0;
-            array[[0, 0, y as usize, x as usize]] = r;
-            array[[0, 1, y as usize, x as usize]] = g;
-            array[[0, 2, y as usize, x as usize]] = b;
+            let idx = (0usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
+                + (y as usize * INPUT_SIZE as usize)
+                + (x as usize);
+            data[idx] = pixel[0] as f32 / 255.0;
+            let idx = (1usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
+                + (y as usize * INPUT_SIZE as usize)
+                + (x as usize);
+            data[idx] = pixel[1] as f32 / 255.0;
+            let idx = (2usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
+                + (y as usize * INPUT_SIZE as usize)
+                + (x as usize);
+            data[idx] = pixel[2] as f32 / 255.0;
         }
     }
-    Ok(array)
+
+    let tensor = Tensor::from_shape(&[1, 3, INPUT_SIZE as usize, INPUT_SIZE as usize], &data)
+        .context("failed to create tensor")?;
+    Ok(tensor)
 }
