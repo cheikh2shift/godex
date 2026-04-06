@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cheikh2shift/godex/internal/history"
 	"github.com/cheikh2shift/godex/internal/hive"
+	clipboard "golang.design/x/clipboard"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -256,6 +259,11 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.delegateLatest = msg.Latest
 		return m, waitDelegateCmd(m.delegateCh)
 	}
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		if msg.Type == tea.KeyCtrlV || (msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 22) {
+			return m.handleImagePaste("")
+		}
+	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = size.Width
 	}
@@ -461,6 +469,27 @@ func (m *promptModel) handlePaste(paste string) {
 	m.input.SetCursor(utf8.RuneCountInString(parts[len(parts)-1]))
 	m.multiline = true
 	m.updatePrompt()
+}
+
+func (m *promptModel) handleImagePaste(_ string) (*promptModel, tea.Cmd) {
+	imgData := clipboard.Read(clipboard.FmtImage)
+	if len(imgData) == 0 {
+		textData := clipboard.Read(clipboard.FmtText)
+		if len(textData) > 0 {
+			m.handlePaste(string(textData))
+		}
+		return m, nil
+	}
+
+	tmpDir := os.TempDir()
+	tmpFile := filepath.Join(tmpDir, "godex-paste-"+fmt.Sprintf("%d", time.Now().UnixNano())+".png")
+	err := os.WriteFile(tmpFile, imgData, 0644)
+	if err != nil {
+		return m, nil
+	}
+
+	m.insertAtCursor(tmpFile)
+	return m, nil
 }
 
 func (m *promptModel) insertAtCursor(s string) {

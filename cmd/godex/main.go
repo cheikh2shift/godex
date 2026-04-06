@@ -23,6 +23,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	clipboard "golang.design/x/clipboard"
 	"golang.org/x/term"
 
 	"github.com/cheikh2shift/godex/internal/agent"
@@ -277,6 +278,10 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer ml.StopVisionServer()
+
+	if err := clipboard.Init(); err != nil {
+		log.Printf("[Clipboard] Warning: clipboard initialization failed: %v", err)
+	}
 
 	servers, mcpLogs := initMCPServers(ctx, provider, autoConfirm)
 	statusCh := make(chan string, 8)
