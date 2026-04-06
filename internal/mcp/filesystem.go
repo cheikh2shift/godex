@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cheikh2shift/godex/internal/ocr"
 	"github.com/cheikh2shift/godex/internal/vision"
 )
 
@@ -48,8 +49,13 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 			},
 			{
 				Name:        "read_image",
-				Description: "Analyze an image locally and return a summary for the LLM. Optional prompt adds relevance.",
+				Description: "Analyze an image to classify what's in it (object, scene, etc.). Returns classification labels with confidence scores.",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"},"prompt":{"type":"string","description":"User prompt for relevance (optional)"}},"required":["path"]}`),
+			},
+			{
+				Name:        "read_text",
+				Description: "Extract text from an image using OCR. Use this when you need to read text, numbers, or written content from images.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the image file"}},"required":["path"]}`),
 			},
 			{
 				Name:        "write_file",
@@ -136,6 +142,8 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.readFile(arguments)
 	case "read_image":
 		return s.readImage(arguments)
+	case "read_text":
+		return s.readText(arguments)
 	case "write_file":
 		return s.writeFile(arguments)
 	case "list_directory":
@@ -234,6 +242,26 @@ func (s *FileSystemServer) readImage(args map[string]interface{}) (string, error
 		return "", err
 	}
 	return summary, nil
+}
+
+func (s *FileSystemServer) readText(args map[string]interface{}) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("path is required")
+	}
+
+	if err := s.checkAndMaybeAddPath(path); err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	text, err := ocr.ExtractText(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return text, nil
 }
 
 func (s *FileSystemServer) writeFile(args map[string]interface{}) (string, error) {
