@@ -7,7 +7,7 @@ This directory contains the Rust/WASI image analysis module used by GoDex for lo
 ```bash
 rustup target add wasm32-wasip1
 cargo build --release --target wasm32-wasip1
-cp target/wasm32-wasip1/release/vision.wasm ../vision.wasm
+cp target/wasm32-wasip1/release/vision.wasm ./vision.wasm
 ```
 
 ## Notes

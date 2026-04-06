@@ -97,15 +97,15 @@ fn load_image<P: AsRef<Path>>(path: P) -> Result<Tensor> {
             let idx = (0usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
                 + (y as usize * INPUT_SIZE as usize)
                 + (x as usize);
-            data[idx] = pixel[0] as f32 / 255.0;
+            data[idx] = (pixel[0] as f32 - 127.0) / 128.0;
             let idx = (1usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
                 + (y as usize * INPUT_SIZE as usize)
                 + (x as usize);
-            data[idx] = pixel[1] as f32 / 255.0;
+            data[idx] = (pixel[1] as f32 - 127.0) / 128.0;
             let idx = (2usize * INPUT_SIZE as usize * INPUT_SIZE as usize)
                 + (y as usize * INPUT_SIZE as usize)
                 + (x as usize);
-            data[idx] = pixel[2] as f32 / 255.0;
+            data[idx] = (pixel[2] as f32 - 127.0) / 128.0;
         }
     }
 

@@ -17,13 +17,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cheikh2shift/godex/internal/providers"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
 const (
 	wasmURL   = "https://raw.githubusercontent.com/cheikh2shift/godex/main/packaging/vision/vision.wasm"
-	modelURL  = "https://huggingface.co/webnn/mobilenet-v2/resolve/main/onnx/mobilenetv2-10.onnx"
+	modelURL  = "https://huggingface.co/onnxmodelzoo/efficientnet-lite4-11/resolve/main/model/efficientnet-lite4-11.onnx"
 	labelsURL = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
 )
 
@@ -80,9 +81,16 @@ func SummarizeImage(ctx context.Context, prompt, imagePath string) (string, erro
 	if err != nil {
 		return "", err
 	}
+	visionDebug("Inference result: primary=%s top5=%v", res.Primary, res.Top5)
 	stats, _ := computeStats(imagePath)
 	lines := buildSummaryLines(prompt, res, stats)
 	return strings.Join(lines, "\n"), nil
+}
+
+func visionDebug(format string, args ...interface{}) {
+	if providers.DebugMode {
+		fmt.Printf("[vision] "+format+"\n", args...)
+	}
 }
 
 type runtimePaths struct {
@@ -133,11 +141,20 @@ func ensureFile(ctx context.Context, path, url string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
+
+	size := resp.ContentLength
+	name := filepath.Base(path)
+	if size > 0 {
+		fmt.Printf("Downloading %s (%.1f MB)...\n", name, float64(size)/1e6)
+	}
+
+	_, err = io.Copy(out, &progressReader{body: resp.Body, size: size, name: name})
+	if err != nil {
 		out.Close()
 		_ = os.Remove(tmp)
 		return err
 	}
+	fmt.Printf("Downloaded %s\n", name)
 	out.Close()
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
@@ -146,16 +163,38 @@ func ensureFile(ctx context.Context, path, url string) error {
 	return nil
 }
 
+type progressReader struct {
+	body io.Reader
+	size int64
+	name string
+	last int64
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.body.Read(p)
+	r.last += int64(n)
+	if r.size > 0 && r.last > 0 {
+		pct := float64(r.last) / float64(r.size) * 100
+		if pct >= 100 {
+			pct = 100
+		}
+		fmt.Printf("\r  %s: %.1f%%", r.name, pct)
+	}
+	return n, err
+}
+
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
 }
 
 func runWasm(ctx context.Context, paths runtimePaths, imagePath string) (Summary, error) {
+	fmt.Printf("Loading vision.wasm...\n")
 	wasmBytes, err := os.ReadFile(paths.WasmPath)
 	if err != nil {
 		return Summary{}, err
 	}
+	fmt.Printf("Initializing Wasm runtime...\n")
 
 	r := wazero.NewRuntime(ctx)
 	defer r.Close(ctx)
@@ -176,6 +215,8 @@ func runWasm(ctx context.Context, paths runtimePaths, imagePath string) (Summary
 		"/model/" + filepath.Base(paths.ModelPath),
 		"/model/" + filepath.Base(paths.LabelsPath),
 	}
+
+	fmt.Printf("Running model inference on %s...\n", imageName)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -199,6 +240,7 @@ func runWasm(ctx context.Context, paths runtimePaths, imagePath string) (Summary
 		return Summary{}, fmt.Errorf("vision wasm invalid JSON: %w (out=%s)", err, out)
 	}
 
+	fmt.Printf("Inference complete.\n")
 	return Summary{Primary: parsed.Label, Top5: parsed.Top5}, nil
 }
 
