@@ -453,6 +453,10 @@ func (o *ollamaProvider) Close() error {
 	return nil
 }
 
+func (o *ollamaProvider) ConfigNeedsSave() bool {
+	return false
+}
+
 func (o *ollamaProvider) Tools() []Tool {
 	return nil
 }

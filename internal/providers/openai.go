@@ -5,13 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/modelquery"
 )
 
 const (
@@ -36,6 +40,8 @@ type openaiProvider struct {
 	baseURL          string
 	thinkCallback    func(string)
 	isCodex          bool
+	apiKey           string
+	clientID         string
 }
 
 func init() {
@@ -48,7 +54,9 @@ func newOpenAIProvider(cfg *config.Provider) (Provider, error) {
 		model = DefaultOpenAIModel
 	}
 
-	baseURL := strings.TrimSuffix(cfg.Endpoint, "/")
+	userEndpoint := strings.TrimSuffix(cfg.Endpoint, "/")
+
+	baseURL := userEndpoint
 	if baseURL == "" {
 		baseURL = PlatformBaseURL
 	}
@@ -58,19 +66,28 @@ func newOpenAIProvider(cfg *config.Provider) (Provider, error) {
 		return nil, err
 	}
 
-	isCodex := isCodexToken(apiKey)
-	if isCodex {
-		baseURL = CodexBaseURL
+	isCodex := false
+	if userEndpoint == "" {
+		isCodex = isCodexToken(apiKey)
+		if isCodex {
+			baseURL = CodexBaseURL
+		}
+	} else if userEndpoint == CodexBaseURL {
+		isCodex = true
 	}
+
+	contextLimit := modelquery.GetModelContextLimit(model)
 
 	p := &openaiProvider{
 		client:       &http.Client{Timeout: 120 * time.Second},
 		cfg:          cfg,
 		model:        model,
 		temperature:  cfg.Temperature,
-		contextLimit: 128000,
+		contextLimit: contextLimit,
 		baseURL:      baseURL,
 		isCodex:      isCodex,
+		apiKey:       apiKey,
+		clientID:     "app_EMoamEEZ73f0CkXaXp7hrann",
 	}
 
 	return p, nil
@@ -159,7 +176,10 @@ func (o *openaiProvider) Send(ctx context.Context, prompt string) (string, error
 		jsonBody, _ = json.Marshal(body)
 		endpoint = o.baseURL + "/responses"
 
-		apiKey, _ := resolveOpenAIAPIKey(o.cfg)
+		apiKey, err := o.getAPIKey()
+		if err != nil {
+			return "", err
+		}
 		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(jsonBody)))
 		if err != nil {
 			return "", err
@@ -176,8 +196,13 @@ func (o *openaiProvider) Send(ctx context.Context, prompt string) (string, error
 		}
 		defer resp.Body.Close()
 
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if DebugMode {
+			log.Printf("[OpenAI Codex] Raw response: %s", string(bodyBytes))
+		}
+
 		var response map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if err := json.Unmarshal(bodyBytes, &response); err != nil {
 			return "", err
 		}
 
@@ -202,12 +227,16 @@ func (o *openaiProvider) Send(ctx context.Context, prompt string) (string, error
 
 	jsonBody, _ = json.Marshal(body)
 	endpoint = o.baseURL + "/chat/completions"
+
+	apiKey, err := o.getAPIKey()
+	if err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(jsonBody)))
 	if err != nil {
 		return "", err
 	}
 
-	apiKey, _ := resolveOpenAIAPIKey(o.cfg)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
@@ -217,8 +246,13 @@ func (o *openaiProvider) Send(ctx context.Context, prompt string) (string, error
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if DebugMode {
+		log.Printf("[OpenAI] Raw response: %s", string(bodyBytes))
+	}
+
 	var response map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := json.Unmarshal(bodyBytes, &response); err != nil {
 		return "", err
 	}
 
@@ -515,4 +549,88 @@ func (o *openaiProvider) parseCodexResponse(response map[string]interface{}) (st
 	}
 
 	return content, nil
+}
+
+func (o *openaiProvider) refreshTokenIfNeeded() error {
+	if o.cfg.RefreshToken == "" {
+		return nil
+	}
+
+	if o.cfg.TokenExpiresAt != nil {
+		refreshBuffer := 5 * time.Minute
+		if time.Now().Add(refreshBuffer).Before(*o.cfg.TokenExpiresAt) {
+			return nil
+		}
+	} else if o.apiKey != "" {
+		return nil
+	}
+
+	refreshToken := o.cfg.RefreshToken
+	if refreshToken == "" {
+		return fmt.Errorf("no refresh token available")
+	}
+
+	clientID := o.clientID
+	if clientID == "" {
+		clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	}
+
+	reqBody := url.Values{}
+	reqBody.Set("grant_type", "refresh_token")
+	reqBody.Set("client_id", clientID)
+	reqBody.Set("refresh_token", refreshToken)
+
+	req, err := http.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(reqBody.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("token refresh failed: HTTP %d - %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("failed to parse refresh response: %w", err)
+	}
+
+	if result.AccessToken == "" {
+		return fmt.Errorf("no access token in refresh response")
+	}
+
+	o.mu.Lock()
+	o.apiKey = result.AccessToken
+	if result.RefreshToken != "" {
+		o.cfg.RefreshToken = result.RefreshToken
+	}
+	if result.ExpiresIn > 0 {
+		expiresAt := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+		o.cfg.TokenExpiresAt = &expiresAt
+	}
+	o.mu.Unlock()
+
+	return nil
+}
+
+func (o *openaiProvider) getAPIKey() (string, error) {
+	if err := o.refreshTokenIfNeeded(); err != nil {
+		return "", err
+	}
+	return o.apiKey, nil
+}
+
+func (o *openaiProvider) ConfigNeedsSave() bool {
+	return o.cfg.RefreshToken != "" && o.cfg.TokenExpiresAt != nil
 }

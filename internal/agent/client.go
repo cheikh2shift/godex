@@ -19,7 +19,36 @@ var (
 	providerCacheMu sync.Mutex
 	mcpExecutors    = map[string]*mcp.MCPToolExecutor{}
 	mcpExecutorsMu  sync.Mutex
+	configPath      string
 )
+
+func SetConfigPath(path string) {
+	configPath = path
+}
+
+func CheckAndSaveProviderConfig(p providers.Provider, cfg *config.Provider) {
+	if p == nil || cfg == nil {
+		return
+	}
+	if p.ConfigNeedsSave() {
+		loadedCfg, err := config.Load(configPath)
+		if err != nil {
+			log.Printf("failed to load config for save: %v", err)
+			return
+		}
+		for i := range loadedCfg.Providers {
+			if loadedCfg.Providers[i].Name == cfg.Name && loadedCfg.Providers[i].Type == cfg.Type {
+				loadedCfg.Providers[i].RefreshToken = cfg.RefreshToken
+				loadedCfg.Providers[i].TokenExpiresAt = cfg.TokenExpiresAt
+				loadedCfg.Providers[i].APIKey = cfg.APIKey
+				break
+			}
+		}
+		if err := config.Save(configPath, loadedCfg); err != nil {
+			log.Printf("failed to save refreshed token: %v", err)
+		}
+	}
+}
 
 type SendResult struct {
 	Content   string
@@ -55,6 +84,7 @@ func SendPrompt(ctx context.Context, provider *config.Provider, prompt string) (
 	if err != nil {
 		return "", err
 	}
+	CheckAndSaveProviderConfig(p, provider)
 	return strings.TrimSpace(resp), nil
 }
 
@@ -76,6 +106,7 @@ func SendPromptWithThink(ctx context.Context, provider *config.Provider, prompt 
 	if err != nil {
 		return "", err
 	}
+	CheckAndSaveProviderConfig(p, provider)
 	return strings.TrimSpace(resp), nil
 }
 

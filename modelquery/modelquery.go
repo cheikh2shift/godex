@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -256,31 +258,68 @@ func listOpenAIModels(ctx context.Context, p Provider) ([]Model, error) {
 		if m.Object != "model" {
 			continue
 		}
+		contextLen := fetchModelContextLimit(ctx, p.APIKey, endpoint, m.ID)
 		models = append(models, Model{
 			ID:          m.ID,
 			Name:        m.ID,
 			Description: "Owned by: " + m.OwnedBy,
-			ContextLen:  128000,
+			ContextLen:  contextLen,
 		})
 	}
 
 	return models, nil
 }
 
-func getCodexModels() []Model {
-	return []Model{
-		{ID: "gpt-5.4", Name: "gpt-5.4", Description: "Flagship frontier model for professional work", ContextLen: 200000},
-		{ID: "gpt-5.4-mini", Name: "gpt-5.4-mini", Description: "Fast, efficient mini model for responsive coding", ContextLen: 200000},
-		{ID: "gpt-5.3-codex", Name: "gpt-5.3-codex", Description: "Industry-leading coding model", ContextLen: 200000},
-		{ID: "gpt-5.3-codex-spark", Name: "gpt-5.3-codex-spark", Description: "Text-only research preview for real-time coding", ContextLen: 200000},
-		{ID: "gpt-5.2-codex", Name: "gpt-5.2-codex", Description: "Advanced coding model for real-world engineering", ContextLen: 200000},
-		{ID: "gpt-5.2", Name: "gpt-5.2", Description: "Previous general-purpose model for coding and agentic tasks", ContextLen: 200000},
-		{ID: "gpt-5.1-codex-max", Name: "gpt-5.1-codex-max", Description: "Optimized for long-horizon, agentic coding tasks", ContextLen: 200000},
-		{ID: "gpt-5.1", Name: "gpt-5.1", Description: "Great for coding and agentic tasks across domains", ContextLen: 200000},
-		{ID: "gpt-5.1-codex", Name: "gpt-5.1-codex", Description: "Optimized for long-running, agentic coding tasks", ContextLen: 200000},
-		{ID: "gpt-5-codex", Name: "gpt-5-codex", Description: "Version tuned for long-running, agentic coding tasks", ContextLen: 200000},
-		{ID: "gpt-5", Name: "gpt-5", Description: "Reasoning model for coding and agentic tasks", ContextLen: 200000},
+func fetchModelContextLimit(ctx context.Context, apiKey, baseURL, modelID string) int {
+	modelName := modelID
+	if idx := strings.Index(modelID, "-"); idx > 0 {
+		modelName = modelID[:idx]
 	}
+	if !strings.HasPrefix(modelID, "gpt-") && !strings.HasPrefix(modelID, "o") {
+		modelName = modelID
+	}
+
+	url := fmt.Sprintf("https://platform.openai.com/docs/models/%s", modelName)
+	data, err := doRequest(ctx, "GET", url, "", nil)
+	if err != nil {
+		return getDefaultContextLimit(modelID)
+	}
+
+	re := regexp.MustCompile(`(\d{1,3}(?:,\d{3})*|\d+)\s*[Kk]\s*context\s*window`)
+	matches := re.FindStringSubmatch(string(data))
+	if len(matches) >= 2 {
+		contextStr := strings.ReplaceAll(matches[1], ",", "")
+		if val, err := strconv.Atoi(contextStr); err == nil {
+			return val * 1000
+		}
+	}
+
+	return getDefaultContextLimit(modelID)
+}
+
+func getCodexModels() []Model {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models := []Model{
+		{ID: "gpt-5.4", Name: "gpt-5.4", Description: "Flagship frontier model for professional work"},
+		{ID: "gpt-5.4-mini", Name: "gpt-5.4-mini", Description: "Fast, efficient mini model for responsive coding"},
+		{ID: "gpt-5.3-codex", Name: "gpt-5.3-codex", Description: "Industry-leading coding model"},
+		{ID: "gpt-5.3-codex-spark", Name: "gpt-5.3-codex-spark", Description: "Text-only research preview for real-time coding"},
+		{ID: "gpt-5.2-codex", Name: "gpt-5.2-codex", Description: "Advanced coding model for real-world engineering"},
+		{ID: "gpt-5.2", Name: "gpt-5.2", Description: "Previous general-purpose model for coding and agentic tasks"},
+		{ID: "gpt-5.1-codex-max", Name: "gpt-5.1-codex-max", Description: "Optimized for long-horizon, agentic coding tasks"},
+		{ID: "gpt-5.1", Name: "gpt-5.1", Description: "Great for coding and agentic tasks across domains"},
+		{ID: "gpt-5.1-codex", Name: "gpt-5.1-codex", Description: "Optimized for long-running, agentic coding tasks"},
+		{ID: "gpt-5-codex", Name: "gpt-5-codex", Description: "Version tuned for long-running, agentic coding tasks"},
+		{ID: "gpt-5", Name: "gpt-5", Description: "Reasoning model for coding and agentic tasks"},
+	}
+
+	for i := range models {
+		models[i].ContextLen = fetchModelContextLimit(ctx, "", "", models[i].ID)
+	}
+
+	return models
 }
 
 func isCodexToken(apiKey string) bool {
@@ -313,4 +352,41 @@ func decodeJWTPayload(payload string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+func GetModelContextLimit(model string) int {
+	return getDefaultContextLimit(model)
+}
+
+func getDefaultContextLimit(model string) int {
+	limits := map[string]int{
+		"gpt-5.4":             200000,
+		"gpt-5.4-mini":        200000,
+		"gpt-5.3-codex":       200000,
+		"gpt-5.3-codex-spark": 128000,
+		"gpt-5.2-codex":       200000,
+		"gpt-5.2":             128000,
+		"gpt-5.1-codex-max":   1000000,
+		"gpt-5.1-codex":       200000,
+		"gpt-5.1":             128000,
+		"gpt-5-codex":         128000,
+		"gpt-5":               128000,
+		"gpt-4o":              128000,
+		"gpt-4o-mini":         128000,
+		"gpt-4":               32000,
+		"gpt-4-turbo":         128000,
+		"gpt-3.5-turbo":       16385,
+		"o1":                  200000,
+		"o1-mini":             128000,
+		"o1-preview":          128000,
+		"o3":                  200000,
+		"o3-mini":             200000,
+		"o4-mini":             128000,
+	}
+
+	if limit, ok := limits[model]; ok {
+		return limit
+	}
+
+	return 128000
 }

@@ -139,6 +139,10 @@ func (h *huggingfaceProvider) Close() error {
 	return nil
 }
 
+func (h *huggingfaceProvider) ConfigNeedsSave() bool {
+	return false
+}
+
 func (h *huggingfaceProvider) Tools() []Tool {
 	return nil
 }

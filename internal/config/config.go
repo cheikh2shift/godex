@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,6 +27,8 @@ type Provider struct {
 	Description    string            `yaml:"description,omitempty"`
 	APIKey         string            `yaml:"api_key,omitempty"`
 	APIKeyEnv      string            `yaml:"api_key_env,omitempty"`
+	RefreshToken   string            `yaml:"refresh_token,omitempty"`
+	TokenExpiresAt *time.Time        `yaml:"token_expires_at,omitempty"`
 	Temperature    *float64          `yaml:"temperature,omitempty"`
 	MaxToolRounds  *int              `yaml:"max_tool_rounds,omitempty"`
 	ToolTimeout    *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180

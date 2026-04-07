@@ -38,6 +38,7 @@ type Provider interface {
 	SupportsNativeToolCalls() bool
 	SetStatusChannel(chan<- string)
 	SetModel(model string, contextLimit int) error
+	ConfigNeedsSave() bool
 }
 
 type factory func(cfg *config.Provider) (Provider, error)

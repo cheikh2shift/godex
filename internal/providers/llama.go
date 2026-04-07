@@ -1235,6 +1235,10 @@ func (p *llamaProvider) Close() error {
 	return nil
 }
 
+func (p *llamaProvider) ConfigNeedsSave() bool {
+	return false
+}
+
 func (p *llamaProvider) Tools() []Tool {
 	return nil
 }

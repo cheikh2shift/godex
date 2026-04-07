@@ -171,6 +171,8 @@ func main() {
 		log.Fatalf("unable to load config: %v", err)
 	}
 
+	agent.SetConfigPath(configPath)
+
 	if len(cfg.Providers) == 0 {
 		fmt.Println("No providers configured. Launching wizard...")
 		if err := wizard.RunWizard(configPath); err != nil {

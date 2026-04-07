@@ -170,12 +170,15 @@ func RunWizard(destination string) error {
 			{label: "env", desc: "Use OPENAI_API_KEY from environment"},
 		}, "oauth")
 		if authMethod == "oauth" {
-			apiKey, err := doOpenAIOAuth()
+			authResult, err := doOpenAIOAuth()
 			if err != nil {
 				fmt.Printf("OAuth failed: %v. Falling back to manual entry.\n", err)
 				provider.APIKey, _ = prompt(reader, "OpenAI API key", "")
 			} else {
-				provider.APIKey = apiKey
+				provider.APIKey = authResult.AccessToken
+				provider.RefreshToken = authResult.RefreshToken
+				expiresAt := time.Now().Add(time.Duration(authResult.ExpiresIn) * time.Second)
+				provider.TokenExpiresAt = &expiresAt
 				fmt.Println("Successfully authenticated with OpenAI!")
 			}
 		} else if authMethod == "manual" {
@@ -707,7 +710,7 @@ func exchangeCodeForKey(code, codeVerifier string) (string, error) {
 	return result.Key, nil
 }
 
-func doOpenAIOAuth() (string, error) {
+func doOpenAIOAuth() (*openAIAuthResult, error) {
 	codeVerifier := generateCodeVerifier(64)
 	codeChallenge := generateCodeChallenge(codeVerifier)
 	state := generateState()
@@ -736,23 +739,30 @@ func doOpenAIOAuth() (string, error) {
 	fmt.Printf("  If browser doesn't open, visit:\n  %s\n\n", authURL)
 
 	if err := openBrowser(authURL); err != nil {
-		return "", fmt.Errorf("failed to open browser: %w", err)
+		return nil, fmt.Errorf("failed to open browser: %w", err)
 	}
 
 	code := waitForCallback(port, 5*time.Minute)
 	if code == "" {
-		return "", fmt.Errorf("OAuth timeout - no callback received")
+		return nil, fmt.Errorf("OAuth timeout - no callback received")
 	}
 
-	apiKey, err := exchangeCodeForOpenAIKey(code, codeVerifier, callbackURL, clientID)
+	authResult, err := exchangeCodeForOpenAIKey(code, codeVerifier, callbackURL, clientID)
 	if err != nil {
-		return "", fmt.Errorf("failed to exchange code: %w", err)
+		return nil, fmt.Errorf("failed to exchange code: %w", err)
 	}
 
-	return apiKey, nil
+	return authResult, nil
 }
 
-func exchangeCodeForOpenAIKey(code, codeVerifier, redirectURI, clientID string) (string, error) {
+type openAIAuthResult struct {
+	AccessToken   string
+	RefreshToken  string
+	ExpiresIn     int
+	TokenEndpoint string
+}
+
+func exchangeCodeForOpenAIKey(code, codeVerifier, redirectURI, clientID string) (*openAIAuthResult, error) {
 	reqBody := url.Values{}
 	reqBody.Set("grant_type", "authorization_code")
 	reqBody.Set("client_id", clientID)
@@ -762,34 +772,91 @@ func exchangeCodeForOpenAIKey(code, codeVerifier, redirectURI, clientID string) 
 
 	req, err := http.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(reqBody.Encode()))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("auth failed: HTTP %d - %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("auth failed: HTTP %d - %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		ExpiresIn    int    `json:"expires_in"`
+		AccessToken   string `json:"access_token"`
+		RefreshToken  string `json:"refresh_token"`
+		ExpiresIn     int    `json:"expires_in"`
+		TokenEndpoint string `json:"token_endpoint,omitempty"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w - body: %s", err, string(body))
+		return nil, fmt.Errorf("failed to parse response: %w - body: %s", err, string(body))
 	}
 
 	if result.AccessToken == "" {
-		return "", fmt.Errorf("no access token in response")
+		return nil, fmt.Errorf("no access token in response")
 	}
 
-	return result.AccessToken, nil
+	return &openAIAuthResult{
+		AccessToken:   result.AccessToken,
+		RefreshToken:  result.RefreshToken,
+		ExpiresIn:     result.ExpiresIn,
+		TokenEndpoint: result.TokenEndpoint,
+	}, nil
+}
+
+func refreshOpenAIToken(refreshToken, clientID string) (*openAIAuthResult, error) {
+	reqBody := url.Values{}
+	reqBody.Set("grant_type", "refresh_token")
+	reqBody.Set("client_id", clientID)
+	reqBody.Set("refresh_token", refreshToken)
+
+	req, err := http.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(reqBody.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("refresh failed: HTTP %d - %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		AccessToken   string `json:"access_token"`
+		RefreshToken  string `json:"refresh_token"`
+		ExpiresIn     int    `json:"expires_in"`
+		TokenEndpoint string `json:"token_endpoint,omitempty"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if result.AccessToken == "" {
+		return nil, fmt.Errorf("no access token in response")
+	}
+
+	newRefreshToken := refreshToken
+	if result.RefreshToken != "" {
+		newRefreshToken = result.RefreshToken
+	}
+
+	return &openAIAuthResult{
+		AccessToken:   result.AccessToken,
+		RefreshToken:  newRefreshToken,
+		ExpiresIn:     result.ExpiresIn,
+		TokenEndpoint: result.TokenEndpoint,
+	}, nil
 }

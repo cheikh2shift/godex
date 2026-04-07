@@ -480,6 +480,10 @@ func (p *openRouterProvider) Close() error {
 	return nil
 }
 
+func (p *openRouterProvider) ConfigNeedsSave() bool {
+	return false
+}
+
 func (p *openRouterProvider) ContextLimit() int {
 	return p.contextLimit
 }

@@ -159,6 +159,10 @@ func (g *geminiProvider) Close() error {
 	return nil
 }
 
+func (g *geminiProvider) ConfigNeedsSave() bool {
+	return false
+}
+
 func (g *geminiProvider) Tools() []Tool {
 	return nil
 }
