@@ -219,6 +219,7 @@ func TestProviderTypes(t *testing.T) {
 		{ProviderOpenRouter, "openrouter"},
 		{ProviderGemini, "gemini"},
 		{ProviderHuggingFace, "huggingface"},
+		{ProviderOpenAI, "openai"},
 	}
 
 	for _, tt := range tests {

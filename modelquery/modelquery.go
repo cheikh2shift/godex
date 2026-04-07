@@ -4,11 +4,19 @@ package modelquery
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+)
+
+const (
+	PlatformBaseURL = "https://api.openai.com/v1"
+	CodexBaseURL    = "https://chatgpt.com/backend-api"
 )
 
 // ProviderType represents the type of LLM provider.
@@ -19,6 +27,7 @@ const (
 	ProviderOpenRouter  ProviderType = "openrouter"
 	ProviderGemini      ProviderType = "gemini"
 	ProviderHuggingFace ProviderType = "huggingface"
+	ProviderOpenAI      ProviderType = "openai"
 )
 
 // Model represents a machine learning model with its metadata.
@@ -62,6 +71,8 @@ func ListModelsWithQuery(ctx context.Context, p Provider, query string) ([]Model
 		return listGeminiModels(ctx, p)
 	case ProviderHuggingFace:
 		return listHuggingFaceModels(ctx, p, query)
+	case ProviderOpenAI:
+		return listOpenAIModels(ctx, p)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", p.Type)
 	}
@@ -98,6 +109,12 @@ func SearchModelsWithQuery(ctx context.Context, p Provider, query string) ([]Mod
 		return filterModels(models, query), nil
 	case ProviderHuggingFace:
 		return listHuggingFaceModels(ctx, p, query)
+	case ProviderOpenAI:
+		models, err := listOpenAIModels(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return filterModels(models, query), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", p.Type)
 	}
@@ -201,4 +218,99 @@ func addParams(baseURL string, params map[string]string) string {
 		values.Set(k, v)
 	}
 	return baseURL + "?" + values.Encode()
+}
+
+func listOpenAIModels(ctx context.Context, p Provider) ([]Model, error) {
+	isCodex := isCodexToken(p.APIKey)
+
+	if isCodex {
+		return getCodexModels(), nil
+	}
+
+	endpoint := p.Endpoint
+	if endpoint == "" {
+		endpoint = PlatformBaseURL
+	}
+	endpoint = strings.TrimSuffix(endpoint, "/")
+
+	data, err := doRequest(ctx, "GET", endpoint+"/models", p.APIKey, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created int64  `json:"created"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, err
+	}
+
+	var models []Model
+	for _, m := range response.Data {
+		if m.Object != "model" {
+			continue
+		}
+		models = append(models, Model{
+			ID:          m.ID,
+			Name:        m.ID,
+			Description: "Owned by: " + m.OwnedBy,
+			ContextLen:  128000,
+		})
+	}
+
+	return models, nil
+}
+
+func getCodexModels() []Model {
+	return []Model{
+		{ID: "gpt-5.4", Name: "gpt-5.4", Description: "Flagship frontier model for professional work", ContextLen: 200000},
+		{ID: "gpt-5.4-mini", Name: "gpt-5.4-mini", Description: "Fast, efficient mini model for responsive coding", ContextLen: 200000},
+		{ID: "gpt-5.3-codex", Name: "gpt-5.3-codex", Description: "Industry-leading coding model", ContextLen: 200000},
+		{ID: "gpt-5.3-codex-spark", Name: "gpt-5.3-codex-spark", Description: "Text-only research preview for real-time coding", ContextLen: 200000},
+		{ID: "gpt-5.2-codex", Name: "gpt-5.2-codex", Description: "Advanced coding model for real-world engineering", ContextLen: 200000},
+		{ID: "gpt-5.2", Name: "gpt-5.2", Description: "Previous general-purpose model for coding and agentic tasks", ContextLen: 200000},
+		{ID: "gpt-5.1-codex-max", Name: "gpt-5.1-codex-max", Description: "Optimized for long-horizon, agentic coding tasks", ContextLen: 200000},
+		{ID: "gpt-5.1", Name: "gpt-5.1", Description: "Great for coding and agentic tasks across domains", ContextLen: 200000},
+		{ID: "gpt-5.1-codex", Name: "gpt-5.1-codex", Description: "Optimized for long-running, agentic coding tasks", ContextLen: 200000},
+		{ID: "gpt-5-codex", Name: "gpt-5-codex", Description: "Version tuned for long-running, agentic coding tasks", ContextLen: 200000},
+		{ID: "gpt-5", Name: "gpt-5", Description: "Reasoning model for coding and agentic tasks", ContextLen: 200000},
+	}
+}
+
+func isCodexToken(apiKey string) bool {
+	if apiKey == "" {
+		return false
+	}
+	// Codex OAuth tokens are JWTs starting with "eyJ"
+	if !strings.HasPrefix(apiKey, "eyJ") {
+		return false
+	}
+	parts := strings.Split(apiKey, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	decoded, err := decodeJWTPayload(parts[1])
+	if err != nil {
+		// If decode fails but it's a JWT, assume it's Codex OAuth
+		return true
+	}
+	return decoded != nil && decoded["https://api.openai.com/auth"] != nil
+}
+
+func decodeJWTPayload(payload string) (map[string]interface{}, error) {
+	decoded := make([]byte, len(payload))
+	if _, err := base64.RawURLEncoding.Decode(decoded, []byte(payload)); err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(decoded, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }

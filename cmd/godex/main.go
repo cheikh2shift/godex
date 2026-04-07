@@ -1620,9 +1620,14 @@ func getBgCount(servers []MCPServer) int {
 }
 
 func buildMQProvider(provider *config.Provider) modelquery.Provider {
+	apiKey := provider.APIKey
+	if apiKey == "" && provider.APIKeyEnv != "" {
+		apiKey = os.Getenv(provider.APIKeyEnv)
+	}
+
 	mqProvider := modelquery.Provider{
 		Endpoint: provider.Endpoint,
-		APIKey:   provider.APIKey,
+		APIKey:   apiKey,
 	}
 	switch provider.Type {
 	case "ollama":
@@ -1633,6 +1638,8 @@ func buildMQProvider(provider *config.Provider) modelquery.Provider {
 		mqProvider.Type = modelquery.ProviderGemini
 	case "openrouter":
 		mqProvider.Type = modelquery.ProviderOpenRouter
+	case "openai":
+		mqProvider.Type = modelquery.ProviderOpenAI
 	default:
 		fmt.Println("[Model] Unknown provider type")
 	}

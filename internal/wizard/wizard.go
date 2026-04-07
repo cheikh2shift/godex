@@ -107,6 +107,7 @@ func RunWizard(destination string) error {
 		{label: "llama", desc: "LLM via llama.cpp (local, no server needed)"},
 		{label: "gemini", desc: "Google Gemini API"},
 		{label: "openrouter", desc: "OpenRouter (OpenAI, Anthropic, Meta models)"},
+		{label: "openai", desc: "OpenAI API (GPT models)"},
 	}, getDefault("type", "ollama"), true)
 	if err != nil || providerType == "" {
 		fmt.Println("\nSetup cancelled.")
@@ -162,6 +163,27 @@ func RunWizard(destination string) error {
 			fmt.Printf("Warning: %v\n", err)
 			fmt.Println("You can still configure the provider, but it may not work until llama-server is available.")
 		}
+	} else if provider.Type == "openai" {
+		authMethod, _ := selectPrompt("OpenAI authentication", []selectOption{
+			{label: "oauth", desc: "Login via browser (OAuth PKCE) - opens browser"},
+			{label: "manual", desc: "Enter API key manually"},
+			{label: "env", desc: "Use OPENAI_API_KEY from environment"},
+		}, "oauth")
+		if authMethod == "oauth" {
+			apiKey, err := doOpenAIOAuth()
+			if err != nil {
+				fmt.Printf("OAuth failed: %v. Falling back to manual entry.\n", err)
+				provider.APIKey, _ = prompt(reader, "OpenAI API key", "")
+			} else {
+				provider.APIKey = apiKey
+				fmt.Println("Successfully authenticated with OpenAI!")
+			}
+		} else if authMethod == "manual" {
+			provider.APIKey, _ = prompt(reader, "OpenAI API key", "")
+		} else if authMethod == "env" {
+			provider.APIKeyEnv, _ = prompt(reader, "API key environment variable", getDefault("api_key_env", "OPENAI_API_KEY"))
+		}
+		provider.Endpoint, _ = prompt(reader, "OpenAI base URL", getDefault("endpoint", "https://api.openai.com/v1"))
 	}
 
 	modelDefault := providers.DefaultGeminiModel
@@ -171,6 +193,8 @@ func RunWizard(destination string) error {
 		modelDefault = "Qwen/Qwen2.5-3B-Instruct-GGUF"
 	} else if provider.Type == "openrouter" {
 		modelDefault = "moonshotai/kimi-k2.5"
+	} else if provider.Type == "openai" {
+		modelDefault = "gpt-5.4"
 	}
 
 	mqProvider := modelquery.Provider{}
@@ -183,9 +207,14 @@ func RunWizard(destination string) error {
 		mqProvider.Type = modelquery.ProviderGemini
 	case "openrouter":
 		mqProvider.Type = modelquery.ProviderOpenRouter
+	case "openai":
+		mqProvider.Type = modelquery.ProviderOpenAI
 	}
 	mqProvider.Endpoint = provider.Endpoint
 	mqProvider.APIKey = provider.APIKey
+	if mqProvider.APIKey == "" && provider.APIKeyEnv != "" {
+		mqProvider.APIKey = os.Getenv(provider.APIKeyEnv)
+	}
 
 	modelID, _ := ModelSelectPrompt(mqProvider, getDefault("model", modelDefault))
 	provider.Model = modelID
@@ -568,6 +597,12 @@ func generateCodeChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
+func generateState() string {
+	bytes := make([]byte, 32)
+	rand.Read(bytes)
+	return base64.RawURLEncoding.EncodeToString(bytes)
+}
+
 func openBrowser(urlStr string) error {
 	switch runtime.GOOS {
 	case "darwin":
@@ -670,4 +705,91 @@ func exchangeCodeForKey(code, codeVerifier string) (string, error) {
 	}
 
 	return result.Key, nil
+}
+
+func doOpenAIOAuth() (string, error) {
+	codeVerifier := generateCodeVerifier(64)
+	codeChallenge := generateCodeChallenge(codeVerifier)
+	state := generateState()
+
+	port := 1455
+	callbackURL := fmt.Sprintf("http://localhost:%d/auth/callback", port)
+
+	clientID := "app_EMoamEEZ73f0CkXaXp7hrann"
+	authURL := fmt.Sprintf("https://auth.openai.com/oauth/authorize?"+
+		"response_type=code"+
+		"&client_id=%s"+
+		"&redirect_uri=%s"+
+		"&scope=openid profile email offline_access"+
+		"&code_challenge=%s"+
+		"&code_challenge_method=S256"+
+		"&state=%s"+
+		"&id_token_add_organizations=true"+
+		"&codex_cli_simplified_flow=true"+
+		"&originator=codex_cli_rs",
+		url.QueryEscape(clientID),
+		url.QueryEscape(callbackURL),
+		url.QueryEscape(codeChallenge),
+		url.QueryEscape(state))
+
+	fmt.Printf("\n  Opening browser for OAuth login (ChatGPT/Codex)...\n")
+	fmt.Printf("  If browser doesn't open, visit:\n  %s\n\n", authURL)
+
+	if err := openBrowser(authURL); err != nil {
+		return "", fmt.Errorf("failed to open browser: %w", err)
+	}
+
+	code := waitForCallback(port, 5*time.Minute)
+	if code == "" {
+		return "", fmt.Errorf("OAuth timeout - no callback received")
+	}
+
+	apiKey, err := exchangeCodeForOpenAIKey(code, codeVerifier, callbackURL, clientID)
+	if err != nil {
+		return "", fmt.Errorf("failed to exchange code: %w", err)
+	}
+
+	return apiKey, nil
+}
+
+func exchangeCodeForOpenAIKey(code, codeVerifier, redirectURI, clientID string) (string, error) {
+	reqBody := url.Values{}
+	reqBody.Set("grant_type", "authorization_code")
+	reqBody.Set("client_id", clientID)
+	reqBody.Set("code", code)
+	reqBody.Set("code_verifier", codeVerifier)
+	reqBody.Set("redirect_uri", redirectURI)
+
+	req, err := http.NewRequest("POST", "https://auth.openai.com/oauth/token", strings.NewReader(reqBody.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("auth failed: HTTP %d - %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w - body: %s", err, string(body))
+	}
+
+	if result.AccessToken == "" {
+		return "", fmt.Errorf("no access token in response")
+	}
+
+	return result.AccessToken, nil
 }
