@@ -41,5 +41,8 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install X11 dev library
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+
       - name: Run integration tests
         run: go test -v -short=false ./... -run "Integration" -timeout=10m
