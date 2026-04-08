@@ -262,7 +262,8 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		if msg.Type == tea.KeyCtrlV || (msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 22) {
-			return m.handleImagePaste("")
+			m, cmd := m.handleImagePaste("")
+			return m, cmd
 		}
 	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {

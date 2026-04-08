@@ -248,3 +248,43 @@ internal/
 ```bash
 go build -o godex ./cmd/godex
 ```
+
+## OpenAI Provider
+
+### WebSocket Support
+
+The OpenAI provider uses WebSocket by default for the `responses` API, with automatic HTTP fallback if WebSocket fails.
+
+**Struct fields:**
+
+```go
+type openaiProvider struct {
+    client           *http.Client
+    cfg              *config.Provider
+    model            string
+    temperature      *float64
+    mu               sync.Mutex
+    cancelFunc       context.CancelFunc
+    cancelGen        uint64
+    contextLimit     int
+    promptTokens     int
+    completionTokens int
+    messages         []Message
+    statusCh         chan<- string
+    baseURL          string
+    thinkCallback    func(string)
+    isCodex          bool
+    apiKey           string
+    clientID         string
+    wsConn           *websocket.Conn      // WebSocket connection
+    wsMu             sync.Mutex           // Mutex for WebSocket
+    responseID       string                // previous_response_id for incremental对话
+}
+```
+
+**Endpoints:**
+
+- Codex: `wss://chatgpt.com/backend-api/responses`
+- Platform: `wss://api.openai.com/v1/responses`
+
+**HTTP fallback:** If WebSocket connection fails, the provider automatically falls back to HTTP.

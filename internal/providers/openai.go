@@ -16,12 +16,15 @@ import (
 
 	"github.com/cheikh2shift/godex/internal/config"
 	"github.com/cheikh2shift/godex/modelquery"
+	"github.com/gorilla/websocket"
 )
 
 const (
 	DefaultOpenAIModel = "gpt-5.4"
 	CodexBaseURL       = "https://chatgpt.com/backend-api"
 	PlatformBaseURL    = "https://api.openai.com/v1"
+	CodexWSBaseURL     = "wss://chatgpt.com/backend-api"
+	PlatformWSBaseURL  = "wss://api.openai.com/v1"
 )
 
 type openaiProvider struct {
@@ -42,6 +45,9 @@ type openaiProvider struct {
 	isCodex          bool
 	apiKey           string
 	clientID         string
+	wsConn           *websocket.Conn
+	wsMu             sync.Mutex
+	responseID       string
 }
 
 func init() {
@@ -163,178 +169,15 @@ func (o *openaiProvider) Send(ctx context.Context, prompt string) (string, error
 
 	messages := buildOpenAIMessages(history, prompt)
 
-	var jsonBody []byte
-	var endpoint string
-
-	if o.isCodex {
-		accountID := o.extractAccountID()
-		body := map[string]interface{}{
-			"model":    o.model,
-			"messages": messages,
-			"store":    false,
-		}
-		jsonBody, _ = json.Marshal(body)
-		endpoint = o.baseURL + "/responses"
-
-		apiKey, err := o.getAPIKey()
-		if err != nil {
-			return "", err
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(jsonBody)))
-		if err != nil {
-			return "", err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		if accountID != "" {
-			req.Header.Set("chatgpt-account-id", accountID)
-		}
-
-		resp, err := o.client.Do(req)
-		if err != nil {
-			return "", err
-		}
-		defer resp.Body.Close()
-
-		bodyBytes, _ := io.ReadAll(resp.Body)
+	result, err := o.sendWebSocketMessage(ctx, messages)
+	if err != nil {
 		if DebugMode {
-			log.Printf("[OpenAI Codex] Raw response: %s", string(bodyBytes))
+			log.Printf("[OpenAI] WebSocket failed, falling back to HTTP: %v", err)
 		}
-
-		var response map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &response); err != nil {
-			return "", err
-		}
-
-		if resp.StatusCode != 200 {
-			errMsg := "unknown error"
-			if err, ok := response["error"].(map[string]interface{}); ok {
-				if msg, ok := err["message"].(string); ok {
-					errMsg = msg
-				}
-			}
-			return "", fmt.Errorf("Codex API error: %s", errMsg)
-		}
-
-		return o.parseCodexResponse(response)
+		return o.sendHTTPMessage(ctx, messages)
 	}
 
-	body := map[string]interface{}{
-		"model":       o.model,
-		"messages":    messages,
-		"temperature": o.temperature,
-	}
-
-	jsonBody, _ = json.Marshal(body)
-	endpoint = o.baseURL + "/chat/completions"
-
-	apiKey, err := o.getAPIKey()
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(jsonBody)))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	if DebugMode {
-		log.Printf("[OpenAI] Raw response: %s", string(bodyBytes))
-	}
-
-	var response map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &response); err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != 200 {
-		errMsg := "unknown error"
-		if err, ok := response["error"].(map[string]interface{}); ok {
-			if msg, ok := err["message"].(string); ok {
-				errMsg = msg
-			}
-		}
-		return "", fmt.Errorf("OpenAI API error: %s", errMsg)
-	}
-
-	choices, ok := response["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return "", fmt.Errorf("no response from OpenAI")
-	}
-
-	firstChoice, ok := choices[0].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("invalid response choice")
-	}
-
-	msg, ok := firstChoice["message"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("invalid message in response")
-	}
-
-	var content string
-	var reasoningContent string
-
-	if contentVal, ok := msg["content"].(string); ok {
-		content = contentVal
-	} else if contentArr, ok := msg["content"].([]interface{}); ok {
-		var textParts []string
-		for _, c := range contentArr {
-			ci, ok := c.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			ct, _ := ci["type"].(string)
-			if ct == "output_text" || ct == "text" {
-				if txt, ok := ci["text"].(string); ok {
-					textParts = append(textParts, txt)
-				}
-			} else if ct == "reasoning" {
-				if txt, ok := ci["text"].(string); ok {
-					reasoningContent = txt
-				}
-			}
-		}
-		content = strings.Join(textParts, "")
-	}
-
-	if reasoningContent == "" {
-		if reasoning, ok := msg["reasoning"].(string); ok {
-			reasoningContent = reasoning
-		}
-	}
-
-	o.mu.Lock()
-	hasThink := o.thinkCallback != nil
-	o.mu.Unlock()
-
-	if hasThink && reasoningContent != "" {
-		o.mu.Lock()
-		o.thinkCallback(reasoningContent)
-		o.mu.Unlock()
-	}
-
-	if usage, ok := response["usage"].(map[string]interface{}); ok {
-		o.mu.Lock()
-		if promptTokens, ok := usage["prompt_tokens"].(float64); ok {
-			o.promptTokens += int(promptTokens)
-		}
-		if completionTokens, ok := usage["completion_tokens"].(float64); ok {
-			o.completionTokens += int(completionTokens)
-		}
-		o.mu.Unlock()
-	}
-
-	return content, nil
+	return result, nil
 }
 
 func buildOpenAIMessages(history []Message, prompt string) []map[string]interface{} {
@@ -629,6 +472,272 @@ func (o *openaiProvider) getAPIKey() (string, error) {
 		return "", err
 	}
 	return o.apiKey, nil
+}
+
+func (o *openaiProvider) getWSBaseURL() string {
+	if o.isCodex {
+		return CodexWSBaseURL + "/responses"
+	}
+	return PlatformWSBaseURL + "/responses"
+}
+
+func (o *openaiProvider) connectWebSocket(ctx context.Context) error {
+	wsURL := o.getWSBaseURL()
+	if DebugMode {
+		log.Printf("[OpenAI] Connecting to WebSocket: %s", wsURL)
+	}
+
+	apiKey, err := o.getAPIKey()
+	if err != nil {
+		return err
+	}
+
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+apiKey)
+	if o.isCodex {
+		accountID := o.extractAccountID()
+		if accountID != "" {
+			header.Set("chatgpt-account-id", accountID)
+		}
+	}
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 30 * time.Second,
+	}
+
+	conn, resp, err := dialer.DialContext(ctx, wsURL, header)
+	if err != nil {
+		return fmt.Errorf("websocket dial failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 101 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("websocket upgrade failed: HTTP %d - %s", resp.StatusCode, string(body))
+	}
+
+	o.wsMu.Lock()
+	o.wsConn = conn
+	o.responseID = ""
+	o.wsMu.Unlock()
+
+	if DebugMode {
+		log.Printf("[OpenAI] WebSocket connected successfully")
+	}
+	return nil
+}
+
+func (o *openaiProvider) ensureWebSocket(ctx context.Context) error {
+	o.wsMu.Lock()
+	conn := o.wsConn
+	o.wsMu.Unlock()
+
+	if conn != nil {
+		return nil
+	}
+
+	if err := o.connectWebSocket(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (o *openaiProvider) closeWebSocket() {
+	o.wsMu.Lock()
+	defer o.wsMu.Unlock()
+	if o.wsConn != nil {
+		o.wsConn.Close()
+		o.wsConn = nil
+	}
+	o.responseID = ""
+}
+
+func (o *openaiProvider) sendWebSocketMessage(ctx context.Context, messages []map[string]interface{}) (string, error) {
+	if err := o.ensureWebSocket(ctx); err != nil {
+		return "", err
+	}
+
+	o.wsMu.Lock()
+	conn := o.wsConn
+	o.wsMu.Unlock()
+
+	body := map[string]interface{}{
+		"model":    o.model,
+		"messages": messages,
+		"store":    false,
+	}
+
+	o.wsMu.Lock()
+	if o.responseID != "" {
+		body["previous_response_id"] = o.responseID
+	}
+	o.wsMu.Unlock()
+
+	if DebugMode {
+		log.Printf("[OpenAI WS] Sending message")
+	}
+
+	err := conn.WriteJSON(body)
+	if err != nil {
+		o.closeWebSocket()
+		return "", fmt.Errorf("websocket write failed: %w", err)
+	}
+
+	var fullResponse string
+
+	for {
+		var msg map[string]interface{}
+		err := conn.ReadJSON(&msg)
+		if err != nil {
+			o.closeWebSocket()
+			if DebugMode {
+				log.Printf("[OpenAI WS] Connection closed: %v", err)
+			}
+			return fullResponse, fmt.Errorf("websocket read failed: %w", err)
+		}
+
+		if DebugMode {
+			log.Printf("[OpenAI WS] Received: %v", msg)
+		}
+
+		msgType, _ := msg["type"].(string)
+
+		if msgType == "response.created" {
+			if resp, ok := msg["response"].(map[string]interface{}); ok {
+				if id, ok := resp["id"].(string); ok {
+					o.wsMu.Lock()
+					o.responseID = id
+					o.wsMu.Unlock()
+				}
+			}
+		} else if msgType == "response.output_text" {
+			if output, ok := msg["output"].(map[string]interface{}); ok {
+				if text, ok := output["text"].(string); ok {
+					fullResponse += text
+				}
+			}
+		} else if msgType == "response.done" {
+			break
+		} else if msgType == "error" {
+			errMsg := "unknown error"
+			if errObj, ok := msg["error"].(map[string]interface{}); ok {
+				if m, ok := errObj["message"].(string); ok {
+					errMsg = m
+				}
+			}
+			if strings.Contains(errMsg, "previous_response_not_found") {
+				o.wsMu.Lock()
+				o.responseID = ""
+				o.wsMu.Unlock()
+				continue
+			}
+			return fullResponse, fmt.Errorf("websocket error: %s", errMsg)
+		}
+	}
+
+	return fullResponse, nil
+}
+
+func (o *openaiProvider) sendHTTPMessage(ctx context.Context, messages []map[string]interface{}) (string, error) {
+	accountID := ""
+	if o.isCodex {
+		accountID = o.extractAccountID()
+	}
+
+	body := map[string]interface{}{
+		"model":    o.model,
+		"messages": messages,
+		"store":    false,
+	}
+	if o.temperature != nil {
+		body["temperature"] = *o.temperature
+	}
+
+	jsonBody, _ := json.Marshal(body)
+	endpoint := o.baseURL + "/responses"
+
+	apiKey, err := o.getAPIKey()
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if accountID != "" {
+		req.Header.Set("chatgpt-account-id", accountID)
+	}
+
+	resp, err := o.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if DebugMode {
+		log.Printf("[OpenAI] Raw response: %s", string(bodyBytes))
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &response); err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != 200 {
+		errMsg := "unknown error"
+		if err, ok := response["error"].(map[string]interface{}); ok {
+			if msg, ok := err["message"].(string); ok {
+				errMsg = msg
+			}
+		}
+		return "", fmt.Errorf("OpenAI API error: %s", errMsg)
+	}
+
+	if o.isCodex {
+		return o.parseCodexResponse(response)
+	}
+
+	choices, ok := response["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return "", fmt.Errorf("no response from OpenAI")
+	}
+
+	firstChoice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid response choice")
+	}
+
+	msg, ok := firstChoice["message"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("invalid message in response")
+	}
+
+	var content string
+
+	if contentVal, ok := msg["content"].(string); ok {
+		content = contentVal
+	} else if contentArr, ok := msg["content"].([]interface{}); ok {
+		var textParts []string
+		for _, c := range contentArr {
+			ci, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			ct, _ := ci["type"].(string)
+			if ct == "output_text" || ct == "text" {
+				if txt, ok := ci["text"].(string); ok {
+					textParts = append(textParts, txt)
+				}
+			}
+		}
+		content = strings.Join(textParts, "")
+	}
+
+	return content, nil
 }
 
 func (o *openaiProvider) ConfigNeedsSave() bool {
