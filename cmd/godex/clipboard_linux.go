@@ -3,12 +3,30 @@
 
 package main
 
-func initClipboard() {}
+import (
+	"log"
 
-func readClipboardImage() []byte {
-	return nil
+	clipboard "golang.design/x/clipboard"
+)
+
+func initClipboard() {
+	if err := clipboard.Init(); err != nil {
+		log.Printf("[Clipboard] Error: %v", err)
+	}
 }
 
 func readClipboardText() []byte {
-	return nil
+	data := clipboard.Read(clipboard.FmtText)
+	if len(data) > 0 {
+		log.Printf("[Clipboard] read %d bytes", len(data))
+	}
+	return data
+}
+
+func readClipboardImage() []byte {
+	return clipboard.Read(clipboard.FmtImage)
+}
+
+func readClipboardImagePath() string {
+	return ""
 }

@@ -10,7 +10,7 @@ import (
 
 func initClipboard() {
 	if err := clipboard.Init(); err != nil {
-		log.Printf("[Clipboard] Warning: clipboard initialization failed: %v", err)
+		log.Printf("[Clipboard] Error: %v", err)
 	}
 }
 
