@@ -1,0 +1,130 @@
+rules:
+- id: go-exec-command-with-variable
+  languages: [go]
+  message: "Dynamic command execution: review use of variable input in os/exec."
+  severity: WARNING
+  patterns:
+  - pattern: exec.Command($CMD, ...).Run()
+  - metavariable-pattern:
+      metavariable: $CMD
+      pattern: $X
+  metadata:
+    category: security
+    confidence: medium
+    likelihood: medium
+    impact: high
+
+- id: go-exec-commandcontext-with-variable
+  languages: [go]
+  message: "Dynamic command execution: review use of variable input in os/exec."
+  severity: WARNING
+  patterns:
+  - pattern: exec.CommandContext($CTX, $CMD, ...).Run()
+  - metavariable-pattern:
+      metavariable: $CMD
+      pattern: $X
+  metadata:
+    category: security
+    confidence: medium
+    likelihood: medium
+    impact: high
+
+- id: go-http-get-variable-url
+  languages: [go]
+  message: "External HTTP call with variable URL: ensure destination is trusted/validated."
+  severity: INFO
+  patterns:
+  - pattern: http.Get($URL)
+  - metavariable-pattern:
+      metavariable: $URL
+      pattern: $X
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: medium
+
+- id: go-http-post-variable-url
+  languages: [go]
+  message: "External HTTP call with variable URL: ensure destination is trusted/validated."
+  severity: INFO
+  patterns:
+  - pattern: http.Post($URL, ..., ...)
+  - metavariable-pattern:
+      metavariable: $URL
+      pattern: $X
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: medium
+
+- id: go-http-newrequest-variable-url
+  languages: [go]
+  message: "External HTTP call with variable URL: ensure destination is trusted/validated."
+  severity: INFO
+  patterns:
+  - pattern: http.NewRequest($METHOD, $URL, ...)
+  - metavariable-pattern:
+      metavariable: $URL
+      pattern: $X
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: medium
+
+- id: go-http-newrequestcontext-variable-url
+  languages: [go]
+  message: "External HTTP call with variable URL: ensure destination is trusted/validated."
+  severity: INFO
+  patterns:
+  - pattern: http.NewRequestWithContext($CTX, $METHOD, $URL, ...)
+  - metavariable-pattern:
+      metavariable: $URL
+      pattern: $X
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: medium
+
+- id: go-grpc-dial-variable-target
+  languages: [go]
+  message: "External gRPC connection with variable target: ensure destination is trusted/validated."
+  severity: INFO
+  patterns:
+  - pattern: grpc.Dial($TARGET, ...)
+  - metavariable-pattern:
+      metavariable: $TARGET
+      pattern: $X
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: medium
+
+- id: go-http-literal-url-not-allowlisted
+  languages: [go]
+  message: "External HTTP call to non-allowlisted URL literal. If intentional, add to allowlist."
+  severity: WARNING
+  paths:
+    include:
+    - internal/providers/
+    - modelquery/
+    exclude:
+    - "**/*_test.go"
+  patterns:
+  - pattern-either:
+    - pattern: http.Get($URL)
+    - pattern: http.Post($URL, ..., ...)
+    - pattern: http.NewRequest($METHOD, $URL, ...)
+    - pattern: http.NewRequestWithContext($CTX, $METHOD, $URL, ...)
+  - metavariable-regex:
+      metavariable: $URL
+      regex: "\"https?://(?!localhost(?::\\d+)?/|127\\.0\\.0\\.1(?::\\d+)?/|openrouter\\.ai/|router\\.huggingface\\.co/|huggingface\\.co/|ollama\\.com/|generativelanguage\\.googleapis\\.com/|api\\.github\\.com/|github\\.com/)[^\"]+\""
+  metadata:
+    category: security
+    confidence: medium
+    likelihood: medium
+    impact: medium
