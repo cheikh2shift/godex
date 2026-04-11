@@ -128,3 +128,159 @@ rules:
     confidence: medium
     likelihood: medium
     impact: medium
+
+- id: go-exec-shell-interpreter
+  languages: [go]
+  message: "Shell interpreter execution (bash/sh/cmd/powershell). Review for abuse of command interpreters."
+  severity: WARNING
+  pattern-either:
+  - pattern: exec.Command("sh", "-c", ...)
+  - pattern: exec.Command("bash", "-c", ...)
+  - pattern: exec.Command("cmd", "/c", ...)
+  - pattern: exec.Command("powershell", ...)
+  - pattern: exec.Command("pwsh", ...)
+  metadata:
+    category: security
+    confidence: medium
+    likelihood: medium
+    impact: high
+
+- id: go-exec-shell-download
+  languages: [go]
+  message: "Shell command includes common download utilities (curl/wget/etc). Review for ingress tool transfer."
+  severity: WARNING
+  patterns:
+  - pattern: exec.Command($SHELL, $FLAG, $CMD)
+  - metavariable-regex:
+      metavariable: $SHELL
+      regex: "\"(sh|bash|cmd|powershell|pwsh)\""
+  - metavariable-regex:
+      metavariable: $FLAG
+      regex: "\"(-c|/c)\""
+  - metavariable-regex:
+      metavariable: $CMD
+      regex: "\".*(curl|wget|Invoke-WebRequest|iwr|certutil|bitsadmin).*\""
+  metadata:
+    category: security
+    confidence: medium
+    likelihood: medium
+    impact: high
+
+- id: go-write-then-exec
+  languages: [go]
+  message: "Writes a file and executes it in the same function. Review for dropper behavior."
+  severity: WARNING
+  patterns:
+  - pattern-inside: |
+      func $F(...) {
+        ...
+      }
+  - pattern-either:
+    - pattern: os.WriteFile($PATH, ..., ...)
+    - pattern: ioutil.WriteFile($PATH, ..., ...)
+  - pattern: exec.Command($PATH, ...)
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
+
+- id: go-base64-decode-then-exec
+  languages: [go]
+  message: "Base64 decode combined with command execution in the same function. Review for encoded payload execution."
+  severity: WARNING
+  patterns:
+  - pattern-inside: |
+      func $F(...) {
+        ...
+      }
+  - pattern-either:
+    - pattern: base64.StdEncoding.DecodeString(...)
+    - pattern: base64.URLEncoding.DecodeString(...)
+    - pattern: base64.RawStdEncoding.DecodeString(...)
+    - pattern: base64.RawURLEncoding.DecodeString(...)
+  - pattern-either:
+    - pattern: exec.Command("sh", "-c", ...)
+    - pattern: exec.Command("bash", "-c", ...)
+    - pattern: exec.Command("cmd", "/c", ...)
+    - pattern: exec.Command("powershell", ...)
+    - pattern: exec.Command("pwsh", ...)
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
+
+- id: go-suspicious-persistence-path
+  languages: [go]
+  message: "Writes to common persistence locations (cron/systemd/LaunchAgents/Startup). Review for persistence."
+  severity: WARNING
+  patterns:
+  - pattern-either:
+    - pattern: os.WriteFile($PATH, ..., ...)
+    - pattern: ioutil.WriteFile($PATH, ..., ...)
+    - pattern: os.Create($PATH)
+  - metavariable-regex:
+      metavariable: $PATH
+      regex: "\"(/etc/cron|/etc/systemd/system|/etc/init\\.d|/Library/LaunchAgents|/Library/LaunchDaemons|/Users/[^/]+/Library/LaunchAgents|/Users/[^/]+/Library/LaunchDaemons|/home/[^/]+/\\.config/systemd/user|/home/[^/]+/\\.config/autostart|C:\\\\\\\\Users\\\\\\\\[^\\\\\\\\]+\\\\\\\\AppData\\\\\\\\Roaming\\\\\\\\Microsoft\\\\\\\\Windows\\\\\\\\Start Menu\\\\\\\\Programs\\\\\\\\Startup).*\""
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
+
+- id: go-suspicious-cron-install
+  languages: [go]
+  message: "Uses cron/systemctl/launchctl to install persistence. Review for malicious persistence."
+  severity: WARNING
+  pattern-either:
+  - pattern: exec.Command("crontab", ...)
+  - pattern: exec.Command("systemctl", "enable", ...)
+  - pattern: exec.Command("systemctl", "start", ...)
+  - pattern: exec.Command("launchctl", "load", ...)
+  - pattern: exec.Command("launchctl", "bootstrap", ...)
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
+
+- id: go-registry-run-key
+  languages: [go]
+  message: "Modifies Windows Run/RunOnce registry keys. Review for persistence."
+  severity: WARNING
+  patterns:
+  - pattern-inside: |
+      func $F(...) {
+        ...
+      }
+  - pattern: registry.OpenKey(..., $PATH, ...)
+  - metavariable-regex:
+      metavariable: $PATH
+      regex: ".*Run(Once)?"
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
+
+- id: go-netcat-like-shell
+  languages: [go]
+  message: "Spawns shell and attaches to network connection. Review for reverse shell behavior."
+  severity: WARNING
+  patterns:
+  - pattern-inside: |
+      func $F(...) {
+        ...
+      }
+  - pattern: net.Dial(...)
+  - pattern-either:
+    - pattern: exec.Command("sh", "-c", ...)
+    - pattern: exec.Command("bash", "-c", ...)
+    - pattern: exec.Command("cmd", "/c", ...)
+    - pattern: exec.Command("powershell", ...)
+  metadata:
+    category: security
+    confidence: low
+    likelihood: medium
+    impact: high
