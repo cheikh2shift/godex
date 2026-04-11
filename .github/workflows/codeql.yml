@@ -42,9 +42,17 @@ jobs:
       run: |
         set -euo pipefail
         export CGO_ENABLED=0
+        pkgs=$(go list ./...)
         for GOOS in linux windows darwin; do
           echo "Building for $GOOS..."
-          GOOS=$GOOS GOARCH=amd64 go test ./...
+          if [ "$GOOS" = "linux" ]; then
+            GOOS=$GOOS GOARCH=amd64 go test ./...
+            continue
+          fi
+          for pkg in $pkgs; do
+            out="/tmp/$(echo "$pkg" | tr '/' '_').test"
+            GOOS=$GOOS GOARCH=amd64 go test -c -o "$out" "$pkg"
+          done
         done
 
     - name: Perform CodeQL Analysis
