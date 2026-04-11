@@ -13,33 +13,6 @@ import (
 	"time"
 )
 
-func TestParseModelContextFromName(t *testing.T) {
-	tests := []struct {
-		model    string
-		expected int
-	}{
-		{"qwen2.5-coder:3b", 8192},
-		{"qwen2.5:7b", 8192},
-		{"llama3:8b", 8192},
-		{"mistral:7b", 32768},
-		{"mixtral:8x7b", 32768},
-		{"codellama:34b", 16384},
-		{"phi3:14b", 4096},
-		{"gemma:7b", 8192},
-		{"deepseek-coder:33b", 16384},
-		{"unknown-model", 4096},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.model, func(t *testing.T) {
-			result := parseModelContext(tt.model)
-			if result != tt.expected {
-				t.Errorf("parseModelContext(%q) = %d, want %d", tt.model, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestResolveModelPathLocal(t *testing.T) {
 	tests := []struct {
 		model    string
@@ -222,29 +195,6 @@ func TestGetQuantizationDescription(t *testing.T) {
 				t.Errorf("GetQuantizationDescription(%q) = %q, want %q", tt.quant, result, tt.expected)
 			}
 		})
-	}
-}
-
-func TestModelDownloadURLIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	quants, err := GetGGUFQuantizations(ctx, "Qwen/Qwen2.5-3B-Instruct-GGUF")
-	if err != nil {
-		t.Skipf("could not fetch quantizations: %v", err)
-	}
-
-	if len(quants) == 0 {
-		t.Fatal("expected at least one quantization")
-	}
-
-	t.Logf("Found %d quantizations for Qwen/Qwen2.5-3B-Instruct-GGUF:", len(quants))
-	for _, q := range quants[:min(5, len(quants))] {
-		t.Logf("  - %s", q)
 	}
 }
 

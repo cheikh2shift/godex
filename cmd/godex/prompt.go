@@ -635,13 +635,6 @@ func promptTruncateRunes(s string, max int) string {
 	return string(runes[:max-3]) + "..."
 }
 
-func promptFormatCommitDate(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("2006-01-02 15:04")
-}
-
 func commonPrefix(values []string) string {
 	if len(values) == 0 {
 		return ""

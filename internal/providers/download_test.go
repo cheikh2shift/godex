@@ -63,24 +63,6 @@ func TestGetDownloadURL(t *testing.T) {
 	}
 }
 
-func TestGetGGUFQuantizations(t *testing.T) {
-	ctx := context.Background()
-
-	quants, err := GetGGUFQuantizations(ctx, "Qwen/Qwen2.5-3B-Instruct-GGUF")
-	if err != nil {
-		t.Fatalf("Failed to get quantizations: %v", err)
-	}
-
-	if len(quants) == 0 {
-		t.Fatal("Expected quantizations, got none")
-	}
-
-	t.Logf("Found %d quantizations:", len(quants))
-	for _, q := range quants {
-		t.Logf("  - %s", q)
-	}
-}
-
 func TestResolveModelPathWithDownload(t *testing.T) {
 	t.Skip("Skipping download test - requires user input for quantization selection")
 }

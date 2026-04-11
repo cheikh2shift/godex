@@ -137,13 +137,6 @@ func (m *MCPToolExecutor) buildArgs() []string {
 	return nil
 }
 
-func (m *MCPToolExecutor) buildTransport() string {
-	if m.server.Transport == "stdio" {
-		return "stdio"
-	}
-	return "stdio"
-}
-
 func listTools(ctx context.Context, mcpClient *client.Client) ([]Tool, error) {
 	result, err := mcpClient.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {

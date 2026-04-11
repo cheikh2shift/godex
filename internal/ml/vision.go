@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -192,18 +191,6 @@ func StopVisionServer() {
 
 func StartVisionServer(ctx context.Context) error {
 	return EnsureOCR(ctx)
-}
-
-func checkServerHealth(url string) bool {
-	return false
-}
-
-func getGodexBinDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".godex", "bin"), nil
 }
 
 func DownloadVisionServer(ctx context.Context) error {

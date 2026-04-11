@@ -23,7 +23,3 @@ func readClipboardText() []byte {
 func readClipboardImage() []byte {
 	return clipboard.Read(clipboard.FmtImage)
 }
-
-func readClipboardImagePath() string {
-	return ""
-}

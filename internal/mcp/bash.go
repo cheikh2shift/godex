@@ -17,10 +17,6 @@ import (
 	"time"
 )
 
-func GetWorkingDir() (string, error) {
-	return os.Getwd()
-}
-
 var runCmdMu sync.Mutex
 
 // Job represents a running background job managed by a goroutine

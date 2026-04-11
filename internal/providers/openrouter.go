@@ -334,21 +334,6 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	return "", lastErr
 }
 
-// extractUserInput extracts the actual user input from the full prompt
-// by finding "User request:" or "User asked:" and returning everything after it
-func extractUserInput(prompt string) string {
-	// Try to find "User request:" first (new format)
-	if idx := strings.Index(prompt, "User request:"); idx != -1 {
-		return strings.TrimSpace(prompt[idx+len("User request:"):])
-	}
-	// Fall back to "User asked:" (follow-up format)
-	if idx := strings.Index(prompt, "User asked:"); idx != -1 {
-		return strings.TrimSpace(prompt[idx+len("User asked:"):])
-	}
-	// Fall back to returning the whole prompt if markers not found
-	return prompt
-}
-
 func buildResponsesInput(messages []map[string]interface{}) []map[string]interface{} {
 	input := make([]map[string]interface{}, 0, len(messages))
 	for _, msg := range messages {
@@ -571,19 +556,6 @@ func (p *openRouterProvider) SetStatusChannel(ch chan<- string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.statusCh = ch
-}
-
-func (p *openRouterProvider) sendStatus(msg string) {
-	p.mu.Lock()
-	ch := p.statusCh
-	p.mu.Unlock()
-	if ch == nil {
-		return
-	}
-	select {
-	case ch <- msg:
-	default:
-	}
 }
 
 func pickMessageContent(content, reasoning string, details []reasoningDetail) string {

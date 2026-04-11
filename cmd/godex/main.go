@@ -1225,10 +1225,6 @@ func (m *mcpLog) Printf(format string, args ...interface{}) {
 	m.lines = append(m.lines, fmt.Sprintf(format, args...))
 }
 
-func (m *mcpLog) Print(args ...interface{}) {
-	m.lines = append(m.lines, fmt.Sprint(args...))
-}
-
 func (m *mcpLog) Println(args ...interface{}) {
 	m.lines = append(m.lines, fmt.Sprint(args...))
 }
@@ -2239,68 +2235,6 @@ func formatElapsed(totalSeconds int) string {
 		return fmt.Sprintf("%dm%02d", minutes, seconds)
 	}
 	return fmt.Sprintf("%ds", totalSeconds)
-}
-
-func parseToolCall(text string) (string, string, map[string]interface{}, bool) {
-	text = strings.TrimSpace(text)
-
-	if strings.HasPrefix(text, "{") {
-		var toolData map[string]interface{}
-		if err := json.Unmarshal([]byte(text), &toolData); err == nil {
-			if name, ok := toolData["name"].(string); ok {
-				args := make(map[string]interface{})
-				if toolArgs, ok := toolData["arguments"].(map[string]interface{}); ok {
-					args = toolArgs
-				} else if toolArgs, ok := toolData["args"].(map[string]interface{}); ok {
-					args = toolArgs
-				}
-				return name, name, args, true
-			}
-		}
-	}
-
-	lines := strings.Split(text, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "call:") || strings.HasPrefix(lower, "tool_call:") || strings.HasPrefix(lower, "execute:") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			toolPart := strings.TrimSpace(parts[1])
-			name := ""
-			args := make(map[string]interface{})
-			if idx := strings.Index(toolPart, "("); idx > 0 {
-				name = strings.TrimSpace(toolPart[:idx])
-				argsStr := strings.Trim(toolPart[idx:], "()")
-				args = parseArgs(argsStr)
-			}
-			if name != "" {
-				return name, name, args, true
-			}
-		}
-	}
-
-	return "", "", nil, false
-}
-
-func parseArgs(argsStr string) map[string]interface{} {
-	args := make(map[string]interface{})
-	if argsStr == "" {
-		return args
-	}
-	parts := strings.Split(argsStr, ",")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if idx := strings.Index(part, "="); idx > 0 {
-			key := strings.TrimSpace(part[:idx])
-			value := strings.TrimSpace(part[idx+1:])
-			value = strings.Trim(value, "\"'")
-			args[key] = value
-		}
-	}
-	return args
 }
 
 func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {

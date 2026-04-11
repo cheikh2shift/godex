@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -94,43 +93,6 @@ type DownloadProgress struct {
 	Downloaded int64
 	Total      int64
 	Filename   string
-}
-
-func DownloadProgressCallback(progress chan<- DownloadProgress) func(bytesRead int64, contentLength int64, done bool) {
-	return func(bytesRead int64, contentLength int64, done bool) {
-		if progress != nil {
-			progress <- DownloadProgress{
-				Downloaded: bytesRead,
-				Total:      contentLength,
-			}
-		}
-	}
-}
-
-func GetGGUFQuantizations(ctx context.Context, modelID string) ([]string, error) {
-	files, err := getGGUFFiles(ctx, modelID)
-	if err != nil {
-		return nil, err
-	}
-
-	quants := make(map[string]string)
-	quantRe := regexp.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
-
-	for _, f := range files {
-		matches := quantRe.FindStringSubmatch(f)
-		if len(matches) >= 2 {
-			quant := matches[1]
-			if _, exists := quants[quant]; !exists {
-				quants[quant] = f
-			}
-		}
-	}
-
-	result := make([]string, 0, len(quants))
-	for q := range quants {
-		result = append(result, q)
-	}
-	return result, nil
 }
 
 var quantOrder = map[string]int{
