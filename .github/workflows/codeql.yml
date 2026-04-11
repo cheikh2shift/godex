@@ -63,7 +63,7 @@ jobs:
     - name: Semgrep scan
       uses: docker://semgrep/semgrep
       with:
-        args: semgrep scan --config auto --config .semgrep/malicious-api.yml --sarif > semgrep.sarif
+        args: semgrep scan --config auto --config .semgrep/malicious-api.yml --sarif --output semgrep.sarif
     - name: Upload SARIF
       uses: github/codeql-action/upload-sarif@v4
       with:
