@@ -284,17 +284,3 @@ rules:
     confidence: low
     likelihood: medium
     impact: high
-
-- id: go-base64-literal-string
-  languages: [go]
-  message: "Base64-encoded string literal detected. Review for embedded payloads/secrets."
-  severity: INFO
-  pattern: "\"$B64\""
-  metavariable-regex:
-    metavariable: $B64
-    regex: "^(?:[A-Za-z0-9+/]{16,}={0,2}|[A-Za-z0-9_-]{16,}={0,2})$"
-  metadata:
-    category: security
-    confidence: low
-    likelihood: low
-    impact: medium
