@@ -16,7 +16,7 @@ jobs:
         run: godex --version
 
   install-linux-arm64:
-    runs-on: ubuntu-24-arm
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
@@ -24,7 +24,7 @@ jobs:
         run: godex --version
 
   install-macos-amd64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
@@ -45,8 +45,8 @@ jobs:
       - name: Get latest release tag
         id: get_tag
         run: |
-          $tag = (gh release list -L 1 --json nameVer -q '.[0].nameVer')
-          echo "TAG=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/cheikh2shift/godex/releases/latest"
+          echo "TAG=v$($response.tag_name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         shell: pwsh
 
       - name: Download Windows binary
