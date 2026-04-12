@@ -139,6 +139,17 @@ godex_get_models() {
     fi
 }
 
+godex_get_mcp_servers() {
+    local config_path=$(godex_get_config_path)
+    local provider_name="${1:-}"
+    if [[ -z "$provider_name" ]]; then
+        provider_name=$(godex_get_default_provider)
+    fi
+    if [[ -f "$config_path" ]]; then
+        godex --completion mcp-servers "$config_path" "$provider_name"
+    fi
+}
+
 godex_get_flags_with_desc() {
     echo "--config:provider configuration YAML"
     echo "--provider:provider name to use"
@@ -151,11 +162,59 @@ godex_get_flags_with_desc() {
     echo "--debug:enable debug mode"
     echo "--completion:generate shell completion"
     echo "--llama-server:external llama.cpp server URL"
+    echo "mcp:manage MCP servers (subcommand)"
 }
 
 _cgodex_completion() {
     local cur prev words cword
     _init_completion || return
+
+    if [[ "${words[1]}" == "mcp" ]]; then
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "add remove" -- "${cur}"))
+            return 0
+        fi
+        case "$prev" in
+            --name)
+                local provider_name=""
+                local i
+                for ((i=1; i<cword; i++)); do
+                    if [[ "${words[i]}" == "--provider" ]] && [[ -n "${words[i+1]}" ]] && [[ "${words[i+1]}" != --* ]]; then
+                        provider_name="${words[i+1]}"
+                        break
+                    fi
+                done
+                if [[ "${words[2]}" == "remove" ]]; then
+                    local servers=$(godex_get_mcp_servers "$provider_name")
+                    COMPREPLY=($(compgen -W "$servers" -- "$cur"))
+                else
+                    COMPREPLY=($(compgen -W "filesystem bash webscraper" -- "$cur"))
+                fi
+                return 0
+                ;;
+            --provider)
+                local providers=$(godex_get_providers)
+                if [[ -n "$providers" ]]; then
+                    COMPREPLY=($(compgen -W "$providers" -- "$cur"))
+                fi
+                return 0
+                ;;
+            --config)
+                COMPREPLY=($(compgen -d -S/ -- "$cur"))
+                COMPREPLY+=($(compgen -f -X '!*.yaml' -X '!*.yml' -- "$cur"))
+                return 0
+                ;;
+            --allowed-path)
+                COMPREPLY=($(compgen -d -S/ -- "$cur"))
+                return 0
+                ;;
+        esac
+        if [[ "$cur" == -* ]]; then
+            local mcp_flags="--provider --name --command --args --env --transport --allowed-path --allowed-url"
+            COMPREPLY=($(compgen -W "$mcp_flags" -- "$cur"))
+            return 0
+        fi
+    fi
     
     case "$prev" in
         --provider)
@@ -193,7 +252,12 @@ _cgodex_completion() {
         local flags=$(godex_get_flags_with_desc | cut -d: -f1)
         COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     else
-        COMPREPLY=($(compgen -f -- "$cur"))
+        local providers=$(godex_get_providers)
+        if [[ -n "$providers" ]]; then
+            COMPREPLY=($(compgen -W "$providers mcp" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "mcp" -- "$cur"))
+        fi
     fi
 }
 

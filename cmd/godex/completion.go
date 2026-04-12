@@ -32,6 +32,17 @@ PROG="{{.ProgName}}"
     fi
 }
 
+{{.ProgName}}_get_mcp_servers() {
+    local config_path=$(${PROG}_get_config_path)
+    local provider_name="${1:-}"
+    if [[ -z "$provider_name" ]]; then
+        provider_name=$(${PROG}_get_default_provider)
+    fi
+    if [[ -f "$config_path" ]]; then
+        ${PROG} --completion mcp-servers "$config_path" "$provider_name"
+    fi
+}
+
 {{.ProgName}}_get_default_provider() {
     local config_path=$(${PROG}_get_config_path)
     if [[ -f "$config_path" ]]; then
@@ -63,11 +74,60 @@ PROG="{{.ProgName}}"
     echo "--debug:enable debug mode"
     echo "--completion:generate shell completion"
     echo "--llama-server:external llama.cpp server URL"
+    echo "mcp:manage MCP servers (subcommand)"
 }
 
 _{{.ProgName}}_completion() {
     local cur prev words cword
     _init_completion || return
+
+    if [[ "${words[1]}" == "mcp" ]]; then
+        if [[ $cword -eq 2 ]]; then
+            COMPREPLY=($(compgen -W "add remove" -- "${cur}"))
+            return
+        fi
+        case "${prev}" in
+        --name)
+            local provider_name=""
+            local i
+            for ((i=1; i<cword; i++)); do
+                if [[ "${words[i]}" == "--provider" ]] && [[ -n "${words[i+1]}" ]] && [[ "${words[i+1]}" != --* ]]; then
+                    provider_name="${words[i+1]}"
+                    break
+                fi
+            done
+            if [[ "${words[2]}" == "remove" ]]; then
+                local servers
+                servers=$(${PROG}_get_mcp_servers "$provider_name")
+                COMPREPLY=($(compgen -W "$servers" -- "${cur}"))
+            else
+                COMPREPLY=($(compgen -W "filesystem bash webscraper" -- "${cur}"))
+            fi
+            return
+            ;;
+        --provider)
+            local providers
+            providers=$(${PROG}_get_providers)
+            COMPREPLY=($(compgen -W "$providers" -- "${cur}"))
+            return
+            ;;
+        --config)
+            COMPREPLY=($(compgen -d -S/ -- "${cur}"))
+            COMPREPLY+=($(compgen -f -X '!*.yaml' -X '!*.yml' -- "${cur}"))
+            return
+            ;;
+        --allowed-path)
+            COMPREPLY=($(compgen -d -S/ -- "${cur}"))
+            return
+            ;;
+        esac
+
+        local mcp_flags="--provider --name --command --args --env --transport --allowed-path --allowed-url"
+        if [[ "${cur}" == -* ]]; then
+            COMPREPLY=($(compgen -W "${mcp_flags}" -- "${cur}"))
+            return
+        fi
+    fi
     
     case "${prev}" in
     --provider)
@@ -127,6 +187,7 @@ _{{.ProgName}}_completion() {
         while IFS= read -r p; do
             COMPREPLY+=("$p")
         done <<< "$providers"
+        COMPREPLY+=("mcp")
     fi
 }
 
@@ -150,10 +211,43 @@ const zshCompletionTemplate = `#compdef godex
     
     case "$state" in
         cmd)
+            local -a commands
+            commands=("mcp:manage MCP servers")
+            _describe 'commands' commands
             _describe 'providers' providers
             ;;
         args)
             case "$words[1]" in
+                mcp)
+                    if [[ $CURRENT -eq 2 ]]; then
+                        _describe 'subcommands' 'add:register MCP server' 'remove:unregister MCP server'
+                        return
+                    fi
+                    local provider_name=""
+                    for ((i=2; i<=CURRENT; i++)); do
+                        if [[ "${words[i-1]}" == "--provider" ]] && [[ -n "${words[i]}" ]] && [[ "${words[i]}" != --* ]]; then
+                            provider_name="${words[i]}"
+                            break
+                        fi
+                    done
+                    if [[ -z "$provider_name" ]]; then
+                        provider_name="${providers[1]}"
+                    fi
+                    local -a mcp_servers
+                    if [[ -n "$provider_name" ]]; then
+                        mcp_servers=(${(f)"$({{.ProgName}} --completion mcp-servers "$config_path" "$provider_name")"})
+                    fi
+                    _arguments \
+                        '--provider[provider name]:provider:->providers' \
+                        '--name[MCP server name]:server:->mcp_name' \
+                        '--command[external MCP command]' \
+                        '--args[command arg]' \
+                        '--env[env var KEY=VALUE]' \
+                        '--transport[MCP transport]' \
+                        '--allowed-path[allowed path]' \
+                        '--allowed-url[allowed URL]'
+                    return
+                    ;;
                 --config)
                     _files -g "*.yaml" -g "*.yml"
                     ;;
@@ -176,6 +270,22 @@ const zshCompletionTemplate = `#compdef godex
                     fi
                     ;;
             esac
+            ;;
+        mcp_servers)
+            if (( ${#mcp_servers[@]} )); then
+                _describe 'mcp servers' mcp_servers
+            fi
+            ;;
+        mcp_name)
+            if [[ "${words[2]}" == "add" ]]; then
+                local -a builtins
+                builtins=("filesystem" "bash" "webscraper")
+                _describe 'mcp servers' builtins
+            else
+                if (( ${#mcp_servers[@]} )); then
+                    _describe 'mcp servers' mcp_servers
+                fi
+            fi
             ;;
     esac
 }
@@ -275,6 +385,35 @@ func listModels(configPath string, providerName string, query string) []string {
 	return models
 }
 
+func listMCPServers(configPath string, providerName string) []string {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil
+	}
+
+	var provider *config.Provider
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Name == providerName {
+			provider = &cfg.Providers[i]
+			break
+		}
+	}
+	if provider == nil {
+		if len(cfg.Providers) > 0 {
+			provider = &cfg.Providers[0]
+		}
+	}
+	if provider == nil {
+		return nil
+	}
+
+	var names []string
+	for _, s := range provider.MCPServers {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
 func listAllModels(ctx context.Context, p modelquery.Provider) ([]string, error) {
 	models, err := modelquery.ListModels(ctx, p)
 	if err != nil {
@@ -338,6 +477,19 @@ func runCompletion(args []string) {
 		for _, m := range models {
 			fmt.Println(m)
 		}
+	case "mcp-servers":
+		configPath := os.ExpandEnv("${HOME}/.godex/providers.yaml")
+		providerName := ""
+		if len(args) > 1 {
+			configPath = args[1]
+		}
+		if len(args) > 2 {
+			providerName = args[2]
+		}
+		servers := listMCPServers(configPath, providerName)
+		for _, s := range servers {
+			fmt.Println(s)
+		}
 	default:
 		printCompletionHelp()
 	}
@@ -400,6 +552,26 @@ function __godex_complete_models
     end
 end
 
+function __godex_complete_mcp_servers
+    set -l default_path %s
+    set -l config_path "$default_path"
+    set -l current_provider ""
+    for i in (seq (count (commandline -opc)))
+        set -l arg (commandline -opc)[$i]
+        if test "$arg" = "--config"
+            set config_path (commandline -opc)[(math $i + 1)]
+        else if test "$arg" = "--provider"
+            set current_provider (commandline -opc)[(math $i + 1)]
+        end
+    end
+    if test -z "$current_provider"
+        set current_provider (godex --completion providers "$config_path" 2>/dev/null | head -1)
+    end
+    if test -f "$config_path"
+        godex --completion mcp-servers "$config_path" "$current_provider"
+    end
+end
+
 complete -c godex -l config -r -f
 complete -c godex -l provider -x -a "(__godex_complete_providers)"
 complete -c godex -l model -x -a "(__godex_complete_models)"
@@ -410,7 +582,19 @@ complete -c godex -l version -s v -f
 complete -c godex -l debug -s d -f
 complete -c godex -l completion -x -a "bash zsh fish" -d "Generate shell completion"
 complete -c godex -l llama-server -s l -x -d "External llama.cpp server URL"
-`, defaultConfigPath, defaultConfigPath)
+complete -c godex -n "__fish_use_subcommand" -a "mcp" -d "Manage MCP servers"
+complete -c godex -n "__fish_seen_subcommand_from mcp" -a "add remove" -d "MCP subcommand"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l provider -x -a "(__godex_complete_providers)"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l name -x -a "filesystem bash webscraper"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l command -x
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l args -x
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l env -x
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l transport -x
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l allowed-path -x -a "(__fish_complete_directories)"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l allowed-url -x
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from remove" -l provider -x -a "(__godex_complete_providers)"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from remove" -l name -x -a "(__godex_complete_mcp_servers)"
+`, defaultConfigPath, defaultConfigPath, defaultConfigPath)
 }
 
 func printCompletionHelp() {
@@ -418,6 +602,8 @@ func printCompletionHelp() {
 
 Usage:
   godex --completion <shell>
+
+Includes flags plus the "mcp" subcommands (add/remove) and their options.
 
 Shells:
   bash    Generate bash completion script

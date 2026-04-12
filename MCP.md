@@ -6,6 +6,15 @@ GoDex supports integrating with external MCP (Model Context Protocol) servers to
 
 External MCP servers are configured in your `~/.godex/providers.yaml` file under each provider's `mcp_servers` section.
 
+You can also manage MCP servers from the CLI:
+
+```bash
+godex mcp add --provider ollama --name filesystem --allowed-path /home/user/project
+godex mcp add --provider ollama --name webscraper --allowed-url https://docs.example.com
+godex mcp add --provider ollama --name myserver --command /usr/local/bin/my-mcp --args --flag --allowed-path /tmp
+godex mcp remove --provider ollama --name myserver
+```
+
 ### MCPServer Structure
 
 Each MCP server is defined with the following properties:

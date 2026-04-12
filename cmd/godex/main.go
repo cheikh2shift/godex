@@ -142,6 +142,13 @@ func main() {
 		os.Exit(0)
 	}
 
+	if args := flag.Args(); len(args) > 0 && args[0] == "mcp" {
+		if err := handleMCPSubcommand(args[1:], configPath); err != nil {
+			log.Fatalf("mcp: %v", err)
+		}
+		return
+	}
+
 	// Handle version flag
 	if printVersion {
 		fmt.Printf("godex version %s\n", version)
@@ -1221,6 +1228,174 @@ promptLoop:
 		historyDB.Close()
 	}
 	fmt.Println("Goodbye!")
+}
+
+type stringList []string
+
+func (s *stringList) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
+func handleMCPSubcommand(args []string, configPath string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: godex mcp <add|remove> [options]")
+	}
+
+	isFilesystem := func(name string) bool {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "filesystem", "files":
+			return true
+		default:
+			return false
+		}
+	}
+	isBash := func(name string) bool {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "bash", "shell", "exec":
+			return true
+		default:
+			return false
+		}
+	}
+	isWeb := func(name string) bool {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "webscraper", "web", "browser":
+			return true
+		default:
+			return false
+		}
+	}
+
+	switch args[0] {
+	case "add":
+		fs := flag.NewFlagSet("mcp add", flag.ContinueOnError)
+		var providerName string
+		var serverName string
+		var command string
+		var transport string
+		var rawArgs stringList
+		var rawEnv stringList
+		var allowedPaths stringList
+		var allowedURLs stringList
+		fs.StringVar(&providerName, "provider", "", "provider name to update (defaults to configured default)")
+		fs.StringVar(&serverName, "name", "", "MCP server name (e.g., filesystem, bash, webscraper, or external name)")
+		fs.StringVar(&command, "command", "", "command for external MCP server")
+		fs.Var(&rawArgs, "args", "MCP server arg (repeatable)")
+		fs.Var(&rawEnv, "env", "MCP server env (repeatable, KEY=VALUE)")
+		fs.StringVar(&transport, "transport", "", "MCP transport (e.g., stdio)")
+		fs.Var(&allowedPaths, "allowed-path", "allowed path for MCP server (repeatable)")
+		fs.Var(&allowedURLs, "allowed-url", "allowed URL for MCP server (repeatable)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(serverName) == "" {
+			return fmt.Errorf("missing --name")
+		}
+
+		if !isFilesystem(serverName) && !isBash(serverName) && !isWeb(serverName) {
+			if strings.TrimSpace(command) == "" {
+				return fmt.Errorf("--command is required for external MCP servers")
+			}
+		}
+
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return err
+		}
+		provider := cfg.DefaultOrFirst()
+		if strings.TrimSpace(providerName) != "" {
+			if p := cfg.ProviderByName(providerName); p != nil {
+				provider = p
+			} else {
+				return fmt.Errorf("provider %q not found", providerName)
+			}
+		}
+		if provider == nil {
+			return fmt.Errorf("no providers configured")
+		}
+
+		for _, s := range provider.MCPServers {
+			if strings.EqualFold(s.Name, serverName) {
+				return fmt.Errorf("MCP server %q already exists on provider %q", serverName, provider.Name)
+			}
+		}
+
+		allows := append([]string{}, allowedPaths...)
+		allows = append(allows, allowedURLs...)
+
+		provider.MCPServers = append(provider.MCPServers, config.MCPServer{
+			Name:         strings.TrimSpace(serverName),
+			Command:      strings.TrimSpace(command),
+			Args:         []string(rawArgs),
+			Env:          []string(rawEnv),
+			Transport:    strings.TrimSpace(transport),
+			AllowedPaths: allows,
+		})
+
+		if err := config.Save(configPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
+		return nil
+	case "remove":
+		fs := flag.NewFlagSet("mcp remove", flag.ContinueOnError)
+		var providerName string
+		var serverName string
+		fs.StringVar(&providerName, "provider", "", "provider name to update (defaults to configured default)")
+		fs.StringVar(&serverName, "name", "", "MCP server name to remove")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(serverName) == "" {
+			return fmt.Errorf("missing --name")
+		}
+
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return err
+		}
+		provider := cfg.DefaultOrFirst()
+		if strings.TrimSpace(providerName) != "" {
+			if p := cfg.ProviderByName(providerName); p != nil {
+				provider = p
+			} else {
+				return fmt.Errorf("provider %q not found", providerName)
+			}
+		}
+		if provider == nil {
+			return fmt.Errorf("no providers configured")
+		}
+
+		found := false
+		before := len(provider.MCPServers)
+		var kept []config.MCPServer
+		for _, s := range provider.MCPServers {
+			if strings.EqualFold(s.Name, serverName) {
+				found = true
+				continue
+			}
+			if s.Name != serverName {
+				kept = append(kept, s)
+			}
+		}
+		provider.MCPServers = kept
+		if !found || len(provider.MCPServers) == before {
+			return fmt.Errorf("no MCP server named %q found on provider %q", serverName, provider.Name)
+		}
+
+		if err := config.Save(configPath, cfg); err != nil {
+			return err
+		}
+		fmt.Printf("Removed MCP server %q from provider %q\n", serverName, provider.Name)
+		return nil
+	default:
+		return fmt.Errorf("unknown subcommand %q (expected add or remove)", args[0])
+	}
 }
 
 type mcpLog struct {

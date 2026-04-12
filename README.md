@@ -278,6 +278,12 @@ godex --prompt "list files in current directory"
 
 # Run wizard to create config
 godex --wizard
+
+# Manage MCP servers in config
+godex mcp add --provider ollama --name filesystem --allowed-path /home/user/project
+godex mcp add --provider ollama --name webscraper --allowed-url https://docs.example.com
+godex mcp add --provider ollama --name myserver --command /usr/local/bin/my-mcp --args --flag --allowed-path /tmp
+godex mcp remove --provider ollama --name myserver
 ```
 
 ### Shell Completion
@@ -303,6 +309,7 @@ After sourcing, pressing Tab will show:
 - All available flags with descriptions
 - Provider names when using `--provider`
 - File paths when using `--config`
+- `mcp` subcommands and flags
 
 ### Commands in TUI
 
