@@ -945,6 +945,12 @@ promptLoop:
 				prevNoTool = false
 			}
 			if !isToolCallResponse || len(toolCalls) == 0 {
+
+				if !looksLikeToolCall(resp) {
+					go playSound()
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					break
+				}
 				// No valid tool calls - print thinking text and final response, then stop
 				if !printedStreamed && !prevNoTool {
 					thinkingText := extractThinkingText(preResp)
@@ -1968,6 +1974,11 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
 
+				if !looksLikeToolCall(resp) {
+					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					return "", nil
+				}
+
 				if strings.TrimSpace(resp) != "" && (nocont || prevNoTool) {
 					if nocont {
 						fmt.Printf("\n\n%s\n", renderMarkdown(resp))
@@ -1995,12 +2006,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		prevNoTool = false
 		if verbose {
 			fmt.Printf("\n")
-			if round == 0 {
-				fmt.Print("\033[90m")
-				fmt.Printf("> %s\n", input)
-				fmt.Printf("%s\n", resp)
-				fmt.Print("\033[0m")
-			}
+
 			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 		}
 
@@ -2235,6 +2241,18 @@ func formatElapsed(totalSeconds int) string {
 		return fmt.Sprintf("%dm%02d", minutes, seconds)
 	}
 	return fmt.Sprintf("%ds", totalSeconds)
+}
+
+func looksLikeToolCall(s string) bool {
+	lower := strings.ToLower(s)
+	if s == "" {
+		return true
+	}
+
+	if !strings.Contains(lower, "toolcall") {
+		return false
+	}
+	return strings.Contains(s, "{") && strings.Contains(s, "}")
 }
 
 func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {
