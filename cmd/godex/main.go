@@ -991,12 +991,12 @@ promptLoop:
 
 			// Execute all tool calls
 			fmt.Printf("\n")
-			if round == 0 {
-				fmt.Print("\033[90m")
-				fmt.Printf("> %s\n", input)
-				fmt.Printf("%s\n", resp)
-				fmt.Print("\033[0m")
-			}
+			// if round == 0 {
+			// 	fmt.Print("\033[90m")
+			// 	fmt.Printf("> %s\n", input)
+			// 	fmt.Printf("%s\n", resp)
+			// 	fmt.Print("\033[0m")
+			// }
 			fmt.Printf("[Executing %d tool(s)] (round %d/%d)\n", len(toolCalls), round+1, maxToolRounds)
 			var toolResults []string
 			var toolExecError bool
