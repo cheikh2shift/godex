@@ -24,7 +24,6 @@ var ErrPromptAborted = errors.New("prompt aborted")
 var inputBoxStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
 	BorderForeground(lipgloss.Color("240")).
-	Background(lipgloss.Color("236")).
 	Padding(0, 1)
 
 var commandTips = map[string]string{
