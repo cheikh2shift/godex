@@ -112,6 +112,7 @@ func main() {
 		modelOverride  string
 		hiveCode       string
 		llamaServerURL string
+		showHelp       bool
 	)
 
 	home, err := os.UserHomeDir()
@@ -128,6 +129,7 @@ func main() {
 	flag.StringVar(&hiveCode, "hive", "", "enable hive mode with a shared secret")
 	flag.BoolVar(&printVersion, "version", false, "print version information")
 	flag.BoolVar(&debugMode, "debug", false, "enable debug mode to log MCP requests")
+	flag.BoolVar(&showHelp, "help", false, "show help")
 	flag.StringVar(&generateComp, "completion", "", "generate shell completion (bash|zsh|fish)")
 	flag.StringVar(&llamaServerURL, "llama-server", "", "external llama.cpp server URL (e.g. http://localhost:9090). If set, won't launch inline server")
 	flag.Parse()
@@ -140,6 +142,11 @@ func main() {
 	if generateComp != "" {
 		runCompletion(append([]string{generateComp}, flag.Args()...))
 		os.Exit(0)
+	}
+
+	if showHelp {
+		printCLIHelp()
+		return
 	}
 
 	if args := flag.Args(); len(args) > 0 && args[0] == "mcp" {
@@ -1228,6 +1235,41 @@ promptLoop:
 		historyDB.Close()
 	}
 	fmt.Println("Goodbye!")
+}
+
+func printCLIHelp() {
+	fmt.Println(`godex - AI coding agent (TUI)
+
+Usage:
+  godex [flags]
+  godex mcp <add|remove> [options]
+
+Flags:
+  --config         Provider configuration YAML
+  --provider       Provider name to use
+  --model          Override provider model
+  --hive           Enable hive mode with a shared secret
+  --wizard         Launch provider configuration wizard
+  --prompt         Run a single prompt non-interactively
+  --auto-confirm   Auto-run suggested commands
+  --version        Print version information
+  --debug          Enable debug mode
+  --completion     Generate shell completion (bash|zsh|fish)
+  --llama-server   External llama.cpp server URL
+  --help           Show this help
+
+MCP subcommands:
+  godex mcp add --provider <name> --name <server> [options]
+  godex mcp remove --provider <name> --name <server>
+
+MCP add options:
+  --name           MCP server name (filesystem, bash, webscraper, or external name)
+  --command        Command for external MCP server (required for external)
+  --args           MCP server arg (repeatable)
+  --env            MCP server env (repeatable, KEY=VALUE)
+  --transport      MCP transport (e.g., stdio)
+  --allowed-path   Allowed path (repeatable)
+  --allowed-url    Allowed URL (repeatable)`)
 }
 
 type stringList []string
