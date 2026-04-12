@@ -1,0 +1,61 @@
+name: Install Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and run install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Verify installation
+        run: godex --version
+
+  install-linux-arm64:
+    runs-on: ubuntu-24-arm
+    steps:
+      - name: Download and run install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Verify installation
+        run: godex --version
+
+  install-macos-amd64:
+    runs-on: macos-13
+    steps:
+      - name: Download and run install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Verify installation
+        run: godex --version
+
+  install-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - name: Download and run install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Verify installation
+        run: godex --version
+
+  install-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Get latest release tag
+        id: get_tag
+        run: |
+          $tag = (gh release list -L 1 --json nameVer -q '.[0].nameVer')
+          echo "TAG=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Download Windows binary
+        run: |
+          curl -sSL -o godex-windows-amd64.exe "https://github.com/cheikh2shift/godex/releases/download/${{ steps.get_tag.outputs.TAG }}/godex-windows-amd64.exe"
+        shell: pwsh
+
+      - name: Verify installation
+        run: |
+          mv godex-windows-amd64.exe godex.exe
+          ./godex.exe --version
+        shell: pwsh
