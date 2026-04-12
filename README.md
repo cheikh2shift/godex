@@ -7,7 +7,7 @@ GoDex is an AI coding agent that interfaces with Ollama, llama.cpp, Gemini, Open
 
 Orchestration and parallel tasks? open another terminal tab and start a new instance of `godex`.
 
-![GoDex demo](scrreen.gif)
+![GoDex demo](screen3.gif)
 
 ## Requirements
 
