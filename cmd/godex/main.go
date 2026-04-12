@@ -2192,8 +2192,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 			if !hasFinal {
 
 				if !looksLikeToolCall(resp) {
-					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
-					return "", nil
+					if nocont {
+						fmt.Printf("\n\n%s\n", renderMarkdown(resp))
+					}
+					return resp, nil
 				}
 
 				if strings.TrimSpace(resp) != "" && (nocont || prevNoTool) {
