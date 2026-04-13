@@ -24,7 +24,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
+          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -47,7 +47,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
+          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -66,7 +66,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
+          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -96,17 +96,17 @@ jobs:
 
       - name: Create dummy providers.yaml
         run: |
-          "providers:`n  - name: my-local-identifier`n    type: ollama`n    api_key: dummy`ndefault_provider: my-local-identifier`nvision_enabled: true`nvision_cli_downloaded: true" | Out-File -FilePath providers.yaml -Encoding utf8
+          "providers:`n  - name: my-local-identifier`n    type: ollama`n    api_key: dummy`ndefault_provider: my-local-identifier`nvision_enabled: false`nvision_cli_downloaded: false" | Out-File -FilePath providers.yaml -Encoding utf8
         shell: pwsh
 
       - name: Test UI rendering
         run: |
           Write-Host "--- VERSION ---"
           ./godex-windows-amd64.exe --version
-          $job = Start-Job -ScriptBlock { ./godex-windows-amd64.exe --config providers.yaml --provider my-local-identifier --model llama3 } 
+          $proc = Start-Process -FilePath ".\godex-windows-amd64.exe" -ArgumentList "--config providers.yaml --provider my-local-identifier --model llama3" -PassThru -RedirectStandardOutput output.txt -RedirectStandardError error.txt
           Start-Sleep -Seconds 3
-          Stop-Job -Job $job -ErrorAction SilentlyContinue
-          Receive-Job -Job $job | Out-File -FilePath output.txt
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
           Write-Host "--- OUTPUT ---"
-          Get-Content output.txt
+          Get-Content output.txt -ErrorAction SilentlyContinue
+          Get-Content error.txt -ErrorAction SilentlyContinue
         shell: pwsh
