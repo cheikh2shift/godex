@@ -40,28 +40,21 @@ jobs:
   install-windows:
     runs-on: windows-latest
     steps:
-      - name: Get latest release tag
-        id: get_tag
-        run: |
-          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/cheikh2shift/godex/releases/latest"
-          echo "TAG=$($response.tag_name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-        shell: pwsh
-
       - name: Download Windows binary
         run: |
-          Write-Host "Tag: ${{ steps.get_tag.outputs.TAG }}"
-          curl.exe -sSL -o godex-windows-amd64.exe "https://github.com/cheikh2shift/godex/releases/download/${{ steps.get_tag.outputs.TAG }}/godex-windows-amd64.exe"
-          Get-Item godex-windows-amd64.exe | Select-Object Name, Length
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/cheikh2shift/godex/releases/latest"
+          $version = ($response.tag_name) -replace '^v',''
+          Write-Host "Downloading version v$version"
+          curl.exe -sSL -o godex-windows-amd64.exe "https://github.com/cheikh2shift/godex/releases/download/v${version}/godex-windows-amd64.exe"
         shell: pwsh
 
       - name: Verify installation
         run: |
-          $bytes = Get-Content godex-windows-amd64.exe -TotalCount 2 -Encoding Byte
-          if ($bytes[0] -eq 77 -and $bytes[1] -eq 90) {
+          $header = [System.IO.File]::ReadAllBytes("godex-windows-amd64.exe")[0..1]
+          if ($header[0] -eq 77 -and $header[1] -eq 90) {
             Write-Host "Valid PE executable"
             ./godex-windows-amd64.exe --version
           } else {
-            Write-Host "Invalid file - first bytes: $($bytes[0]) $($bytes[1])"
-            Get-Content godex-windows-amd64.exe -TotalCount 5
+            Write-Host "Invalid file - first bytes: $($header[0]) $($header[1])"
           }
         shell: pwsh

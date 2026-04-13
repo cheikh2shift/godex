@@ -6,6 +6,29 @@ REPO="cheikh2shift/godex"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="godex"
 
+# Detect version from API
+get_version() {
+    # Try API first, fall back to parsing HTML
+    curl -sL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/'
+}
+
+# VERSION can be passed as arg, env var, or auto-detected
+if [ -n "$1" ]; then
+    LATEST_TAG="$1"
+elif [ -n "$VERSION" ]; then
+    LATEST_TAG="$VERSION"
+else
+    LATEST_TAG=$(get_version)
+    if [ -z "$LATEST_TAG" ]; then
+        # Fallback: parse release page
+        LATEST_TAG=$(curl -sL "https://github.com/${REPO}/releases" 2>/dev/null | grep -o 'releases/tag/[^"]*' | head -1 | sed 's/.*tag\///')
+    fi
+    if [ -z "$LATEST_TAG" ]; then
+        echo "Failed to get latest release version"
+        exit 1
+    fi
+fi
+
 # Detect OS and architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -52,15 +75,11 @@ if [ "$OS" = "windows" ]; then
     SHA_FILENAME="${FILENAME}.sha256"
 fi
 
-# Get latest tag
-LATEST_TAG=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-if [ -z "$LATEST_TAG" ]; then
-    echo "Failed to get latest release version"
-    exit 1
-fi
 
 URL="https://github.com/${REPO}/releases/download/v${LATEST_TAG}/${FILENAME}"
 SHA_URL="https://github.com/${REPO}/releases/download/v${LATEST_TAG}/${SHA_FILENAME}"
+
+echo "Using version v${LATEST_TAG}"
 
 echo "Downloading ${FILENAME}..."
 curl -sSL -o "${FILENAME}" "$URL"
