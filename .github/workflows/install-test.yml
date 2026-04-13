@@ -24,7 +24,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
+          script -c "godex --config providers.yaml --provider my-local-identifier --model llama3" output.txt > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -47,7 +47,26 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          script -c "godex --config providers.yaml --provider my-local-identifier --model llama3" output.txt > output.txt 2>&1 &
+          script output.txt godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &
+          sleep 3
+          pkill -f "godex" || true
+          echo "--- OUTPUT ---"
+          cat output.txt
+
+  install-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - name: Download and run install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Create dummy providers.yaml
+        run: |
+          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Test binary execution
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "--- VERSION ---"
+          godex --version
+          script output.txt godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -82,10 +101,16 @@ jobs:
 
       - name: Test binary execution
         run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
           Write-Host "--- VERSION ---"
           ./godex-windows-amd64.exe --version
           $job = Start-Job -ScriptBlock { 
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $OutputEncoding = [System.Text.Encoding]::UTF8
             $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+            $pinfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+            $pinfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
             $pinfo.FileName = ".\godex-windows-amd64.exe"
             $pinfo.Arguments = "--config providers.yaml --provider my-local-identifier --model llama3"
             $pinfo.UseShellExecute = $false
