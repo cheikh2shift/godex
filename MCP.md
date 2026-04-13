@@ -9,10 +9,10 @@ External MCP servers are configured in your `~/.godex/providers.yaml` file under
 You can also manage MCP servers from the CLI:
 
 ```bash
-godex mcp add --provider ollama --name filesystem --allowed-path /home/user/project
-godex mcp add --provider ollama --name webscraper --allowed-url https://docs.example.com
-godex mcp add --provider ollama --name myserver --command /usr/local/bin/my-mcp --args --flag --allowed-path /tmp
-godex mcp remove --provider ollama --name myserver
+godex mcp add --provider my-local-identifier --name filesystem --allowed-path /home/user/project
+godex mcp add --provider my-local-identifier --name webscraper --allowed-url https://docs.example.com
+godex mcp add --provider my-local-identifier --name myserver --command /usr/local/bin/my-mcp --args --flag --allowed-path /tmp
+godex mcp remove --provider my-local-identifier --name myserver
 ```
 
 ### MCPServer Structure

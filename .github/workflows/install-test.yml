@@ -16,6 +16,19 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           godex --version
+      - name: Create dummy providers.yaml
+        run: |
+          printf -- 'providers:\n  - name: ollama\n' > providers.yaml
+      - name: Test UI rendering
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "--- VERSION ---"
+          godex --version
+          (godex --config providers.yaml --provider ollama --model llama3 > output.txt 2>&1 &)
+          sleep 0.5
+          pkill -f "godex" || true
+          echo "--- OUTPUT ---"
+          cat output.txt
 
   install-macos-amd64:
     runs-on: macos-15-intel
@@ -26,16 +39,38 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           godex --version
+      - name: Create dummy providers.yaml
+        run: |
+          printf -- 'providers:\n  - name: ollama\n' > providers.yaml
+      - name: Test UI rendering
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "--- VERSION ---"
+          godex --version
+          (godex --config providers.yaml --provider ollama --model llama3 > output.txt 2>&1 &)
+          sleep 0.5
+          pkill -f "godex" || true
+          echo "--- OUTPUT ---"
+          cat output.txt
 
   install-macos-arm64:
     runs-on: macos-latest
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
-      - name: Verify installation
+      - name: Create dummy providers.yaml
+        run: |
+          printf -- 'providers:\n  - name: ollama\n' > providers.yaml
+      - name: Test UI rendering
         run: |
           export PATH="$HOME/.local/bin:$PATH"
+          echo "--- VERSION ---"
           godex --version
+          (godex --config providers.yaml --provider ollama --model llama3 > output.txt 2>&1 &)
+          sleep 0.5
+          pkill -f "godex" || true
+          echo "--- OUTPUT ---"
+          cat output.txt
 
   install-windows:
     runs-on: windows-latest
@@ -57,4 +92,21 @@ jobs:
           } else {
             Write-Host "Invalid file - first bytes: $($header[0]) $($header[1])"
           }
+        shell: pwsh
+
+      - name: Create dummy providers.yaml
+        run: |
+          "providers:`n  - name: ollama" | Out-File -FilePath providers.yaml -Encoding utf8
+        shell: pwsh
+
+      - name: Test UI rendering
+        run: |
+          Write-Host "--- VERSION ---"
+          ./godex-windows-amd64.exe --version
+          $job = Start-Job -ScriptBlock { ./godex-windows-amd64.exe --config providers.yaml --provider ollama --model llama3 } 
+          Start-Sleep -Seconds 0.5
+          Stop-Job -Job $job -ErrorAction SilentlyContinue
+          Receive-Job -Job $job | Out-File -FilePath output.txt
+          Write-Host "--- OUTPUT ---"
+          Get-Content output.txt
         shell: pwsh
