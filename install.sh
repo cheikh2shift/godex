@@ -32,6 +32,7 @@ fi
 # Detect OS and architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
+echo "Detected OS=$OS ARCH=$ARCH"
 
 case "$ARCH" in
     x86_64)
@@ -91,9 +92,25 @@ echo "Verifying checksum..."
 if command -v sha256sum >/dev/null 2>&1; then
     sha256sum -c "${SHA_FILENAME}"
 elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "${SHA_FILENAME}"
+    EXPECTED_HASH=$(cat "${SHA_FILENAME}" | cut -d' ' -f1)
+    ACTUAL_HASH=$(shasum -a 256 "${FILENAME}" | cut -d' ' -f1)
+    if [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ]; then
+        echo "Checksum verified"
+    else
+        echo "Checksum mismatch!"
+        exit 1
+    fi
+elif command -v openssl >/dev/null 2>&1; then
+    EXPECTED_HASH=$(cat "${SHA_FILENAME}" | cut -d' ' -f1)
+    ACTUAL_HASH=$(openssl dgst -sha256 "${FILENAME}" | sed 's/.* //')
+    if [ "$EXPECTED_HASH" = "$ACTUAL_HASH" ]; then
+        echo "Checksum verified"
+    else
+        echo "Checksum mismatch!"
+        exit 1
+    fi
 else
-    echo "Warning: Neither sha256sum nor shasum found. Skipping checksum verification."
+    echo "Warning: Neither sha256sum nor shasum nor openssl found. Skipping checksum verification."
     echo "Consider installing coreutils (Linux) or using Homebrew (macOS) for security."
 fi
 
