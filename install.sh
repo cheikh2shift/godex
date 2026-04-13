@@ -29,6 +29,10 @@ else
     fi
 fi
 
+LATEST_TAG="${LATEST_TAG#v}"
+
+echo "LATEST_TAG=$LATEST_TAG"
+
 # Detect OS and architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
