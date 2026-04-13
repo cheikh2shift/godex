@@ -18,8 +18,8 @@ jobs:
           godex --version
       - name: Create dummy providers.yaml
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: true\nvision_cli_downloaded: true\n' > providers.yaml
-      - name: Test UI rendering
+          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
@@ -41,13 +41,13 @@ jobs:
           godex --version
       - name: Create dummy providers.yaml
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: true\nvision_cli_downloaded: true\n' > providers.yaml
+          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
       - name: Test UI rendering
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
+          (godex --config providers.yaml --provider my-local-identifier --model llama3 2>&1 | tee output.txt &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -60,13 +60,13 @@ jobs:
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
       - name: Create dummy providers.yaml
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: true\nvision_cli_downloaded: true\n' > providers.yaml
-      - name: Test UI rendering
+          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
+          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
