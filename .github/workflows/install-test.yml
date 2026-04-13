@@ -30,8 +30,11 @@ jobs:
   install-macos-arm64:
     runs-on: macos-latest
     steps:
-      - name: Download and run install.sh
-        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Download install.sh
+        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh -o install.sh
+
+      - name: Run install.sh
+        run: chmod +x install.sh && ./install.sh
       - name: Verify installation
         run: |
           export PATH="$HOME/.local/bin:$PATH"
