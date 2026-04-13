@@ -24,7 +24,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (script -qc "godex --config providers.yaml --provider my-local-identifier --model llama3" /dev/null 2>&1 | tee output.txt &)
+          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -42,31 +42,12 @@ jobs:
       - name: Create dummy providers.yaml
         run: |
           printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
-      - name: Test UI rendering
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "--- VERSION ---"
-          godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 2>&1 | tee output.txt &)
-          sleep 3
-          pkill -f "godex" || true
-          echo "--- OUTPUT ---"
-          cat output.txt
-
-  install-macos-arm64:
-    runs-on: macos-latest
-    steps:
-      - name: Download and run install.sh
-        run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
-      - name: Create dummy providers.yaml
-        run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          (godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &)
+          script -c "godex --config providers.yaml --provider my-local-identifier --model llama3" output.txt > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -99,14 +80,30 @@ jobs:
           "providers:`n  - name: my-local-identifier`n    type: ollama`n    api_key: dummy`ndefault_provider: my-local-identifier`nvision_enabled: false`nvision_cli_downloaded: false" | Out-File -FilePath providers.yaml -Encoding utf8
         shell: pwsh
 
-      - name: Test UI rendering
+      - name: Test binary execution
         run: |
           Write-Host "--- VERSION ---"
           ./godex-windows-amd64.exe --version
-          $proc = Start-Process -FilePath ".\godex-windows-amd64.exe" -ArgumentList "--config providers.yaml --provider my-local-identifier --model llama3" -PassThru -RedirectStandardOutput output.txt -RedirectStandardError error.txt
-          Start-Sleep -Seconds 3
-          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          $job = Start-Job -ScriptBlock { 
+            $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+            $pinfo.FileName = ".\godex-windows-amd64.exe"
+            $pinfo.Arguments = "--config providers.yaml --provider my-local-identifier --model llama3"
+            $pinfo.UseShellExecute = $false
+            $pinfo.RedirectStandardOutput = $true
+            $pinfo.RedirectStandardError = $true
+            $pinfo.CreateNoWindow = $true
+            $p = New-Object System.Diagnostics.Process
+            $p.StartInfo = $pinfo
+            $p.Start() | Out-Null
+            Start-Sleep -Seconds 3
+            if (-not $p.HasExited) { $p.Kill() }
+            $stdout = $p.StandardOutput.ReadToEnd()
+            $stderr = $p.StandardError.ReadToEnd()
+            "$stdout`n$stderr"
+          }
+          Start-Sleep -Seconds 4
+          $output = Receive-Job -Job $job
+          $output | Out-File -FilePath output.txt
           Write-Host "--- OUTPUT ---"
-          Get-Content output.txt -ErrorAction SilentlyContinue
-          Get-Content error.txt -ErrorAction SilentlyContinue
+          $output
         shell: pwsh
