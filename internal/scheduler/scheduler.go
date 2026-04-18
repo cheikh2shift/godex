@@ -94,7 +94,19 @@ func New(dbPath string) (*Scheduler, error) {
 		return nil, err
 	}
 
+	s.startLoadedTasks()
+
 	return s, nil
+}
+
+func (s *Scheduler) startLoadedTasks() {
+	s.taskMu.Lock()
+	defer s.taskMu.Unlock()
+	for _, task := range s.tasks {
+		if task.IsRepeating || (task.LastRun.IsZero() && task.IntervalSec > 0) {
+			s.startTask(task)
+		}
+	}
 }
 
 func NewDefault() (*Scheduler, error) {
@@ -260,12 +272,18 @@ func (s *Scheduler) RunNow(prompt string, providerType, providerName, providerMo
 }
 
 func (s *Scheduler) saveTask(task *ScheduledTask) error {
+	var lastRunStr string
+	if task.LastRun.IsZero() {
+		lastRunStr = ""
+	} else {
+		lastRunStr = task.LastRun.Format(time.RFC3339)
+	}
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO scheduled_tasks 
 		(id, prompt, interval_sec, run_at, is_repeating, created_at, last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Prompt, task.IntervalSec, task.RunAt, task.IsRepeating,
-		task.CreatedAt.Format(time.RFC3339), task.LastRun.Format(time.RFC3339),
+		task.CreatedAt.Format(time.RFC3339), lastRunStr,
 		task.RunCount, task.LastError, task.LastOutput, task.ProviderType, task.ProviderName, task.ProviderModel)
 	return err
 }
@@ -323,11 +341,14 @@ func (s *Scheduler) runLoop(ctx context.Context, task *ScheduledTask) {
 func (s *Scheduler) executeTask(task *ScheduledTask) {
 	if s.provider == nil {
 		task.LastError = "no provider getter set"
+		task.LastRun = time.Now()
+		task.RunCount++
+		s.updateTask(task)
 		return
 	}
 
 	var cfg interface{}
-	if task.ProviderType == "unknown" || task.ProviderType == "" {
+	if task.ProviderType == "unknown" || task.ProviderType == "" || task.ProviderType == "current" {
 		cfg = map[string]interface{}{
 			"type":  "current",
 			"name":  "current",
@@ -344,6 +365,7 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 	prov, err := s.provider.GetProvider(cfg)
 	if err != nil {
 		task.LastError = fmt.Sprintf("failed to get provider: %v", err)
+		task.LastRun = time.Now()
 		task.RunCount++
 		s.updateTask(task)
 		return
@@ -354,6 +376,7 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 	})
 	if !ok {
 		task.LastError = "provider does not support Send method"
+		task.LastRun = time.Now()
 		task.RunCount++
 		s.updateTask(task)
 		return
@@ -369,19 +392,12 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 	} else {
 		task.LastError = ""
 		task.LastOutput = result
-		fmt.Printf("[Scheduler %s] Result: %s\n", task.ID, truncate(result, 200))
+		//fmt.Printf("[Scheduler %s] Result: %s\n", task.ID, truncate(result, 200))
 	}
 
 	task.LastRun = time.Now()
 	task.RunCount++
 	s.updateTask(task)
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 func (s *Scheduler) updateTask(task *ScheduledTask) {
