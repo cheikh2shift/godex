@@ -71,7 +71,7 @@ func (s *SchedulerServer) Tools() []Tool {
 	currentTime := time.Now().Format("2006-01-02 15:04:05")
 	return []Tool{
 		{
-			Name:        "schedule_task",
+			Name:        "scheduler",
 			Description: fmt.Sprintf("Schedule a task to run a prompt at a specific time or at regular intervals. Current time: %s. Use interval_sec for repeating tasks (e.g., 60 for every minute, 3600 for every hour), or run_at for specific times (e.g., \"14:30\" for 2:30 PM daily, or \"now\" to execute immediately).", currentTime),
 			InputSchema: json.RawMessage(`{
 				"type": "object",
@@ -96,7 +96,7 @@ func (s *SchedulerServer) Tools() []Tool {
 }
 
 func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
-	if name != "schedule_task" {
+	if name != "scheduler" {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
 
@@ -107,6 +107,8 @@ func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[st
 
 	intervalSec := 0
 	if iv, ok := args["interval_sec"].(float64); ok {
+		intervalSec = int(iv)
+	} else if iv, ok := args["run_every"].(float64); ok {
 		intervalSec = int(iv)
 	}
 
@@ -122,14 +124,14 @@ func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[st
 	}
 
 	if isNow {
-		result, err := s.scheduler.scheduler.RunNow(prompt, "unknown", "unknown", "unknown")
+		result, err := s.scheduler.scheduler.RunNow(prompt, "current", "current", "current")
 		if err != nil {
 			return fmt.Sprintf("Error running task: %v", err), nil
 		}
 		return fmt.Sprintf("Task executed immediately.\n\nResult:\n%s", result), nil
 	}
 
-	task, err := s.scheduler.scheduler.AddTask(prompt, intervalSec, runAt, "unknown", "unknown", "unknown")
+	task, err := s.scheduler.scheduler.AddTask(prompt, intervalSec, runAt, "current", "current", "current")
 	if err != nil {
 		return fmt.Sprintf("Error scheduling task: %v", err), nil
 	}

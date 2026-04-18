@@ -23,7 +23,7 @@ func (s *schedulerProviderGetter) GetProvider(cfg interface{}) (interface{}, err
 	providerName, _ := cfgMap["name"].(string)
 	providerModel, _ := cfgMap["model"].(string)
 
-	if providerType == "unknown" && s.provider != nil {
+	if (providerType == "unknown" || providerType == "current") && s.provider != nil {
 		providerType = s.provider.Type
 		providerName = s.provider.Name
 		providerModel = s.provider.Model
@@ -37,7 +37,6 @@ func (s *schedulerProviderGetter) GetProvider(cfg interface{}) (interface{}, err
 }
 
 func handleSchedule(input string) {
-
 	if sched == nil {
 		fmt.Println("[Scheduler] Not initialized")
 		return
@@ -49,11 +48,32 @@ func handleSchedule(input string) {
 		return
 	}
 
+	if len(parts) == 2 && len(parts[1]) == 4 {
+		id := strings.ToUpper(parts[1])
+		task := sched.GetTask(id)
+		if task == nil {
+			fmt.Printf("Task %s not found\n", id)
+			return
+		}
+		st, ok := task.(*scheduler.ScheduledTask)
+		if !ok {
+			fmt.Printf("Task %s not found\n", id)
+			return
+		}
+		if st.LastOutput == "" {
+			fmt.Printf("No output for task %s\n", id)
+			return
+		}
+		fmt.Printf("Output for task %s:\n%s\n", id, st.LastOutput)
+		return
+	}
+
 	if len(parts) >= 2 && (parts[1] == "help" || parts[1] == "-h" || parts[1] == "--help") {
 		fmt.Println("Scheduler - Schedule prompts to run at specific times or intervals")
 		fmt.Println("")
 		fmt.Println("Usage:")
 		fmt.Println("  /schedule              - List all scheduled tasks")
+		fmt.Println("  /schedule <id>         - Show last output of a task")
 		fmt.Println("  /schedule stop <id>    - Stop a running task by 4-char ID")
 		fmt.Println("  /schedule remove <id> - Remove a task from the schedule by 4-char ID")
 		fmt.Println("  /schedule help        - Show this help message")
@@ -100,6 +120,7 @@ func handleSchedule(input string) {
 
 	fmt.Println("Usage:")
 	fmt.Println("  /schedule              - List all scheduled tasks")
+	fmt.Println("  /schedule <id>         - Show last output of a task")
 	fmt.Println("  /schedule stop <id>    - Stop a task by 4-char ID")
 	fmt.Println("  /schedule remove <id> - Remove a task by 4-char ID")
 }
@@ -111,8 +132,8 @@ func listScheduledTasks() {
 		return
 	}
 
-	fmt.Printf("\n%-6s %-12s %-10s %-8s %-8s %s\n", "ID", "Created", "Interval", "Runs", "Last Run", "Status")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("\n%-6s %-8s %-8s %-8s %s\n", "ID", "Runs", "Interval", "Last Run", "Output")
+	fmt.Println(strings.Repeat("-", 70))
 
 	for _, t := range tasks {
 		task, ok := t.(*scheduler.ScheduledTask)
@@ -127,21 +148,24 @@ func listScheduledTasks() {
 
 		lastRun := "Never"
 		if !task.LastRun.IsZero() {
-			lastRun = task.LastRun.Format("2006-01-02 15:04")
+			lastRun = task.LastRun.Format("15:04")
 		}
 
-		status := "OK"
+		output := "OK"
 		if task.LastError != "" {
-			status = truncate(task.LastError, 30)
+			output = truncate(task.LastError, 40)
+		} else if task.LastOutput != "" {
+			lines := strings.Split(task.LastOutput, "\n")
+			lastLine := strings.TrimSpace(lines[len(lines)-1])
+			output = truncate(lastLine, 40)
 		}
 
-		fmt.Printf("%-6s %-12s %-10s %-8d %-8s %s\n",
+		fmt.Printf("%-6s %-8d %-8s %-8s %s\n",
 			task.ID,
-			task.CreatedAt.Format("2006-01-02"),
-			interval,
 			task.RunCount,
+			interval,
 			lastRun,
-			status,
+			output,
 		)
 	}
 	fmt.Println()

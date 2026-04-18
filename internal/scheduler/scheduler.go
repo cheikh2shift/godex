@@ -25,6 +25,7 @@ type ScheduledTask struct {
 	LastRun       time.Time `json:"last_run"`
 	RunCount      int       `json:"run_count"`
 	LastError     string    `json:"last_error"`
+	LastOutput    string    `json:"last_output"`
 	ProviderType  string    `json:"provider_type"`
 	ProviderName  string    `json:"provider_name"`
 	ProviderModel string    `json:"provider_model"`
@@ -112,6 +113,7 @@ func (s *Scheduler) initSchema() error {
 		last_run TEXT,
 		run_count INTEGER DEFAULT 0,
 		last_error TEXT,
+		last_output TEXT,
 		provider_type TEXT NOT NULL,
 		provider_name TEXT NOT NULL,
 		provider_model TEXT NOT NULL
@@ -125,7 +127,7 @@ func (s *Scheduler) initSchema() error {
 func (s *Scheduler) loadTasks() error {
 	rows, err := s.db.Query(`
 		SELECT id, prompt, interval_sec, run_at, is_repeating, created_at, 
-		       last_run, run_count, last_error, provider_type, provider_name, provider_model
+		       last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model
 		FROM scheduled_tasks
 	`)
 	if err != nil {
@@ -135,10 +137,10 @@ func (s *Scheduler) loadTasks() error {
 
 	for rows.Next() {
 		var task ScheduledTask
-		var lastRun, createdAt, runAt sql.NullString
+		var lastRun, createdAt, runAt, lastOutput sql.NullString
 		err := rows.Scan(
 			&task.ID, &task.Prompt, &task.IntervalSec, &runAt, &task.IsRepeating,
-			&createdAt, &lastRun, &task.RunCount, &task.LastError,
+			&createdAt, &lastRun, &task.RunCount, &task.LastError, &lastOutput,
 			&task.ProviderType, &task.ProviderName, &task.ProviderModel,
 		)
 		if err != nil {
@@ -152,6 +154,9 @@ func (s *Scheduler) loadTasks() error {
 		}
 		if runAt.Valid {
 			task.RunAt = runAt.String
+		}
+		if lastOutput.Valid {
+			task.LastOutput = lastOutput.String
 		}
 		s.tasks[task.ID] = &task
 	}
@@ -257,11 +262,11 @@ func (s *Scheduler) RunNow(prompt string, providerType, providerName, providerMo
 func (s *Scheduler) saveTask(task *ScheduledTask) error {
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO scheduled_tasks 
-		(id, prompt, interval_sec, run_at, is_repeating, created_at, last_run, run_count, last_error, provider_type, provider_name, provider_model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, prompt, interval_sec, run_at, is_repeating, created_at, last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Prompt, task.IntervalSec, task.RunAt, task.IsRepeating,
 		task.CreatedAt.Format(time.RFC3339), task.LastRun.Format(time.RFC3339),
-		task.RunCount, task.LastError, task.ProviderType, task.ProviderName, task.ProviderModel)
+		task.RunCount, task.LastError, task.LastOutput, task.ProviderType, task.ProviderName, task.ProviderModel)
 	return err
 }
 
@@ -321,14 +326,19 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 		return
 	}
 
-	cfg := &struct {
-		Type  string `json:"type"`
-		Name  string `json:"name"`
-		Model string `json:"model"`
-	}{
-		Type:  task.ProviderType,
-		Name:  task.ProviderName,
-		Model: task.ProviderModel,
+	var cfg interface{}
+	if task.ProviderType == "unknown" || task.ProviderType == "" {
+		cfg = map[string]interface{}{
+			"type":  "current",
+			"name":  "current",
+			"model": "current",
+		}
+	} else {
+		cfg = map[string]interface{}{
+			"type":  task.ProviderType,
+			"name":  task.ProviderName,
+			"model": task.ProviderModel,
+		}
 	}
 
 	prov, err := s.provider.GetProvider(cfg)
@@ -355,8 +365,10 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 	result, err := provInterface.Send(taskCtx, task.Prompt)
 	if err != nil {
 		task.LastError = fmt.Sprintf("execution error: %v", err)
+		task.LastOutput = ""
 	} else {
 		task.LastError = ""
+		task.LastOutput = result
 		fmt.Printf("[Scheduler %s] Result: %s\n", task.ID, truncate(result, 200))
 	}
 

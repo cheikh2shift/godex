@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cheikh2shift/godex/internal/history"
 	"github.com/cheikh2shift/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/scheduler"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -74,6 +75,7 @@ type promptModel struct {
 	searchResults   []string
 	statusMessage   string
 	commitList      []string
+	scheduleList    []string
 	statusCh        <-chan string
 	delegateCh      <-chan hive.HiveStats
 	delegateCount   int
@@ -550,6 +552,11 @@ func (m *promptModel) handleTab() {
 			return
 		}
 	}
+	if strings.HasPrefix(value, "/schedule ") && strings.Contains(value, " ") {
+		if m.handleScheduleTab(value) {
+			return
+		}
+	}
 	if value != "" && !strings.HasPrefix(value, "/") {
 		return
 	}
@@ -587,6 +594,46 @@ func (m *promptModel) handleTab() {
 		return
 	}
 	m.showCompletions = true
+}
+
+func (m *promptModel) handleScheduleTab(value string) bool {
+	parts := strings.Fields(value)
+	if len(parts) != 2 {
+		return false
+	}
+	prefix := strings.ToUpper(parts[1])
+	if sched == nil {
+		return false
+	}
+	tasks := sched.ListTasks()
+	if len(tasks) == 0 {
+		return false
+	}
+	var matches []string
+	for _, t := range tasks {
+		task, ok := t.(*scheduler.ScheduledTask)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(task.ID, prefix) {
+			matches = append(matches, task.ID)
+		}
+	}
+	if len(matches) == 0 {
+		return false
+	}
+	if len(matches) == 1 && prefix != "" {
+		m.input.SetValue("/schedule " + matches[0])
+		m.input.SetCursor(len([]rune(m.input.Value())))
+		m.resetCompletion()
+		return true
+	}
+	m.scheduleList = nil
+	for _, id := range matches {
+		m.scheduleList = append(m.scheduleList, id)
+	}
+	m.resetCompletion()
+	return true
 }
 
 func (m *promptModel) handleCommitPullTab(value string) bool {

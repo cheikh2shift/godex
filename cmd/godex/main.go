@@ -985,7 +985,8 @@ promptLoop:
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
-			if len(toolCalls) > 0 && isToolCallResponse {
+			totalToolCalls := len(toolCalls) + len(missingTools)
+			if totalToolCalls > 0 && isToolCallResponse {
 				prevNoTool = false
 			}
 			if !isToolCallResponse || len(toolCalls) == 0 {
