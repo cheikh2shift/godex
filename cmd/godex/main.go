@@ -35,6 +35,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/mcp"
 	"github.com/cheikh2shift/godex/internal/ml"
 	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/scheduler"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
 )
@@ -62,7 +63,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist", "/schedule"}
 
 var (
 	greenOrb         = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -73,6 +74,7 @@ var (
 	pathPromptMu     sync.Mutex
 	hivePendingStop  chan struct{}
 	summarisingStart chan struct{}
+	sched            *scheduler.Scheduler
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -319,10 +321,34 @@ func main() {
 		setter.SetStatusChannel(statusCh)
 	}
 
+	sched, err = scheduler.NewDefault()
+	if err != nil {
+		log.Printf("[Scheduler] Failed to initialize: %v", err)
+	} else {
+		sched.SetProviderGetter(&schedulerProviderGetter{provider: provider})
+		schedulerServer := mcp.NewSchedulerServer(sched, &schedulerProviderGetter{provider: provider})
+		servers = append(servers, schedulerServer)
+		for _, tool := range schedulerServer.Tools() {
+			var inputSchema map[string]interface{}
+			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+				inputSchema = map[string]interface{}{}
+			}
+			providerTools = append(providerTools, providers.Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: inputSchema,
+			})
+		}
+		agent.SetProviderTools(provider, providerTools)
+		if debugMode {
+			fmt.Println(muted.Render("[Scheduler] Initialized"))
+		}
+	}
+
 	fmt.Println()
 
 	if prompt != "" {
-		err := runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
+		err = runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
 		cleanup(servers)
 		if err != nil {
 			log.Fatalf("prompt failed: %v", err)
@@ -852,6 +878,10 @@ promptLoop:
 			}
 			continue
 		}
+		if strings.HasPrefix(input, "/schedule") {
+			handleSchedule(input)
+			continue
+		}
 
 		nativeToolCalls := llmProvider.SupportsNativeToolCalls()
 		var toolsSection string
@@ -1233,6 +1263,9 @@ promptLoop:
 	}
 	if historyDB != nil {
 		historyDB.Close()
+	}
+	if sched != nil {
+		sched.Close()
 	}
 	fmt.Println("Goodbye!")
 }
@@ -1955,6 +1988,7 @@ Commands:
   /commit-merge <ref> - Merge committed history into current state
   /commit-search <query> - Search commits by ref or message
   /clear-context    - Reset context counter and LLM client
+  /schedule         - List scheduled tasks (see /schedule help for more)
   /save, /save-exit - Save session and exit
   /kill <pid>       - Kill a background process by PID
   /killbg           - Kill all background processes

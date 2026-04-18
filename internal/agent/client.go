@@ -48,7 +48,6 @@ func SendPrompt(ctx context.Context, provider *config.Provider, prompt string) (
 	return strings.TrimSpace(resp), nil
 }
 
-
 func CancelPrompt(provider *config.Provider) {
 	if provider == nil {
 		return
@@ -71,7 +70,6 @@ func CancelPrompt(provider *config.Provider) {
 	mcpExecutorsMu.Unlock()
 }
 
-
 func SetProviderTools(provider *config.Provider, tools []providers.Tool) {
 	p, err := GetProvider(provider)
 	if err != nil {
@@ -81,7 +79,6 @@ func SetProviderTools(provider *config.Provider, tools []providers.Tool) {
 		pt.SetTools(tools)
 	}
 }
-
 
 func RegisterMCPExecutor(provider *config.Provider, executor *mcp.MCPToolExecutor) {
 	if provider == nil || executor == nil {
@@ -146,4 +143,22 @@ func GetProvider(cfg *config.Provider) (providers.Provider, error) {
 
 func cacheKey(cfg *config.Provider) string {
 	return fmt.Sprintf("%s|%s|%s|%s", cfg.Type, cfg.Name, cfg.Model, cfg.Endpoint)
+}
+
+type ProviderConfig struct {
+	Type  string
+	Name  string
+	Model string
+}
+
+func GetProviderFromConfig(cfg *ProviderConfig) (providers.Provider, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("nil config")
+	}
+	provider := &config.Provider{
+		Type:  cfg.Type,
+		Name:  cfg.Name,
+		Model: cfg.Model,
+	}
+	return GetProvider(provider)
 }
