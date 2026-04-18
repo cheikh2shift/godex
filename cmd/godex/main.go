@@ -322,7 +322,7 @@ func main() {
 	fmt.Println()
 
 	if prompt != "" {
-		err := runSinglePrompt(ctx, provider, prompt, autoConfirm, servers)
+		err := runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
 		cleanup(servers)
 		if err != nil {
 			log.Fatalf("prompt failed: %v", err)
@@ -2026,7 +2026,7 @@ func isOllamaPromptTooLong(err error) bool {
 		strings.Contains(msg, "max context length")
 }
 
-func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, servers []MCPServer) error {
+func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt string, autoConfirm bool, debug bool, servers []MCPServer) error {
 	tree, _ := godexcontext.BuildTree(".")
 	wd, _ := os.Getwd()
 
@@ -2049,7 +2049,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 		toolTimeout = *provider.ToolTimeout
 	}
 
-	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, false, false, false, nil)
+	output, err := runToolLoop(ctx, provider, servers, fullPrompt, prompt, maxToolRounds, toolTimeout, llmProvider, true, debug, false, false, nil)
 	if err != nil {
 		return err
 	}
@@ -2179,6 +2179,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if verbose {
 			fmt.Printf("[TL Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 		}
+
 		if debug {
 			for _, tc := range toolCalls {
 				name := tc["name"].(string)
@@ -2249,14 +2250,14 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 					onToolCall(toolName)
 				}
 
-				if verbose {
+				/*	if verbose {
 					toolDesc := getToolDescription(servers, toolName)
 					if toolDesc != "" {
 						fmt.Print("\033[90m")
 						fmt.Printf("  %s\n", toolDesc)
 						fmt.Print("\033[0m")
 					}
-				}
+				}*/
 
 				if raw, ok := args["_raw"]; ok {
 					if rawStr, ok := raw.(string); ok {

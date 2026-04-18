@@ -33,7 +33,7 @@ jobs:
       - name: Run prompt before TUI test
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
+          godex --config providers.yaml --debug --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
@@ -71,7 +71,7 @@ jobs:
       - name: Run prompt before TUI test
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
+          godex --config providers.yaml --debug --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
@@ -109,7 +109,7 @@ jobs:
       - name: Run prompt before TUI test
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
+          godex --config providers.yaml --debug --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
@@ -163,7 +163,7 @@ jobs:
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
-          ./godex-windows-amd64.exe --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
+          ./godex-windows-amd64.exe --debug --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
         shell: pwsh
 
       - name: Test binary execution
