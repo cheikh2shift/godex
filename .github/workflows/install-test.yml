@@ -12,19 +12,34 @@ jobs:
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Create .env from GitHub secret
+        run: |
+          printf 'OPENROUTER_API_KEY=%s\n' "${{ secrets.OPENROUTER_API_KEY }}" > .env
+          set -a
+          . ./.env
+          set +a
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "OPENROUTER_API_KEY secret is required"
+            exit 1
+          fi
+          echo "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" >> "$GITHUB_ENV"
       - name: Verify installation
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           godex --version
-      - name: Create dummy providers.yaml
+      - name: Create OpenRouter providers.yaml
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+          printf -- 'providers:\n  - name: openrouter-ci\n    type: openrouter\n    endpoint: https://openrouter.ai/api/v1\n    model: minimax/minimax-m2.5\n    api_key_env: OPENROUTER_API_KEY\n    max_tool_rounds: 2\n    mcp_servers:\n      - name: filesystem\n        allowed_paths:\n          - .\ndefault_provider: openrouter-ci\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Run prompt before TUI test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          script -c "godex --config providers.yaml --provider my-local-identifier --model llama3" output.txt > output.txt 2>&1 &
+          script -c "godex --config providers.yaml --provider openrouter-ci" output.txt > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -35,19 +50,34 @@ jobs:
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+      - name: Create .env from GitHub secret
+        run: |
+          printf 'OPENROUTER_API_KEY=%s\n' "${{ secrets.OPENROUTER_API_KEY }}" > .env
+          set -a
+          . ./.env
+          set +a
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "OPENROUTER_API_KEY secret is required"
+            exit 1
+          fi
+          echo "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" >> "$GITHUB_ENV"
       - name: Verify installation
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           godex --version
-      - name: Create dummy providers.yaml
+      - name: Create OpenRouter providers.yaml
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+          printf -- 'providers:\n  - name: openrouter-ci\n    type: openrouter\n    endpoint: https://openrouter.ai/api/v1\n    model: minimax/minimax-m2.5\n    api_key_env: OPENROUTER_API_KEY\n    max_tool_rounds: 2\n    mcp_servers:\n      - name: filesystem\n        allowed_paths:\n          - .\ndefault_provider: openrouter-ci\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Run prompt before TUI test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          script output.txt godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &
+          script output.txt godex --config providers.yaml --provider openrouter-ci > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -58,15 +88,34 @@ jobs:
     steps:
       - name: Download and run install.sh
         run: curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
-      - name: Create dummy providers.yaml
+      - name: Create .env from GitHub secret
         run: |
-          printf -- 'providers:\n  - name: my-local-identifier\n    type: ollama\n    api_key: dummy\ndefault_provider: my-local-identifier\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+          printf 'OPENROUTER_API_KEY=%s\n' "${{ secrets.OPENROUTER_API_KEY }}" > .env
+          set -a
+          . ./.env
+          set +a
+          if [ -z "${OPENROUTER_API_KEY}" ]; then
+            echo "OPENROUTER_API_KEY secret is required"
+            exit 1
+          fi
+          echo "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" >> "$GITHUB_ENV"
+      - name: Verify installation
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          godex --version
+      - name: Create OpenRouter providers.yaml
+        run: |
+          printf -- 'providers:\n  - name: openrouter-ci\n    type: openrouter\n    endpoint: https://openrouter.ai/api/v1\n    model: minimax/minimax-m2.5\n    api_key_env: OPENROUTER_API_KEY\n    max_tool_rounds: 2\n    mcp_servers:\n      - name: filesystem\n        allowed_paths:\n          - .\ndefault_provider: openrouter-ci\nvision_enabled: false\nvision_cli_downloaded: true\n' > providers.yaml
+      - name: Run prompt before TUI test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          godex --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
       - name: Test binary execution
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "--- VERSION ---"
           godex --version
-          script output.txt godex --config providers.yaml --provider my-local-identifier --model llama3 > output.txt 2>&1 &
+          script output.txt godex --config providers.yaml --provider openrouter-ci > output.txt 2>&1 &
           sleep 3
           pkill -f "godex" || true
           echo "--- OUTPUT ---"
@@ -94,9 +143,27 @@ jobs:
           }
         shell: pwsh
 
-      - name: Create dummy providers.yaml
+      - name: Create .env from GitHub secret
         run: |
-          "providers:`n  - name: my-local-identifier`n    type: ollama`n    api_key: dummy`ndefault_provider: my-local-identifier`nvision_enabled: false`nvision_cli_downloaded: false" | Out-File -FilePath providers.yaml -Encoding utf8
+          "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" | Out-File -FilePath .env -Encoding ascii
+          $line = Get-Content .env -Raw
+          $key = (($line -replace '^OPENROUTER_API_KEY=', '')).Trim()
+          if ([string]::IsNullOrWhiteSpace($key)) {
+            throw "OPENROUTER_API_KEY secret is required"
+          }
+          "OPENROUTER_API_KEY=$key" | Out-File -FilePath $env:GITHUB_ENV -Append
+        shell: pwsh
+
+      - name: Create OpenRouter providers.yaml
+        run: |
+          "providers:`n  - name: openrouter-ci`n    type: openrouter`n    endpoint: https://openrouter.ai/api/v1`n    model: minimax/minimax-m2.5`n    api_key_env: OPENROUTER_API_KEY`n    max_tool_rounds: 2`n    mcp_servers:`n      - name: filesystem`n        allowed_paths:`n          - .`ndefault_provider: openrouter-ci`nvision_enabled: false`nvision_cli_downloaded: false" | Out-File -FilePath providers.yaml -Encoding utf8
+        shell: pwsh
+
+      - name: Run prompt before TUI test
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          ./godex-windows-amd64.exe --config providers.yaml --provider openrouter-ci --prompt "What are the files in this directory" --auto-confirm
         shell: pwsh
 
       - name: Test binary execution
@@ -112,7 +179,7 @@ jobs:
             $pinfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
             $pinfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
             $pinfo.FileName = ".\godex-windows-amd64.exe"
-            $pinfo.Arguments = "--config providers.yaml --provider my-local-identifier --model llama3"
+            $pinfo.Arguments = "--config providers.yaml --provider openrouter-ci"
             $pinfo.UseShellExecute = $false
             $pinfo.RedirectStandardOutput = $true
             $pinfo.RedirectStandardError = $true
