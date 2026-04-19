@@ -37,20 +37,20 @@ type ScheduledTask struct {
 }
 
 type Scheduler struct {
-	db          *sql.DB
-	tasks       map[string]*ScheduledTask
-	taskMu      sync.RWMutex
-	running     map[string]context.CancelFunc
-	runMu       sync.RWMutex
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
-	provider    ProviderGetter
-	servers     []ToolServer
+	db             *sql.DB
+	tasks          map[string]*ScheduledTask
+	taskMu         sync.RWMutex
+	running        map[string]context.CancelFunc
+	runMu          sync.RWMutex
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	provider       ProviderGetter
+	servers        []ToolServer
 	onTaskFinished func(*ScheduledTask)
-	maxRounds   int
-	toolTimeout int
-	wd          string
-	os          string
+	maxRounds      int
+	toolTimeout    int
+	wd             string
+	os             string
 }
 
 type ProviderGetter interface {
@@ -201,8 +201,8 @@ func (s *Scheduler) loadTasks() error {
 		var task ScheduledTask
 		var (
 			lastRun, createdAt, runAt, lastOutput sql.NullString
-			workingDir                          sql.NullString
-			isRepeatingInt                       sql.NullInt64
+			workingDir                            sql.NullString
+			isRepeatingInt                        sql.NullInt64
 		)
 		err := rows.Scan(
 			&task.ID, &task.Prompt, &task.IntervalSec, &runAt, &isRepeatingInt, &workingDir,
@@ -545,7 +545,7 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
-				if !s.looksLikeToolCall(resp) {
+				if !s.looksLikeToolCall(resp) && round > 0 {
 					return resp, nil
 				}
 				if strings.TrimSpace(resp) != "" && prevNoTool {
