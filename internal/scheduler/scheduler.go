@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -186,12 +187,17 @@ func (s *Scheduler) loadTasks() error {
 		       last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model
 		FROM scheduled_tasks
 	`
+	if strings.TrimSpace(s.wd) != "" {
+		query += ` WHERE working_dir = ?`
+	}
+	query += ` ORDER BY created_at ASC`
+
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if strings.TrimSpace(s.wd) != "" {
-		rows, err = s.db.Query(query+` WHERE working_dir = ?`, s.wd)
+		rows, err = s.db.Query(query, s.wd)
 	} else {
 		rows, err = s.db.Query(query)
 	}
@@ -827,11 +833,18 @@ func (s *Scheduler) ListTasks() []interface{} {
 	s.taskMu.RLock()
 	defer s.taskMu.RUnlock()
 
-	tasks := make([]interface{}, 0, len(s.tasks))
+	tasks := make([]*ScheduledTask, 0, len(s.tasks))
 	for _, task := range s.tasks {
 		tasks = append(tasks, task)
 	}
-	return tasks
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
+	})
+	result := make([]interface{}, len(tasks))
+	for i, t := range tasks {
+		result[i] = t
+	}
+	return result
 }
 
 func (s *Scheduler) GetTask(id string) interface{} {
