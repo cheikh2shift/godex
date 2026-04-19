@@ -23,10 +23,14 @@ func (s *schedulerProviderGetter) GetProvider(cfg interface{}) (interface{}, err
 	providerName, _ := cfgMap["name"].(string)
 	providerModel, _ := cfgMap["model"].(string)
 
-	if (providerType == "unknown" || providerType == "current") && s.provider != nil {
-		providerType = s.provider.Type
-		providerName = s.provider.Name
-		providerModel = s.provider.Model
+	// The scheduler often requests a "current" provider. For providers like OpenRouter,
+	// the API key lives on the full config.Provider struct, so we must pass it through.
+	useCurrent := s.provider != nil && (providerType == "" || providerType == "unknown" || providerType == "current" || providerName == "" || providerName == "current")
+	if useCurrent {
+		// Reinitialize to ensure runtime auth (OpenRouter keys, env) is present for scheduler runs.
+		// NOTE: We intentionally do not override the model here to avoid mutating global config.
+		_ = providerModel
+		return agent.ReinitializeProvider(s.provider)
 	}
 
 	return agent.GetProviderFromConfig(&agent.ProviderConfig{
@@ -159,6 +163,11 @@ func handleSchedule(input string) {
 			return
 		}
 		if st.LastOutput == "" {
+
+			if st.LastError != "" {
+				fmt.Printf("Error for task %s:\n%s\n", id, st.LastError)
+				return
+			}
 			fmt.Printf("No output for task %s\n", id)
 			return
 		}

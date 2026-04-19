@@ -559,23 +559,30 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 			return finalResp, nil
 		}
 
-		prevNoTool = false
+			prevNoTool = false
 
-		var toolResults []string
-		for _, tc := range toolCalls {
-			toolName, ok := tc["name"].(string)
-			if !ok {
-				continue
-			}
-			args, ok := tc["arguments"].(map[string]interface{})
-			if !ok {
-				continue
-			}
+			var toolResults []string
+			seenThisRound := make(map[string]bool)
+			for _, tc := range toolCalls {
+				toolName, ok := tc["name"].(string)
+				if !ok {
+					continue
+				}
+				args, ok := tc["arguments"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				argsJSON, _ := json.Marshal(args)
+				sig := fmt.Sprintf("%s:%s", toolName, string(argsJSON))
+				if seenThisRound[sig] {
+					continue
+				}
+				seenThisRound[sig] = true
 
-			result, err := s.callTool(ctx, toolName, args, toolTimeout)
-			if err != nil {
-				toolResults = append(toolResults, fmt.Sprintf("ERROR: %v", err))
-			} else {
+				result, err := s.callTool(ctx, toolName, args, toolTimeout)
+				if err != nil {
+					toolResults = append(toolResults, fmt.Sprintf("ERROR: %v", err))
+				} else {
 				toolResults = append(toolResults, s.truncate(result, 2500))
 			}
 		}
@@ -584,13 +591,16 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 			return finalResp, nil
 		}
 
-		currentToolCalls := make(map[string]bool)
-		for _, tc := range toolCalls {
-			name := tc["name"].(string)
-			args := tc["arguments"]
-			argsJson, _ := json.Marshal(args)
-			currentToolCalls[fmt.Sprintf("%s:%s", name, string(argsJson))] = true
-		}
+			currentToolCalls := make(map[string]bool)
+			for _, tc := range toolCalls {
+				name, ok := tc["name"].(string)
+				if !ok {
+					continue
+				}
+				args := tc["arguments"]
+				argsJSON, _ := json.Marshal(args)
+				currentToolCalls[fmt.Sprintf("%s:%s", name, string(argsJSON))] = true
+			}
 
 		hasRepeatedCalls := false
 		for sig := range currentToolCalls {
