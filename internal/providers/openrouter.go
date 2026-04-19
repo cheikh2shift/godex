@@ -89,6 +89,19 @@ type openRouterProvider struct {
 	statusCh         chan<- string
 }
 
+func (p *openRouterProvider) emitStatus(msg string) {
+	p.mu.Lock()
+	ch := p.statusCh
+	p.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- msg:
+	default:
+	}
+}
+
 func init() {
 	Register("openrouter", newOpenRouterProvider)
 }
@@ -162,7 +175,7 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
-	systemPrompt, userInput := splitSystemUserPrompt(prompt)
+	systemPrompt, userInput := SplitSystemUserPrompt(prompt)
 	if userInput == "" {
 		userInput = strings.TrimSpace(prompt)
 	}
@@ -219,13 +232,13 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			fmt.Printf("\n[OPENROUTER] Waiting %v before retry (attempt %d/%d)...\n", retryDelay, attempt, maxRetries)
+			p.emitStatus(fmt.Sprintf("OpenRouter: waiting %v before retry (%d/%d)", retryDelay, attempt, maxRetries))
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
 			case <-time.After(retryDelay):
 			}
-			fmt.Printf("\n[OPENROUTER] Retrying request (attempt %d/%d)...\n", attempt, maxRetries)
+			p.emitStatus(fmt.Sprintf("OpenRouter: retrying request (%d/%d)", attempt, maxRetries))
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/responses", bytes.NewReader(body))
@@ -242,7 +255,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		if err != nil {
 			lastErr = fmt.Errorf("request failed: %w", err)
 			if attempt < maxRetries {
-				fmt.Printf("[OPENROUTER00] retryable error: %v\n", lastErr)
+				p.emitStatus(fmt.Sprintf("OpenRouter: retryable error: %v", lastErr))
 			}
 			continue
 		}
@@ -253,7 +266,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		if resp.StatusCode == http.StatusTooManyRequests {
 			lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(bodyBytes))
 			if attempt < maxRetries {
-				fmt.Printf("[OPENROUTER] retryable error: %v\n", lastErr)
+				p.emitStatus(fmt.Sprintf("OpenRouter: retryable error: %v", lastErr))
 			}
 			continue
 		}

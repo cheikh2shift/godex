@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
@@ -17,6 +16,8 @@ var (
 	providerCacheMu sync.Mutex
 	mcpExecutors    = map[string]*mcp.MCPToolExecutor{}
 	mcpExecutorsMu  sync.Mutex
+	toolsCache      = map[string][]providers.Tool{}
+	toolsCacheMu    sync.Mutex
 )
 
 type SendResult struct {
@@ -48,7 +49,6 @@ func SendPrompt(ctx context.Context, provider *config.Provider, prompt string) (
 	return strings.TrimSpace(resp), nil
 }
 
-
 func CancelPrompt(provider *config.Provider) {
 	if provider == nil {
 		return
@@ -71,17 +71,21 @@ func CancelPrompt(provider *config.Provider) {
 	mcpExecutorsMu.Unlock()
 }
 
-
 func SetProviderTools(provider *config.Provider, tools []providers.Tool) {
 	p, err := GetProvider(provider)
 	if err != nil {
 		return
 	}
+	if provider != nil {
+		key := cacheKey(provider)
+		toolsCacheMu.Lock()
+		toolsCache[key] = tools
+		toolsCacheMu.Unlock()
+	}
 	if pt, ok := p.(interface{ SetTools([]providers.Tool) }); ok {
 		pt.SetTools(tools)
 	}
 }
-
 
 func RegisterMCPExecutor(provider *config.Provider, executor *mcp.MCPToolExecutor) {
 	if provider == nil || executor == nil {
@@ -110,7 +114,7 @@ func CloseProvider(cfg *config.Provider) {
 	}
 	providerCacheMu.Unlock()
 	if ok {
-		log.Printf("[agent] Closing provider for %s/%s", cfg.Type, cfg.Name)
+		//log.Printf("[agent] Closing provider for %s/%s", cfg.Type, cfg.Name)
 		_ = p.Close()
 	}
 
@@ -140,10 +144,47 @@ func GetProvider(cfg *config.Provider) (providers.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	toolsCacheMu.Lock()
+	tools := toolsCache[key]
+	toolsCacheMu.Unlock()
+	if len(tools) > 0 {
+		if pt, ok := p.(interface{ SetTools([]providers.Tool) }); ok {
+			pt.SetTools(tools)
+		}
+	}
 	providerCache[key] = p
 	return p, nil
 }
 
+// ReinitializeProvider closes any cached provider instance for cfg and creates a fresh one.
+// This is useful when background workers (like the scheduler) need a clean client instance
+// with all settings (API keys, endpoint, params) preserved.
+func ReinitializeProvider(cfg *config.Provider) (providers.Provider, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("nil provider")
+	}
+	CloseProvider(cfg)
+	return GetProvider(cfg)
+}
+
 func cacheKey(cfg *config.Provider) string {
 	return fmt.Sprintf("%s|%s|%s|%s", cfg.Type, cfg.Name, cfg.Model, cfg.Endpoint)
+}
+
+type ProviderConfig struct {
+	Type  string
+	Name  string
+	Model string
+}
+
+func GetProviderFromConfig(cfg *ProviderConfig) (providers.Provider, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("nil config")
+	}
+	provider := &config.Provider{
+		Type:  cfg.Type,
+		Name:  cfg.Name,
+		Model: cfg.Model,
+	}
+	return GetProvider(provider)
 }

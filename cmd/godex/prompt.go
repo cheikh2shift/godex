@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cheikh2shift/godex/internal/history"
 	"github.com/cheikh2shift/godex/internal/hive"
+	"github.com/cheikh2shift/godex/internal/scheduler"
 )
 
 var ErrPromptAborted = errors.New("prompt aborted")
@@ -74,6 +75,7 @@ type promptModel struct {
 	searchResults   []string
 	statusMessage   string
 	commitList      []string
+	scheduleList    []string
 	statusCh        <-chan string
 	delegateCh      <-chan hive.HiveStats
 	delegateCount   int
@@ -166,9 +168,10 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.statusHidden {
 			return m, nil
 		}
-		if (m.statusMessage != "" || len(m.commitList) > 0) && msg.Type != tea.KeyTab {
+		if (m.statusMessage != "" || len(m.commitList) > 0 || len(m.scheduleList) > 0) && msg.Type != tea.KeyTab {
 			m.statusMessage = ""
 			m.commitList = nil
+			m.scheduleList = nil
 		}
 		if msg.Type == tea.KeyCtrlR {
 			if m.searchMode {
@@ -253,6 +256,12 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(statusMsg); ok {
 		m.applyStatusMessage(msg)
 		return m, waitStatusCmd(m.statusCh)
+	}
+	if _, ok := msg.(statusMsgPoll); ok {
+		return m, waitStatusCmd(m.statusCh)
+	}
+	if _, ok := msg.(delegateMsgPoll); ok {
+		return m, waitDelegateCmd(m.delegateCh)
 	}
 	if msg, ok := msg.(delegateMsg); ok {
 		m.delegateCount = msg.Count
@@ -409,6 +418,14 @@ func (m promptModel) View() string {
 			b.WriteByte('\n')
 		}
 	}
+	if len(m.scheduleList) > 0 {
+		b.WriteByte('\n')
+		listStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		for _, id := range m.scheduleList {
+			b.WriteString(listStyle.Render(id))
+			b.WriteByte('\n')
+		}
+	}
 	if m.statusMessage != "" {
 		b.WriteByte('\n')
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(m.statusMessage))
@@ -550,6 +567,11 @@ func (m *promptModel) handleTab() {
 			return
 		}
 	}
+	if strings.HasPrefix(value, "/schedule ") && strings.Contains(value, " ") {
+		if m.handleScheduleTab(value) {
+			return
+		}
+	}
 	if value != "" && !strings.HasPrefix(value, "/") {
 		return
 	}
@@ -587,6 +609,62 @@ func (m *promptModel) handleTab() {
 		return
 	}
 	m.showCompletions = true
+}
+
+func (m *promptModel) handleScheduleTab(value string) bool {
+	hasTrailingSpace := strings.HasSuffix(value, " ")
+	parts := strings.Fields(value)
+	if hasTrailingSpace {
+		parts = append(parts, "")
+	}
+
+	var (
+		prefix     string
+		nextPrefix string
+	)
+
+	if len(parts) == 2 {
+		prefix = strings.ToUpper(parts[1])
+		nextPrefix = "/schedule "
+	} else if len(parts) == 3 && (parts[1] == "stop" || parts[1] == "remove") {
+		prefix = strings.ToUpper(parts[2])
+		nextPrefix = "/schedule " + parts[1] + " "
+	} else {
+		return false
+	}
+
+	if sched == nil {
+		return false
+	}
+	tasks := sched.ListTasks()
+	if len(tasks) == 0 {
+		return false
+	}
+	var matches []string
+	for _, t := range tasks {
+		task, ok := t.(*scheduler.ScheduledTask)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(task.ID, prefix) {
+			matches = append(matches, task.ID)
+		}
+	}
+	if len(matches) == 0 {
+		return false
+	}
+	if len(matches) == 1 {
+		m.input.SetValue(nextPrefix + matches[0])
+		m.input.SetCursor(len([]rune(m.input.Value())))
+		m.resetCompletion()
+		return true
+	}
+	m.scheduleList = nil
+	for _, id := range matches {
+		m.scheduleList = append(m.scheduleList, id)
+	}
+	m.resetCompletion()
+	return true
 }
 
 func (m *promptModel) handleCommitPullTab(value string) bool {
@@ -863,12 +941,24 @@ func waitStatusCmd(ch <-chan string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return nil
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			//fmt.Printf("DEBUG waitStatusCmd received: %s\n", msg)
+			return statusMsg(msg)
+		case <-time.After(50 * time.Millisecond):
+			return statusMsgPoll{}
 		}
-		return statusMsg(msg)
 	}
+}
+
+type statusMsgPoll struct{}
+
+func (statusMsgPoll) Init() {}
+func (p statusMsgPoll) Update(msg tea.Msg) (tea.Msg, tea.Cmd) {
+	return msg, nil
 }
 
 func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
@@ -876,12 +966,23 @@ func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return nil
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			return delegateMsg{Count: msg.DelegatedCount, Latest: msg.LatestCommand}
+		case <-time.After(50 * time.Millisecond):
+			return delegateMsgPoll{}
 		}
-		return delegateMsg{Count: msg.DelegatedCount, Latest: msg.LatestCommand}
 	}
+}
+
+type delegateMsgPoll struct{}
+
+func (delegateMsgPoll) Init() {}
+func (p delegateMsgPoll) Update(msg tea.Msg) (tea.Msg, tea.Cmd) {
+	return msg, nil
 }
 
 type commitRow struct {

@@ -35,6 +35,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/mcp"
 	"github.com/cheikh2shift/godex/internal/ml"
 	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/scheduler"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
 )
@@ -62,7 +63,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist", "/schedule", "/schedule-clear"}
 
 var (
 	greenOrb         = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -73,6 +74,7 @@ var (
 	pathPromptMu     sync.Mutex
 	hivePendingStop  chan struct{}
 	summarisingStart chan struct{}
+	sched            *scheduler.Scheduler
 )
 
 var thinkingStyle = lipgloss.NewStyle().
@@ -319,10 +321,8 @@ func main() {
 		setter.SetStatusChannel(statusCh)
 	}
 
-	fmt.Println()
-
 	if prompt != "" {
-		err := runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
+		err = runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
 		cleanup(servers)
 		if err != nil {
 			log.Fatalf("prompt failed: %v", err)
@@ -330,8 +330,57 @@ func main() {
 		return
 	}
 
+	sched, err = scheduler.NewDefault()
+	if err != nil {
+		log.Printf("[Scheduler] Failed to initialize: %v", err)
+	} else {
+		sched.SetStatusChannel(statusCh)
+		if debugMode {
+			fmt.Println(muted.Render("[Scheduler] Initialized with statusCh"))
+		}
+		sched.SetOnTaskFinished(func(*scheduler.ScheduledTask) {
+			playSound()
+		})
+		sched.SetProviderGetter(&schedulerProviderGetter{provider: provider})
+		var serverSlice []interface{} = make([]interface{}, len(servers))
+		for i, s := range servers {
+			serverSlice[i] = s
+		}
+		sched.SetServers(serverSlice)
+
+		schedulerServer := mcp.NewSchedulerServer(sched, &schedulerProviderGetter{provider: provider})
+		servers = append(servers, schedulerServer)
+		for _, tool := range schedulerServer.Tools() {
+			var inputSchema map[string]interface{}
+			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
+				inputSchema = map[string]interface{}{}
+			}
+			providerTools = append(providerTools, providers.Tool{
+				Name:        tool.Name,
+				Description: tool.Description,
+				InputSchema: inputSchema,
+			})
+		}
+		agent.SetProviderTools(provider, providerTools)
+		if debugMode {
+			fmt.Println(muted.Render("[Scheduler] Initialized"))
+		}
+	}
+
 	// Get working directory for session files
 	wd, _ := os.Getwd()
+
+	if sched != nil {
+		maxRounds := 10
+		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+			maxRounds = *provider.MaxToolRounds
+		}
+		toolTimeout := 180
+		if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+			toolTimeout = *provider.ToolTimeout
+		}
+		sched.SetConfig(maxRounds, toolTimeout, wd, runtime.GOOS)
+	}
 
 	// Initialize history database (stored in tmp directory)
 	var historyDB *history.HistoryDB
@@ -852,6 +901,14 @@ promptLoop:
 			}
 			continue
 		}
+		if input == "/schedule-clear" {
+			handleSchedule("/schedule clear")
+			continue
+		}
+		if strings.HasPrefix(input, "/schedule") {
+			handleSchedule(input)
+			continue
+		}
 
 		nativeToolCalls := llmProvider.SupportsNativeToolCalls()
 		var toolsSection string
@@ -955,12 +1012,14 @@ promptLoop:
 
 			fmt.Printf("[Round %d/%d] Got %d tool calls, isToolCallResponse=%v\n", round+1, maxToolRounds, len(toolCalls), isToolCallResponse)
 
-			if len(toolCalls) > 0 && isToolCallResponse {
+			totalToolCalls := len(toolCalls) + len(missingTools)
+			if totalToolCalls > 0 && isToolCallResponse {
 				prevNoTool = false
 			}
+
 			if !isToolCallResponse || len(toolCalls) == 0 {
 
-				if !looksLikeToolCall(resp) {
+				if !looksLikeToolCall(resp) && round > 0 {
 					go playSound()
 					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
 					break
@@ -1036,12 +1095,12 @@ promptLoop:
 						}
 					}
 
-					toolDesc := getToolDescription(servers, toolName)
+					/*toolDesc := getToolDescription(servers, toolName)
 					if toolDesc != "" {
 						fmt.Print("\033[90m")
 						fmt.Printf("  %s\n", toolDesc)
 						fmt.Print("\033[0m")
-					}
+					}*/
 
 					var argsStr string
 					for k, v := range args {
@@ -1233,6 +1292,9 @@ promptLoop:
 	}
 	if historyDB != nil {
 		historyDB.Close()
+	}
+	if sched != nil {
+		sched.Close()
 	}
 	fmt.Println("Goodbye!")
 }
@@ -1803,17 +1865,6 @@ func handleKill(servers []MCPServer, input string) {
 	fmt.Println("No bash server found")
 }
 
-func getToolDescription(servers []MCPServer, toolName string) string {
-	for _, server := range servers {
-		for _, tool := range server.Tools() {
-			if tool.Name == toolName {
-				return tool.Description
-			}
-		}
-	}
-	return ""
-}
-
 func handleListBg(servers []MCPServer) {
 	for _, server := range servers {
 		if bs, ok := server.(*mcp.BashServer); ok {
@@ -1955,6 +2006,7 @@ Commands:
   /commit-merge <ref> - Merge committed history into current state
   /commit-search <query> - Search commits by ref or message
   /clear-context    - Reset context counter and LLM client
+  /schedule         - List scheduled tasks (see /schedule help for more)
   /save, /save-exit - Save session and exit
   /kill <pid>       - Kill a background process by PID
   /killbg           - Kill all background processes
@@ -2192,7 +2244,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
 
-				if !looksLikeToolCall(resp) {
+				if !looksLikeToolCall(resp) && round > 0 {
 					if nocont {
 						fmt.Printf("\n\n%s\n", renderMarkdown(resp))
 					}
