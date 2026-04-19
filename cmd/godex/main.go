@@ -63,7 +63,7 @@ type MCPServer interface {
 	Close() error
 }
 
-var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist", "/schedule"}
+var slashCommands = []string{"/add-path ", "/remove-path ", "/paths", "/tools", "/clear-context", "/commit ", "/commit-pull ", "/commit-merge ", "/commit-search ", "/exit", "/quit", "/q", "/save", "/save-exit", "/kill ", "/killbg", "/bg", "/clear", "/help", "/model", "/model-persist", "/schedule", "/schedule-clear"}
 
 var (
 	greenOrb         = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("●")
@@ -334,6 +334,10 @@ func main() {
 	if err != nil {
 		log.Printf("[Scheduler] Failed to initialize: %v", err)
 	} else {
+		sched.SetStatusChannel(statusCh)
+		if debugMode {
+			fmt.Println(muted.Render("[Scheduler] Initialized with statusCh"))
+		}
 		sched.SetOnTaskFinished(func(*scheduler.ScheduledTask) {
 			playSound()
 		})
@@ -895,6 +899,10 @@ promptLoop:
 			} else {
 				fmt.Println("Context cleared.")
 			}
+			continue
+		}
+		if input == "/schedule-clear" {
+			handleSchedule("/schedule clear")
 			continue
 		}
 		if strings.HasPrefix(input, "/schedule") {

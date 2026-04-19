@@ -51,6 +51,7 @@ type Scheduler struct {
 	toolTimeout    int
 	wd             string
 	os             string
+	statusCh       chan string
 }
 
 type ProviderGetter interface {
@@ -97,11 +98,12 @@ func New(dbPath string) (*Scheduler, error) {
 	}
 
 	s := &Scheduler{
-		db:      db,
-		tasks:   make(map[string]*ScheduledTask),
-		running: make(map[string]context.CancelFunc),
-		stopCh:  make(chan struct{}),
-		wd:      wd,
+		db:       db,
+		tasks:    make(map[string]*ScheduledTask),
+		running:  make(map[string]context.CancelFunc),
+		stopCh:   make(chan struct{}),
+		wd:       wd,
+		statusCh: make(chan string, 8),
 	}
 
 	if err := s.initSchema(); err != nil {
@@ -131,6 +133,10 @@ func (s *Scheduler) startLoadedTasks() {
 
 func NewDefault() (*Scheduler, error) {
 	return New("")
+}
+
+func (s *Scheduler) SetStatusChannel(ch chan string) {
+	s.statusCh = ch
 }
 
 func (s *Scheduler) initSchema() error {
@@ -578,6 +584,14 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 				continue
 			}
 			seenThisRound[sig] = true
+
+			if s.statusCh != nil {
+				select {
+				case s.statusCh <- fmt.Sprintf("[%s] Calling tool: %s", task.ID, toolName):
+					//fmt.Printf("DEBUG: Sent status: [%s] Calling tool: %s\n", task.ID, toolName)
+				default:
+				}
+			}
 
 			result, err := s.callTool(ctx, toolName, args, toolTimeout)
 			if err != nil {

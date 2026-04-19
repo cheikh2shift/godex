@@ -257,6 +257,12 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyStatusMessage(msg)
 		return m, waitStatusCmd(m.statusCh)
 	}
+	if _, ok := msg.(statusMsgPoll); ok {
+		return m, waitStatusCmd(m.statusCh)
+	}
+	if _, ok := msg.(delegateMsgPoll); ok {
+		return m, waitDelegateCmd(m.delegateCh)
+	}
 	if msg, ok := msg.(delegateMsg); ok {
 		m.delegateCount = msg.Count
 		m.delegateLatest = msg.Latest
@@ -935,12 +941,24 @@ func waitStatusCmd(ch <-chan string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return nil
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			//fmt.Printf("DEBUG waitStatusCmd received: %s\n", msg)
+			return statusMsg(msg)
+		case <-time.After(50 * time.Millisecond):
+			return statusMsgPoll{}
 		}
-		return statusMsg(msg)
 	}
+}
+
+type statusMsgPoll struct{}
+
+func (statusMsgPoll) Init() {}
+func (p statusMsgPoll) Update(msg tea.Msg) (tea.Msg, tea.Cmd) {
+	return msg, nil
 }
 
 func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
@@ -948,12 +966,23 @@ func waitDelegateCmd(ch <-chan hive.HiveStats) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return nil
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			return delegateMsg{Count: msg.DelegatedCount, Latest: msg.LatestCommand}
+		case <-time.After(50 * time.Millisecond):
+			return delegateMsgPoll{}
 		}
-		return delegateMsg{Count: msg.DelegatedCount, Latest: msg.LatestCommand}
 	}
+}
+
+type delegateMsgPoll struct{}
+
+func (delegateMsgPoll) Init() {}
+func (p delegateMsgPoll) Update(msg tea.Msg) (tea.Msg, tea.Cmd) {
+	return msg, nil
 }
 
 type commitRow struct {
