@@ -601,6 +601,14 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 
 			result, err := s.callTool(ctx, toolName, args, toolTimeout)
 			if err != nil {
+				errStr := strings.ToLower(err.Error())
+				if strings.Contains(errStr, "path_restricted") ||
+					strings.Contains(errStr, "not allowed") ||
+					strings.Contains(errStr, "denied") ||
+					strings.Contains(errStr, "_blocked") ||
+					strings.Contains(errStr, "permission") {
+					return fmt.Sprintf("PERMISSION_DENIED: %v", err), nil
+				}
 				toolResults = append(toolResults, fmt.Sprintf("ERROR: %v", err))
 			} else {
 				toolResults = append(toolResults, s.truncate(result, 2500))
