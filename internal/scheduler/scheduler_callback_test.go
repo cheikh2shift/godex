@@ -38,4 +38,3 @@ func TestScheduler_OnTaskFinishedCalled(t *testing.T) {
 		t.Fatalf("expected callback called once, got %d", atomic.LoadInt32(&called))
 	}
 }
-

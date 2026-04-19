@@ -321,6 +321,15 @@ func main() {
 		setter.SetStatusChannel(statusCh)
 	}
 
+	if prompt != "" {
+		err = runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
+		cleanup(servers)
+		if err != nil {
+			log.Fatalf("prompt failed: %v", err)
+		}
+		return
+	}
+
 	sched, err = scheduler.NewDefault()
 	if err != nil {
 		log.Printf("[Scheduler] Failed to initialize: %v", err)
@@ -352,17 +361,6 @@ func main() {
 		if debugMode {
 			fmt.Println(muted.Render("[Scheduler] Initialized"))
 		}
-	}
-
-	fmt.Println()
-
-	if prompt != "" {
-		err = runSinglePrompt(ctx, provider, prompt, autoConfirm, debugMode, servers)
-		cleanup(servers)
-		if err != nil {
-			log.Fatalf("prompt failed: %v", err)
-		}
-		return
 	}
 
 	// Get working directory for session files
@@ -1857,17 +1855,6 @@ func handleKill(servers []MCPServer, input string) {
 		}
 	}
 	fmt.Println("No bash server found")
-}
-
-func getToolDescription(servers []MCPServer, toolName string) string {
-	for _, server := range servers {
-		for _, tool := range server.Tools() {
-			if tool.Name == toolName {
-				return tool.Description
-			}
-		}
-	}
-	return ""
 }
 
 func handleListBg(servers []MCPServer) {

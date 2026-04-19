@@ -27,9 +27,9 @@ func (f *fakeScheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt 
 	return &fakeTask{ID: "ABCD", Prompt: prompt, IntervalSec: intervalSec, RunAt: runAt, IsRepeating: isRepeating}, nil
 }
 
-func (f *fakeScheduler) StopTask(id string) bool    { return true }
-func (f *fakeScheduler) RemoveTask(id string) bool  { return true }
-func (f *fakeScheduler) ListTasks() []interface{}   { return nil }
+func (f *fakeScheduler) StopTask(id string) bool       { return true }
+func (f *fakeScheduler) RemoveTask(id string) bool     { return true }
+func (f *fakeScheduler) ListTasks() []interface{}      { return nil }
 func (f *fakeScheduler) GetTask(id string) interface{} { return nil }
 
 func TestSchedulerTool_RunOnceForcesNonRepeating(t *testing.T) {
@@ -37,9 +37,9 @@ func TestSchedulerTool_RunOnceForcesNonRepeating(t *testing.T) {
 	server := NewSchedulerServer(fs, nil)
 
 	_, err := server.CallTool(context.Background(), "scheduler", map[string]interface{}{
-		"prompt":        "hi",
-		"interval_sec":  float64(60),
-		"run_once":      true,
+		"prompt":       "hi",
+		"interval_sec": float64(60),
+		"run_once":     true,
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

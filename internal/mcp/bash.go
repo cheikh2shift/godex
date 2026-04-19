@@ -168,13 +168,13 @@ func (t *JobTracker) JobStatus(id string) (string, bool) {
 }
 
 type BashServer struct {
-	allowedPaths   []string
-	tools          []Tool
-	jobTracker     *JobTracker
-	autoConfirm    bool
-	mu             sync.RWMutex
-	failedMu       sync.Mutex
-	failedStarts   []string
+	allowedPaths []string
+	tools        []Tool
+	jobTracker   *JobTracker
+	autoConfirm  bool
+	mu           sync.RWMutex
+	failedMu     sync.Mutex
+	failedStarts []string
 }
 
 var (
@@ -866,7 +866,6 @@ func (s *BashServer) SetAllowedPaths(paths []string) {
 }
 
 func (s *BashServer) AllowedPathsUpdated() {}
-
 
 // Aliases for backwards compatibility with main.go
 func (s *BashServer) ListBackground() (string, error) {

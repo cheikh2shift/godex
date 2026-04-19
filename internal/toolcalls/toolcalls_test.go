@@ -46,4 +46,3 @@ func TestExtractAllToolCalls_JSONArray(t *testing.T) {
 		t.Fatalf("expected 2 tool calls, got %d", len(calls))
 	}
 }
-

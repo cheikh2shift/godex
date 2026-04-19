@@ -367,4 +367,3 @@ func parseToolArgs(data map[string]interface{}) map[string]interface{} {
 	}
 	return make(map[string]interface{})
 }
-

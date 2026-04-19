@@ -39,12 +39,10 @@ func setProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
 }
 
-
 // GetUnixTools returns an empty list on Windows (not supported)
 func GetUnixTools() []Tool {
 	return []Tool{}
 }
-
 
 // HandleRunBashScript is not supported on Windows
 func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]interface{}) (string, error) {

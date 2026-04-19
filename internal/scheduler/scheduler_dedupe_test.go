@@ -24,7 +24,7 @@ func (f *fakeLLMProvider) Send(ctx context.Context, prompt string) (string, erro
 	return f.resp, nil
 }
 func (f *fakeLLMProvider) SetThinkCallback(cb func(string)) {}
-func (f *fakeLLMProvider) SupportsNativeToolCalls() bool     { return false }
+func (f *fakeLLMProvider) SupportsNativeToolCalls() bool    { return false }
 
 type countingToolServer struct {
 	name  string
@@ -32,8 +32,8 @@ type countingToolServer struct {
 	calls int
 }
 
-func (c *countingToolServer) Name() string       { return c.name }
-func (c *countingToolServer) Tools() []mcp.Tool  { return c.tools }
+func (c *countingToolServer) Name() string      { return c.name }
+func (c *countingToolServer) Tools() []mcp.Tool { return c.tools }
 func (c *countingToolServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
 	c.calls++
 	return "ok", nil
@@ -78,4 +78,3 @@ func TestExecuteWithTools_DedupesIdenticalToolCallsInOneResponse(t *testing.T) {
 		t.Fatalf("expected 1 tool execution, got %d", server.calls)
 	}
 }
-

@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	maxTreeLines     = 500
-	treeCacheName    = ".gtree"
+	maxTreeLines  = 500
+	treeCacheName = ".gtree"
 )
 
 var (
@@ -80,7 +80,6 @@ func BuildTree(root string) (string, error) {
 	_ = writeTreeCache(root, tree)
 	return tree, nil
 }
-
 
 func loadGitignore(root string) *ignore.GitIgnore {
 	path := filepath.Join(root, ".gitignore")

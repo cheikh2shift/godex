@@ -71,4 +71,3 @@ func TestScheduler_DefaultWDUsesProcessWD(t *testing.T) {
 		t.Fatalf("expected scheduler wd to default to process wd %q, got %q", pwd, s.wd)
 	}
 }
-
