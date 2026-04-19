@@ -1085,12 +1085,12 @@ promptLoop:
 						}
 					}
 
-					toolDesc := getToolDescription(servers, toolName)
+					/*toolDesc := getToolDescription(servers, toolName)
 					if toolDesc != "" {
 						fmt.Print("\033[90m")
 						fmt.Printf("  %s\n", toolDesc)
 						fmt.Print("\033[0m")
-					}
+					}*/
 
 					var argsStr string
 					for k, v := range args {
