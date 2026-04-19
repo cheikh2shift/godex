@@ -220,7 +220,7 @@ func (o *ollamaProvider) Send(ctx context.Context, prompt string) (string, error
 	defer o.sendMu.Unlock()
 
 	o.mu.Lock()
-	systemPrompt, userInput := splitSystemUserPrompt(prompt)
+	systemPrompt, userInput := SplitSystemUserPrompt(prompt)
 	if systemPrompt != "" {
 		o.systemPrompt = systemPrompt
 	}

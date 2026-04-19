@@ -326,6 +326,12 @@ func main() {
 		log.Printf("[Scheduler] Failed to initialize: %v", err)
 	} else {
 		sched.SetProviderGetter(&schedulerProviderGetter{provider: provider})
+		var serverSlice []interface{} = make([]interface{}, len(servers))
+		for i, s := range servers {
+			serverSlice[i] = s
+		}
+		sched.SetServers(serverSlice)
+
 		schedulerServer := mcp.NewSchedulerServer(sched, &schedulerProviderGetter{provider: provider})
 		servers = append(servers, schedulerServer)
 		for _, tool := range schedulerServer.Tools() {
@@ -358,6 +364,18 @@ func main() {
 
 	// Get working directory for session files
 	wd, _ := os.Getwd()
+
+	if sched != nil {
+		maxRounds := 10
+		if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
+			maxRounds = *provider.MaxToolRounds
+		}
+		toolTimeout := 180
+		if provider.ToolTimeout != nil && *provider.ToolTimeout > 0 {
+			toolTimeout = *provider.ToolTimeout
+		}
+		sched.SetConfig(maxRounds, toolTimeout, wd, runtime.GOOS)
+	}
 
 	// Initialize history database (stored in tmp directory)
 	var historyDB *history.HistoryDB

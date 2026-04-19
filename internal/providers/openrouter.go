@@ -162,7 +162,7 @@ func newOpenRouterProvider(cfg *config.Provider) (Provider, error) {
 }
 
 func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, error) {
-	systemPrompt, userInput := splitSystemUserPrompt(prompt)
+	systemPrompt, userInput := SplitSystemUserPrompt(prompt)
 	if userInput == "" {
 		userInput = strings.TrimSpace(prompt)
 	}

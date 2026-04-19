@@ -7,7 +7,8 @@ const (
 	userAskedMarker   = "User asked:"
 )
 
-func splitSystemUserPrompt(prompt string) (string, string) {
+// SplitSystemUserPrompt splits a prompt into system and user parts
+func SplitSystemUserPrompt(prompt string) (string, string) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", ""

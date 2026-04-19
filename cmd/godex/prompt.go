@@ -168,9 +168,10 @@ func (m promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.statusHidden {
 			return m, nil
 		}
-		if (m.statusMessage != "" || len(m.commitList) > 0) && msg.Type != tea.KeyTab {
+		if (m.statusMessage != "" || len(m.commitList) > 0 || len(m.scheduleList) > 0) && msg.Type != tea.KeyTab {
 			m.statusMessage = ""
 			m.commitList = nil
+			m.scheduleList = nil
 		}
 		if msg.Type == tea.KeyCtrlR {
 			if m.searchMode {
@@ -411,6 +412,14 @@ func (m promptModel) View() string {
 			b.WriteByte('\n')
 		}
 	}
+	if len(m.scheduleList) > 0 {
+		b.WriteByte('\n')
+		listStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("75"))
+		for _, id := range m.scheduleList {
+			b.WriteString(listStyle.Render(id))
+			b.WriteByte('\n')
+		}
+	}
 	if m.statusMessage != "" {
 		b.WriteByte('\n')
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(m.statusMessage))
@@ -597,11 +606,27 @@ func (m *promptModel) handleTab() {
 }
 
 func (m *promptModel) handleScheduleTab(value string) bool {
+	hasTrailingSpace := strings.HasSuffix(value, " ")
 	parts := strings.Fields(value)
-	if len(parts) != 2 {
+	if hasTrailingSpace {
+		parts = append(parts, "")
+	}
+
+	var (
+		prefix     string
+		nextPrefix string
+	)
+
+	if len(parts) == 2 {
+		prefix = strings.ToUpper(parts[1])
+		nextPrefix = "/schedule "
+	} else if len(parts) == 3 && (parts[1] == "stop" || parts[1] == "remove") {
+		prefix = strings.ToUpper(parts[2])
+		nextPrefix = "/schedule " + parts[1] + " "
+	} else {
 		return false
 	}
-	prefix := strings.ToUpper(parts[1])
+
 	if sched == nil {
 		return false
 	}
@@ -622,8 +647,8 @@ func (m *promptModel) handleScheduleTab(value string) bool {
 	if len(matches) == 0 {
 		return false
 	}
-	if len(matches) == 1 && prefix != "" {
-		m.input.SetValue("/schedule " + matches[0])
+	if len(matches) == 1 {
+		m.input.SetValue(nextPrefix + matches[0])
 		m.input.SetCursor(len([]rune(m.input.Value())))
 		m.resetCompletion()
 		return true

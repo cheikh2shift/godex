@@ -37,37 +37,7 @@ func (s *schedulerProviderGetter) GetProvider(cfg interface{}) (interface{}, err
 }
 
 func handleSchedule(input string) {
-	if sched == nil {
-		fmt.Println("[Scheduler] Not initialized")
-		return
-	}
-
 	parts := strings.Fields(input)
-	if len(parts) == 1 {
-		listScheduledTasks()
-		return
-	}
-
-	if len(parts) == 2 && len(parts[1]) == 4 {
-		id := strings.ToUpper(parts[1])
-		task := sched.GetTask(id)
-		if task == nil {
-			fmt.Printf("Task %s not found\n", id)
-			return
-		}
-		st, ok := task.(*scheduler.ScheduledTask)
-		if !ok {
-			fmt.Printf("Task %s not found\n", id)
-			return
-		}
-		if st.LastOutput == "" {
-			fmt.Printf("No output for task %s\n", id)
-			return
-		}
-		fmt.Printf("Output for task %s:\n%s\n", id, st.LastOutput)
-		return
-	}
-
 	if len(parts) >= 2 && (parts[1] == "help" || parts[1] == "-h" || parts[1] == "--help") {
 		fmt.Println("Scheduler - Schedule prompts to run at specific times or intervals")
 		fmt.Println("")
@@ -75,18 +45,28 @@ func handleSchedule(input string) {
 		fmt.Println("  /schedule              - List all scheduled tasks")
 		fmt.Println("  /schedule <id>         - Show last output of a task")
 		fmt.Println("  /schedule stop <id>    - Stop a running task by 4-char ID")
-		fmt.Println("  /schedule remove <id> - Remove a task from the schedule by 4-char ID")
-		fmt.Println("  /schedule help        - Show this help message")
+		fmt.Println("  /schedule remove <id>  - Remove a task from the schedule by 4-char ID")
+		fmt.Println("  /schedule help         - Show this help message")
 		fmt.Println("")
-		fmt.Println("LLM Tool (schedule_task):")
+		fmt.Println("LLM Tool (scheduler):")
 		fmt.Println("  prompt: The prompt to execute")
 		fmt.Println("  interval_sec: Repeating interval in seconds (e.g., 60, 3600)")
 		fmt.Println("  run_at: Time in HH:MM format (e.g., '14:30') or 'now' for immediate execution")
 		fmt.Println("")
 		fmt.Println("Examples:")
-		fmt.Println("  schedule_task(prompt='Summarize my emails', interval_sec=3600)")
-		fmt.Println("  schedule_task(prompt='Check system status', run_at='09:00')")
-		fmt.Println("  schedule_task(prompt='Generate report', run_at='now')")
+		fmt.Println("  scheduler(prompt='Summarize my emails', interval_sec=3600)")
+		fmt.Println("  scheduler(prompt='Check system status', run_at='09:00')")
+		fmt.Println("  scheduler(prompt='Generate report', run_at='now')")
+		return
+	}
+
+	if sched == nil {
+		fmt.Println("[Scheduler] Not initialized")
+		return
+	}
+
+	if len(parts) == 1 {
+		listScheduledTasks()
 		return
 	}
 
@@ -118,11 +98,31 @@ func handleSchedule(input string) {
 		return
 	}
 
+	if len(parts) == 2 && len(parts[1]) == 4 {
+		id := strings.ToUpper(parts[1])
+		task := sched.GetTask(id)
+		if task == nil {
+			fmt.Printf("Task %s not found\n", id)
+			return
+		}
+		st, ok := task.(*scheduler.ScheduledTask)
+		if !ok || st == nil {
+			fmt.Printf("Task %s not found\n", id)
+			return
+		}
+		if st.LastOutput == "" {
+			fmt.Printf("No output for task %s\n", id)
+			return
+		}
+		fmt.Printf("Output for task %s:\n%s\n", id, renderMarkdown(st.LastOutput))
+		return
+	}
+
 	fmt.Println("Usage:")
 	fmt.Println("  /schedule              - List all scheduled tasks")
 	fmt.Println("  /schedule <id>         - Show last output of a task")
 	fmt.Println("  /schedule stop <id>    - Stop a task by 4-char ID")
-	fmt.Println("  /schedule remove <id> - Remove a task by 4-char ID")
+	fmt.Println("  /schedule remove <id>  - Remove a task by 4-char ID")
 }
 
 func listScheduledTasks() {

@@ -9,9 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/cheikh2shift/godex/internal/mcp"
+	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/toolcalls"
 	_ "modernc.org/sqlite"
 )
 
@@ -21,6 +25,7 @@ type ScheduledTask struct {
 	IntervalSec   int       `json:"interval_sec"`
 	RunAt         string    `json:"run_at"`
 	IsRepeating   bool      `json:"is_repeating"`
+	WorkingDir    string    `json:"working_dir"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastRun       time.Time `json:"last_run"`
 	RunCount      int       `json:"run_count"`
@@ -32,18 +37,29 @@ type ScheduledTask struct {
 }
 
 type Scheduler struct {
-	db       *sql.DB
-	tasks    map[string]*ScheduledTask
-	taskMu   sync.RWMutex
-	running  map[string]context.CancelFunc
-	runMu    sync.RWMutex
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	provider ProviderGetter
+	db          *sql.DB
+	tasks       map[string]*ScheduledTask
+	taskMu      sync.RWMutex
+	running     map[string]context.CancelFunc
+	runMu       sync.RWMutex
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	provider    ProviderGetter
+	servers     []ToolServer
+	maxRounds   int
+	toolTimeout int
+	wd          string
+	os          string
 }
 
 type ProviderGetter interface {
 	GetProvider(cfg interface{}) (interface{}, error)
+}
+
+type ToolServer interface {
+	Name() string
+	Tools() []mcp.Tool
+	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
 }
 
 func getDefaultDBPath() string {
@@ -62,6 +78,8 @@ func New(dbPath string) (*Scheduler, error) {
 	if dbPath == "" {
 		dbPath = getDefaultDBPath()
 	}
+
+	wd, _ := os.Getwd()
 
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -82,6 +100,7 @@ func New(dbPath string) (*Scheduler, error) {
 		tasks:   make(map[string]*ScheduledTask),
 		running: make(map[string]context.CancelFunc),
 		stopCh:  make(chan struct{}),
+		wd:      wd,
 	}
 
 	if err := s.initSchema(); err != nil {
@@ -121,6 +140,7 @@ func (s *Scheduler) initSchema() error {
 		interval_sec INTEGER NOT NULL,
 		run_at TEXT NOT NULL,
 		is_repeating INTEGER NOT NULL,
+		working_dir TEXT NOT NULL,
 		created_at TEXT NOT NULL,
 		last_run TEXT,
 		run_count INTEGER DEFAULT 0,
@@ -131,32 +151,68 @@ func (s *Scheduler) initSchema() error {
 		provider_model TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_created_at ON scheduled_tasks(created_at);
+	CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_working_dir ON scheduled_tasks(working_dir);
 	`
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate older DBs which predate working_dir.
+	if _, err := s.db.Exec(`ALTER TABLE scheduled_tasks ADD COLUMN working_dir TEXT`); err != nil {
+		// ignore "duplicate column name" errors (SQLite reports this when column already exists)
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return err
+		}
+	}
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_working_dir ON scheduled_tasks(working_dir)`)
+	if strings.TrimSpace(s.wd) != "" {
+		_, _ = s.db.Exec(`UPDATE scheduled_tasks SET working_dir = ? WHERE working_dir IS NULL OR working_dir = ''`, s.wd)
+	}
+
+	return nil
 }
 
 func (s *Scheduler) loadTasks() error {
-	rows, err := s.db.Query(`
-		SELECT id, prompt, interval_sec, run_at, is_repeating, created_at, 
+	query := `
+		SELECT id, prompt, interval_sec, run_at, is_repeating, working_dir, created_at,
 		       last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model
 		FROM scheduled_tasks
-	`)
+	`
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if strings.TrimSpace(s.wd) != "" {
+		rows, err = s.db.Query(query+` WHERE working_dir = ?`, s.wd)
+	} else {
+		rows, err = s.db.Query(query)
+	}
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
+	s.taskMu.Lock()
+	defer s.taskMu.Unlock()
+
 	for rows.Next() {
 		var task ScheduledTask
-		var lastRun, createdAt, runAt, lastOutput sql.NullString
+		var (
+			lastRun, createdAt, runAt, lastOutput sql.NullString
+			workingDir                          sql.NullString
+			isRepeatingInt                       sql.NullInt64
+		)
 		err := rows.Scan(
-			&task.ID, &task.Prompt, &task.IntervalSec, &runAt, &task.IsRepeating,
+			&task.ID, &task.Prompt, &task.IntervalSec, &runAt, &isRepeatingInt, &workingDir,
 			&createdAt, &lastRun, &task.RunCount, &task.LastError, &lastOutput,
 			&task.ProviderType, &task.ProviderName, &task.ProviderModel,
 		)
 		if err != nil {
 			return err
+		}
+		if isRepeatingInt.Valid && isRepeatingInt.Int64 != 0 {
+			task.IsRepeating = true
 		}
 		if createdAt.Valid {
 			task.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
@@ -170,6 +226,11 @@ func (s *Scheduler) loadTasks() error {
 		if lastOutput.Valid {
 			task.LastOutput = lastOutput.String
 		}
+		if workingDir.Valid {
+			task.WorkingDir = workingDir.String
+		} else {
+			task.WorkingDir = s.wd
+		}
 		s.tasks[task.ID] = &task
 	}
 	return rows.Err()
@@ -177,6 +238,42 @@ func (s *Scheduler) loadTasks() error {
 
 func (s *Scheduler) SetProviderGetter(pg ProviderGetter) {
 	s.provider = pg
+}
+
+func (s *Scheduler) SetServers(servers []interface{}) {
+	s.servers = nil
+	for _, srv := range servers {
+		ts, ok := srv.(ToolServer)
+		if !ok {
+			continue
+		}
+		s.servers = append(s.servers, ts)
+	}
+}
+
+func (s *Scheduler) SetConfig(maxRounds, toolTimeout int, wd, os string) {
+	if maxRounds > 0 {
+		s.maxRounds = maxRounds
+	}
+	if toolTimeout > 0 {
+		s.toolTimeout = toolTimeout
+	}
+	if strings.TrimSpace(wd) != "" && s.wd != wd {
+		// Re-scope tasks to the configured working directory.
+		s.wd = wd
+		s.StopAllTasks()
+		s.taskMu.Lock()
+		s.tasks = make(map[string]*ScheduledTask)
+		s.taskMu.Unlock()
+		_ = s.initSchema()
+		_ = s.loadTasks()
+		s.startLoadedTasks()
+	} else if strings.TrimSpace(wd) != "" {
+		s.wd = wd
+	}
+	if os != "" {
+		s.os = os
+	}
 }
 
 func (s *Scheduler) generateID() (string, error) {
@@ -194,7 +291,7 @@ func (s *Scheduler) generateID() (string, error) {
 
 type SchedulerInterface interface {
 	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
-	RunNow(prompt string, providerType, providerName, providerModel string) (string, error)
+	AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error)
 	StopTask(id string) bool
 	RemoveTask(id string) bool
 	ListTasks() []interface{}
@@ -202,6 +299,11 @@ type SchedulerInterface interface {
 }
 
 func (s *Scheduler) AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error) {
+	isRepeating := intervalSec > 0
+	return s.AddTaskWithRepeat(prompt, intervalSec, runAt, isRepeating, providerType, providerName, providerModel)
+}
+
+func (s *Scheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error) {
 	if intervalSec <= 0 && runAt == "" {
 		return nil, fmt.Errorf("must specify either interval or run_at time")
 	}
@@ -216,7 +318,8 @@ func (s *Scheduler) AddTask(prompt string, intervalSec int, runAt string, provid
 		Prompt:        prompt,
 		IntervalSec:   intervalSec,
 		RunAt:         runAt,
-		IsRepeating:   intervalSec > 0,
+		IsRepeating:   isRepeating,
+		WorkingDir:    s.wd,
 		CreatedAt:     time.Now(),
 		RunCount:      0,
 		ProviderType:  providerType,
@@ -237,40 +340,6 @@ func (s *Scheduler) AddTask(prompt string, intervalSec int, runAt string, provid
 	return task, nil
 }
 
-func (s *Scheduler) RunNow(prompt string, providerType, providerName, providerModel string) (string, error) {
-	if s.provider == nil {
-		return "", fmt.Errorf("no provider getter set")
-	}
-
-	cfg := map[string]interface{}{
-		"type":  providerType,
-		"name":  providerName,
-		"model": providerModel,
-	}
-
-	prov, err := s.provider.GetProvider(cfg)
-	if err != nil {
-		return "", fmt.Errorf("failed to get provider: %v", err)
-	}
-
-	provInterface, ok := prov.(interface {
-		Send(ctx context.Context, prompt string) (string, error)
-	})
-	if !ok {
-		return "", fmt.Errorf("provider does not support Send method")
-	}
-
-	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	result, err := provInterface.Send(taskCtx, prompt)
-	if err != nil {
-		return "", fmt.Errorf("execution error: %v", err)
-	}
-
-	return result, nil
-}
-
 func (s *Scheduler) saveTask(task *ScheduledTask) error {
 	var lastRunStr string
 	if task.LastRun.IsZero() {
@@ -280,9 +349,9 @@ func (s *Scheduler) saveTask(task *ScheduledTask) error {
 	}
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO scheduled_tasks 
-		(id, prompt, interval_sec, run_at, is_repeating, created_at, last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.Prompt, task.IntervalSec, task.RunAt, task.IsRepeating,
+		(id, prompt, interval_sec, run_at, is_repeating, working_dir, created_at, last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.Prompt, task.IntervalSec, task.RunAt, task.IsRepeating, task.WorkingDir,
 		task.CreatedAt.Format(time.RFC3339), lastRunStr,
 		task.RunCount, task.LastError, task.LastOutput, task.ProviderType, task.ProviderName, task.ProviderModel)
 	return err
@@ -307,6 +376,9 @@ func (s *Scheduler) runLoop(ctx context.Context, task *ScheduledTask) {
 	defer s.wg.Done()
 
 	sleepDuration := func() time.Duration {
+		if strings.ToLower(strings.TrimSpace(task.RunAt)) == "now" {
+			return 0
+		}
 		if task.IntervalSec > 0 {
 			return time.Duration(task.IntervalSec) * time.Second
 		}
@@ -339,65 +411,335 @@ func (s *Scheduler) runLoop(ctx context.Context, task *ScheduledTask) {
 }
 
 func (s *Scheduler) executeTask(task *ScheduledTask) {
-	if s.provider == nil {
-		task.LastError = "no provider getter set"
-		task.LastRun = time.Now()
-		task.RunCount++
-		s.updateTask(task)
-		return
-	}
-
-	var cfg interface{}
-	if task.ProviderType == "unknown" || task.ProviderType == "" || task.ProviderType == "current" {
-		cfg = map[string]interface{}{
-			"type":  "current",
-			"name":  "current",
-			"model": "current",
-		}
-	} else {
-		cfg = map[string]interface{}{
-			"type":  task.ProviderType,
-			"name":  task.ProviderName,
-			"model": task.ProviderModel,
-		}
-	}
-
-	prov, err := s.provider.GetProvider(cfg)
-	if err != nil {
-		task.LastError = fmt.Sprintf("failed to get provider: %v", err)
-		task.LastRun = time.Now()
-		task.RunCount++
-		s.updateTask(task)
-		return
-	}
-
-	provInterface, ok := prov.(interface {
-		Send(ctx context.Context, prompt string) (string, error)
-	})
-	if !ok {
-		task.LastError = "provider does not support Send method"
-		task.LastRun = time.Now()
-		task.RunCount++
-		s.updateTask(task)
-		return
-	}
-
 	taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	result, err := provInterface.Send(taskCtx, task.Prompt)
-	if err != nil {
-		task.LastError = fmt.Sprintf("execution error: %v", err)
-		task.LastOutput = ""
+	if len(s.servers) > 0 {
+		result, err := s.executeWithTools(taskCtx, task)
+		if err != nil {
+			task.LastError = fmt.Sprintf("execution error: %v", err)
+			task.LastOutput = ""
+		} else {
+			task.LastError = ""
+			task.LastOutput = result
+		}
+	} else if s.provider != nil {
+		var cfg interface{}
+		if task.ProviderType == "unknown" || task.ProviderType == "" || task.ProviderType == "current" {
+			cfg = map[string]interface{}{
+				"type":  "current",
+				"name":  "current",
+				"model": "current",
+			}
+		} else {
+			cfg = map[string]interface{}{
+				"type":  task.ProviderType,
+				"name":  task.ProviderName,
+				"model": task.ProviderModel,
+			}
+		}
+
+		prov, err := s.provider.GetProvider(cfg)
+		if err != nil {
+			task.LastError = fmt.Sprintf("failed to get provider: %v", err)
+			task.LastRun = time.Now()
+			task.RunCount++
+			s.updateTask(task)
+			return
+		}
+
+		provInterface, ok := prov.(interface {
+			Send(ctx context.Context, prompt string) (string, error)
+		})
+		if !ok {
+			task.LastError = "provider does not support Send method"
+			task.LastRun = time.Now()
+			task.RunCount++
+			s.updateTask(task)
+			return
+		}
+
+		result, err := provInterface.Send(taskCtx, task.Prompt)
+		if err != nil {
+			task.LastError = fmt.Sprintf("execution error: %v", err)
+			task.LastOutput = ""
+		} else {
+			task.LastError = ""
+			task.LastOutput = result
+		}
 	} else {
-		task.LastError = ""
-		task.LastOutput = result
-		//fmt.Printf("[Scheduler %s] Result: %s\n", task.ID, truncate(result, 200))
+		task.LastError = "no provider or servers available"
 	}
 
 	task.LastRun = time.Now()
 	task.RunCount++
 	s.updateTask(task)
+}
+
+func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (string, error) {
+	maxRounds := s.maxRounds
+	if maxRounds <= 0 {
+		maxRounds = 10
+	}
+	toolTimeout := s.toolTimeout
+	if toolTimeout <= 0 {
+		toolTimeout = 180
+	}
+
+	if s.provider == nil {
+		return "", fmt.Errorf("no provider available")
+	}
+
+	cfg := map[string]interface{}{
+		"type":  "current",
+		"name":  "current",
+		"model": "current",
+	}
+	prov, err := s.provider.GetProvider(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to get provider: %v", err)
+	}
+	llmProvider, ok := prov.(interface {
+		Send(ctx context.Context, prompt string) (string, error)
+		SetThinkCallback(cb func(string))
+		SupportsNativeToolCalls() bool
+	})
+	if !ok {
+		return "", fmt.Errorf("provider does not support required interface")
+	}
+
+	toolsDesc := s.getToolsDescription()
+	toolCallFormat := ""
+	if !llmProvider.SupportsNativeToolCalls() {
+		toolCallFormat = "\nTo call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
+	}
+
+	input := task.Prompt
+	fullPrompt := s.buildInitialPrompt(input, toolsDesc, toolCallFormat, llmProvider.SupportsNativeToolCalls())
+
+	prevRoundToolCalls := make(map[string]bool)
+	prevNoTool := false
+
+	for round := 0; round < maxRounds; round++ {
+		var resp string
+		resp, err = llmProvider.Send(ctx, fullPrompt)
+		if err != nil {
+			return "", fmt.Errorf("provider error: %v", err)
+		}
+
+		preResp, finalResp, hasFinal := s.splitFinalAnswer(resp)
+		toolCalls := toolcalls.ExtractAllToolCalls(preResp)
+		isToolCallResponse := len(toolCalls) > 0
+
+		if !isToolCallResponse || len(toolCalls) == 0 {
+			if !hasFinal {
+				if !s.looksLikeToolCall(resp) {
+					return resp, nil
+				}
+				if strings.TrimSpace(resp) != "" && prevNoTool {
+					return resp, nil
+				}
+				prevNoTool = true
+				continuePrompt := fmt.Sprintf("You provided the following response:\n%s\n\nHowever, I couldn't find any valid tool calls in it. Please provide your FINAL_ANSWER now based on the information you have.", resp)
+				fullPrompt = s.buildContinuePrompt(continuePrompt, toolsDesc, toolCallFormat, llmProvider.SupportsNativeToolCalls(), round+1, maxRounds)
+				continue
+			}
+			return finalResp, nil
+		}
+
+		prevNoTool = false
+
+		var toolResults []string
+		for _, tc := range toolCalls {
+			toolName, ok := tc["name"].(string)
+			if !ok {
+				continue
+			}
+			args, ok := tc["arguments"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			result, err := s.callTool(ctx, toolName, args, toolTimeout)
+			if err != nil {
+				toolResults = append(toolResults, fmt.Sprintf("ERROR: %v", err))
+			} else {
+				toolResults = append(toolResults, s.truncate(result, 2500))
+			}
+		}
+
+		if hasFinal {
+			return finalResp, nil
+		}
+
+		currentToolCalls := make(map[string]bool)
+		for _, tc := range toolCalls {
+			name := tc["name"].(string)
+			args := tc["arguments"]
+			argsJson, _ := json.Marshal(args)
+			currentToolCalls[fmt.Sprintf("%s:%s", name, string(argsJson))] = true
+		}
+
+		hasRepeatedCalls := false
+		for sig := range currentToolCalls {
+			if prevRoundToolCalls[sig] {
+				hasRepeatedCalls = true
+				break
+			}
+		}
+
+		duplicateWarning := ""
+		if hasRepeatedCalls && round > 0 {
+			duplicateWarning = "\n\nWARNING: You are calling the same tool(s) with the same arguments as the previous round. Do NOT call them again."
+		}
+
+		roundUrgency := ""
+		if round >= 10 {
+			roundUrgency = "\n\nSTOP: You have reached round " + fmt.Sprintf("%d", round+1) + ". You MUST provide your FINAL_ANSWER now."
+		} else if round >= 2 {
+			roundUrgency = "\n\nNOTE: You are on round " + fmt.Sprintf("%d", round+1) + ". Only call more tools if absolutely necessary."
+		}
+
+		prevRoundToolCalls = currentToolCalls
+
+		if llmProvider.SupportsNativeToolCalls() {
+			fullPrompt = fmt.Sprintf("User asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
+		} else {
+			fullPrompt = fmt.Sprintf("You have access to these tools:%s\n\n%s\n\nUser asked: %s\n\nTool results:\n%s%s%s\n\nProvide your FINAL_ANSWER now.", toolsDesc, toolCallFormat, input, strings.Join(toolResults, "\n---\n"), duplicateWarning, roundUrgency)
+		}
+	}
+
+	return "Max tool rounds reached", nil
+}
+
+func (s *Scheduler) buildInitialPrompt(input, toolsDesc string, toolCallFormat string, nativeToolCalls bool) string {
+	osInfo := "linux"
+	if s.os != "" {
+		osInfo = s.os
+	}
+	arch := runtime.GOARCH
+	wdInfo := ""
+	if s.wd != "" {
+		wdInfo = s.wd
+	}
+
+	base := fmt.Sprintf(`CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
+
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results.
+`, osInfo, arch, wdInfo)
+
+	if nativeToolCalls {
+		return base + "\n\n" + input
+	}
+	return fmt.Sprintf("%s\n\nYou have access to these tools:\n%s\n\n%s\n\nUser asked: %s", base, toolsDesc, toolCallFormat, input)
+}
+
+func (s *Scheduler) buildContinuePrompt(continuePrompt, toolsDesc string, toolCallFormat string, nativeToolCalls bool, currentRound, maxRounds int) string {
+	roundInfo := ""
+	if currentRound > 0 {
+		roundInfo = fmt.Sprintf("\n\nNOTE: You are on round %d/%d. Only call more tools if absolutely necessary.", currentRound, maxRounds)
+	}
+	osInfo := "linux"
+	if s.os != "" {
+		osInfo = s.os
+	}
+	arch := runtime.GOARCH
+	wdInfo := ""
+	if s.wd != "" {
+		wdInfo = s.wd
+	}
+	extraInfo := fmt.Sprintf(`CRITICAL INFORMATION:
+- Operating System: %s (%s)
+- Current working directory: %s
+Use this path when the user asks about "this folder", "current directory", or similar.
+`, osInfo, arch, wdInfo)
+
+	systemPrompt, _ := providers.SplitSystemUserPrompt(continuePrompt)
+	if systemPrompt != "" {
+		systemPrompt += "\n\n"
+	}
+	userPromptWithContext := fmt.Sprintf("\n\n%s%sContinue from where you left off. %s\n\nProvide your FINAL_ANSWER now.%s", extraInfo, systemPrompt, continuePrompt, roundInfo)
+
+	if nativeToolCalls {
+		return userPromptWithContext
+	}
+
+	return fmt.Sprintf("%s\n\nYou have access to these tools:\n%s\n\n%s\n\n%s", extraInfo, toolsDesc, toolCallFormat, userPromptWithContext)
+}
+
+func (s *Scheduler) splitFinalAnswer(text string) (string, string, bool) {
+	parts := strings.Split(text, "FINAL_ANSWER:")
+	if len(parts) > 1 {
+		return parts[0], strings.TrimSpace(parts[1]), true
+	}
+	parts = strings.Split(text, "final answer:")
+	if len(parts) > 1 {
+		return parts[0], strings.TrimSpace(parts[1]), true
+	}
+	return text, "", false
+}
+
+func (s *Scheduler) looksLikeToolCall(text string) bool {
+	return strings.Contains(text, "tool") || strings.Contains(text, "call") ||
+		strings.Contains(text, "function") || strings.Contains(text, "(")
+}
+
+func (s *Scheduler) callTool(ctx context.Context, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+	for _, server := range s.servers {
+		for _, t := range server.Tools() {
+			if t.Name == name {
+				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
+				defer cancel()
+				return server.CallTool(toolCtx, name, args)
+			}
+		}
+	}
+
+	// Compatibility: some models incorrectly use the server name (e.g. "bash") as the tool name.
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, server := range s.servers {
+		if strings.ToLower(server.Name()) != lower {
+			continue
+		}
+		for _, t := range server.Tools() {
+			if t.Name == "run_command" {
+				toolCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
+				defer cancel()
+				return server.CallTool(toolCtx, t.Name, args)
+			}
+		}
+	}
+
+	return "", fmt.Errorf("tool %s not found", name)
+}
+
+func (s *Scheduler) truncate(str string, maxLen int) string {
+	if len(str) <= maxLen {
+		return str
+	}
+	return str[:maxLen] + "..."
+}
+
+func (s *Scheduler) getToolsDescription() string {
+	if len(s.servers) == 0 {
+		return "No tools available."
+	}
+
+	var desc strings.Builder
+	for _, server := range s.servers {
+		tools := server.Tools()
+		if len(tools) == 0 {
+			continue
+		}
+		desc.WriteString(fmt.Sprintf("\n[%s]\n", server.Name()))
+		for _, tool := range tools {
+			desc.WriteString(fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description))
+		}
+	}
+	return desc.String()
 }
 
 func (s *Scheduler) updateTask(task *ScheduledTask) {
@@ -419,12 +761,25 @@ func (s *Scheduler) StopTask(id string) bool {
 	return false
 }
 
+func (s *Scheduler) StopAllTasks() {
+	s.runMu.Lock()
+	for id, cancel := range s.running {
+		cancel()
+		delete(s.running, id)
+	}
+	s.runMu.Unlock()
+}
+
 func (s *Scheduler) RemoveTask(id string) bool {
 	s.StopTask(id)
 	s.taskMu.Lock()
 	if _, exists := s.tasks[id]; exists {
 		delete(s.tasks, id)
 		s.taskMu.Unlock()
+		if strings.TrimSpace(s.wd) != "" {
+			_, err := s.db.Exec("DELETE FROM scheduled_tasks WHERE id = ? AND working_dir = ?", id, s.wd)
+			return err == nil
+		}
 		_, err := s.db.Exec("DELETE FROM scheduled_tasks WHERE id = ?", id)
 		return err == nil
 	}
@@ -451,11 +806,7 @@ func (s *Scheduler) GetTask(id string) interface{} {
 
 func (s *Scheduler) Close() {
 	close(s.stopCh)
-	s.runMu.Lock()
-	for _, cancel := range s.running {
-		cancel()
-	}
-	s.runMu.Unlock()
+	s.StopAllTasks()
 	s.wg.Wait()
 	s.db.Close()
 }
