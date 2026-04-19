@@ -45,7 +45,10 @@ func handleSchedule(input string) {
 		fmt.Println("  /schedule              - List all scheduled tasks")
 		fmt.Println("  /schedule <id>         - Show last output of a task")
 		fmt.Println("  /schedule stop <id>    - Stop a running task by 4-char ID")
+		fmt.Println("  /schedule stop --all   - Stop all running tasks")
 		fmt.Println("  /schedule remove <id>  - Remove a task from the schedule by 4-char ID")
+		fmt.Println("  /schedule remove --all - Remove all tasks from the schedule")
+		fmt.Println("  /schedule clear        - Stop and remove all tasks")
 		fmt.Println("  /schedule help         - Show this help message")
 		fmt.Println("")
 		fmt.Println("LLM Tool (scheduler):")
@@ -70,7 +73,33 @@ func handleSchedule(input string) {
 		return
 	}
 
+	if len(parts) == 2 && (parts[1] == "clear" || parts[1] == "clear-all") {
+		tasks := sched.ListTasks()
+		if len(tasks) == 0 {
+			fmt.Println("No scheduled tasks")
+			return
+		}
+		sched.StopAllTasks()
+		removed := 0
+		for _, t := range tasks {
+			task, ok := t.(*scheduler.ScheduledTask)
+			if !ok || task == nil {
+				continue
+			}
+			if sched.RemoveTask(task.ID) {
+				removed++
+			}
+		}
+		fmt.Printf("Cleared %d task(s)\n", removed)
+		return
+	}
+
 	if len(parts) >= 3 && parts[1] == "stop" {
+		if parts[2] == "all" || parts[2] == "--all" || parts[2] == "*" {
+			sched.StopAllTasks()
+			fmt.Println("Stopped all running tasks")
+			return
+		}
 		id := strings.ToUpper(parts[2])
 		if len(id) != 4 {
 			fmt.Println("Invalid task ID. Use 4-character identifier (e.g., ABC1)")
@@ -85,6 +114,25 @@ func handleSchedule(input string) {
 	}
 
 	if len(parts) >= 3 && parts[1] == "remove" {
+		if parts[2] == "all" || parts[2] == "--all" || parts[2] == "*" {
+			tasks := sched.ListTasks()
+			if len(tasks) == 0 {
+				fmt.Println("No scheduled tasks")
+				return
+			}
+			removed := 0
+			for _, t := range tasks {
+				task, ok := t.(*scheduler.ScheduledTask)
+				if !ok || task == nil {
+					continue
+				}
+				if sched.RemoveTask(task.ID) {
+					removed++
+				}
+			}
+			fmt.Printf("Removed %d task(s)\n", removed)
+			return
+		}
 		id := strings.ToUpper(parts[2])
 		if len(id) != 4 {
 			fmt.Println("Invalid task ID. Use 4-character identifier (e.g., ABC1)")
@@ -123,6 +171,7 @@ func handleSchedule(input string) {
 	fmt.Println("  /schedule <id>         - Show last output of a task")
 	fmt.Println("  /schedule stop <id>    - Stop a task by 4-char ID")
 	fmt.Println("  /schedule remove <id>  - Remove a task by 4-char ID")
+	fmt.Println("  /schedule clear        - Stop and remove all tasks")
 }
 
 func listScheduledTasks() {

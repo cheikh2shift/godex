@@ -46,6 +46,7 @@ type Scheduler struct {
 	wg          sync.WaitGroup
 	provider    ProviderGetter
 	servers     []ToolServer
+	onTaskFinished func(*ScheduledTask)
 	maxRounds   int
 	toolTimeout int
 	wd          string
@@ -249,6 +250,10 @@ func (s *Scheduler) SetServers(servers []interface{}) {
 		}
 		s.servers = append(s.servers, ts)
 	}
+}
+
+func (s *Scheduler) SetOnTaskFinished(cb func(*ScheduledTask)) {
+	s.onTaskFinished = cb
 }
 
 func (s *Scheduler) SetConfig(maxRounds, toolTimeout int, wd, os string) {
@@ -474,6 +479,13 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 	task.LastRun = time.Now()
 	task.RunCount++
 	s.updateTask(task)
+
+	if s.onTaskFinished != nil {
+		func() {
+			defer func() { _ = recover() }()
+			s.onTaskFinished(task)
+		}()
+	}
 }
 
 func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (string, error) {

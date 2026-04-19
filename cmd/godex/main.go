@@ -325,6 +325,9 @@ func main() {
 	if err != nil {
 		log.Printf("[Scheduler] Failed to initialize: %v", err)
 	} else {
+		sched.SetOnTaskFinished(func(*scheduler.ScheduledTask) {
+			playSound()
+		})
 		sched.SetProviderGetter(&schedulerProviderGetter{provider: provider})
 		var serverSlice []interface{} = make([]interface{}, len(servers))
 		for i, s := range servers {
@@ -1007,9 +1010,10 @@ promptLoop:
 			if totalToolCalls > 0 && isToolCallResponse {
 				prevNoTool = false
 			}
+
 			if !isToolCallResponse || len(toolCalls) == 0 {
 
-				if !looksLikeToolCall(resp) {
+				if !looksLikeToolCall(resp) && round > 0 {
 					go playSound()
 					fmt.Printf("\n\n%s\n", renderMarkdown(resp))
 					break
@@ -2245,7 +2249,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 		if !isToolCallResponse || len(toolCalls) == 0 {
 			if !hasFinal {
 
-				if !looksLikeToolCall(resp) {
+				if !looksLikeToolCall(resp) && round > 0 {
 					if nocont {
 						fmt.Printf("\n\n%s\n", renderMarkdown(resp))
 					}
