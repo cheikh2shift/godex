@@ -13,4 +13,11 @@
 /.godex/providers.yaml
 .git/
 .gtree
-/godex
+
+# Dyno test harness generated files
+/dyno/logs/
+/dyno/mocks/
+/dyno/*.so
+/dyno/*.c
+/dyno/strace_wrapper.sh
+/dyno/godex

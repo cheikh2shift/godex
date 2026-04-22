@@ -2524,7 +2524,7 @@ func looksLikeToolCall(s string) bool {
 	if !strings.Contains(lower, "toolcall") {
 		return false
 	}
-	return strings.Contains(s, "{") && strings.Contains(s, "}")
+	return strings.Contains(s, "{") || strings.Contains(s, "}")
 }
 
 func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {
