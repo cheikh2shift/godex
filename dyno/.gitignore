@@ -1,0 +1,12 @@
+# Logs
+logs/
+
+# Workspace
+workspace/
+
+# Docker
+*.dockerfile
+
+# OS
+.DS_Store
+Thumbs.db
