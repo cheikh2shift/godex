@@ -3,10 +3,7 @@
 DYNO Mock Server - Intercepts all HTTP requests and returns mock responses
 to simulate tool calling for godex testing.
 
-This server:
-- Logs all HTTP requests to tracking files
-- Returns dummy responses that simulate AI tool calling
-- Supports OpenAI-compatible API responses
+Handles both OpenAI and Ollama API formats.
 """
 
 import os
@@ -63,103 +60,102 @@ class MockHandler(BaseHTTPRequestHandler):
     def get_mock_response(self, method, path, headers=None, body=None):
         """Determine mock response based on request"""
         
-        # Check for tool result in request
-        if body:
-            try:
-                req_data = json.loads(body)
-                if 'messages' in req_data:
-                    last_msg = req_data['messages'][-1] if req_data['messages'] else {}
-                    if last_msg.get('role') == 'tool':
-                        return self.mock_tool_result_response(last_msg)
-            except:
-                pass
+        # Ollama endpoints
+        if '/api/chat' in path:
+            return self.mock_ollama_chat(body)
+        if '/api/show' in path:
+            return self.mock_ollama_show(body)
+        if '/api/generate' in path:
+            return self.mock_ollama_generate(body)
+        if '/api/tags' in path or '/tags' in path:
+            return self.mock_ollama_tags()
         
-        # OpenAI/ChatGPT style endpoints
+        # OpenAI endpoints
         if '/v1/chat/completions' in path or 'chat/completions' in path:
             return self.mock_chat_completion(body)
-        
-        # OpenAI embeddings
         if '/v1/embeddings' in path or 'embeddings' in path:
             return self.mock_embeddings_response()
-        
-        # Anthropic Claude
-        if 'anthropic.com' in path or '/v1/messages' in path:
-            return self.mock_anthropic_response(body)
         
         # Default: generic success response
         return self.mock_default_response()
     
-    def mock_tool_result_response(self, tool_msg):
-        """Return mock response after tool execution"""
-        tool_name = tool_msg.get('name', 'unknown')
-        content = tool_msg.get('content', '')
-        
-        logger.info(f"Mocking tool result for: {tool_name}")
-        
-        response = {
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": f"[Tool {tool_name} executed successfully. Result: {content[:200]}]"
-                },
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150
-            }
-        }
-        return 200, response
-    
-    def mock_chat_completion(self, body):
-        """Mock OpenAI chat completion - simulates tool calling"""
+    def mock_ollama_chat(self, body):
+        """Mock Ollama chat response"""
         try:
             req_data = json.loads(body) if body else {}
         except:
             req_data = {}
         
-        # Check if this is a tool call request
-        tools = req_data.get('tools', [])
+        model = req_data.get('model', 'gpt-4')
         messages = req_data.get('messages', [])
         
-        # If tools provided and no tool call yet, simulate a tool call
-        if tools and not any(m.get('tool_calls', []) for m in messages if isinstance(m, dict)):
-            # Simulate tool calling behavior
-            tool_name = tools[0].get('function', {}).get('name', 'example_tool')
-            
-            response = {
-                "id": "chatcmpl-mock-dyno-001",
-                "object": "chat.completion",
-                "created": int(datetime.now().timestamp()),
-                "model": req_data.get('model', 'gpt-4'),
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "tool_calls": [{
-                            "id": "call_mock_001",
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": json.dumps({"query": "mocked query for testing"})
-                            }
-                        }]
-                    },
-                    "finish_reason": "tool_calls"
-                }],
-                "usage": {
-                    "prompt_tokens": 50,
-                    "completion_tokens": 30,
-                    "total_tokens": 80
-                }
-            }
-            return 200, response
-        
-        # Regular chat response
+        # Build a response
         response = {
-            "id": "chatcmpl-mock-dyno-002",
+            "model": model,
+            "message": {
+                "role": "assistant",
+                "content": "[DYNO MOCK] This is a simulated AI response. All network calls are being tracked and mocked for testing purposes."
+            },
+            "done": True
+        }
+        return 200, response
+    
+    def mock_ollama_show(self, body):
+        """Mock Ollama show response"""
+        try:
+            req_data = json.loads(body) if body else {}
+        except:
+            req_data = {}
+        
+        model = req_data.get('name', 'gpt-4')
+        
+        response = {
+            "model": model,
+            "modified_at": "2026-01-01T00:00:00Z",
+            "size": 0,
+            "digest": "mockdigest123"
+        }
+        return 200, response
+    
+    def mock_ollama_generate(self, body):
+        """Mock Ollama generate response"""
+        try:
+            req_data = json.loads(body) if body else {}
+        except:
+            req_data = {}
+        
+        model = req_data.get('model', 'gpt-4')
+        
+        response = {
+            "model": model,
+            "response": "[DYNO MOCK] This is a simulated AI response.",
+            "done": True
+        }
+        return 200, response
+    
+    def mock_ollama_tags(self):
+        """Mock Ollama tags response"""
+        response = {
+            "models": [
+                {
+                    "name": "gpt-4",
+                    "modified_at": "2026-01-01T00:00:00Z",
+                    "size": 0,
+                    "digest": "mockdigest123"
+                }
+            ]
+        }
+        return 200, response
+    
+    def mock_chat_completion(self, body):
+        """Mock OpenAI chat completion"""
+        try:
+            req_data = json.loads(body) if body else {}
+        except:
+            req_data = {}
+        
+        response = {
+            "id": "chatcmpl-mock-dyno-001",
             "object": "chat.completion",
             "created": int(datetime.now().timestamp()),
             "model": req_data.get('model', 'gpt-4'),
@@ -167,7 +163,7 @@ class MockHandler(BaseHTTPRequestHandler):
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": "[DYNO MOCK RESPONSE] This is a simulated AI response. All network calls are being tracked and mocked for testing purposes."
+                    "content": "[DYNO MOCK] This is a simulated AI response."
                 },
                 "finish_reason": "stop"
             }],
@@ -192,25 +188,6 @@ class MockHandler(BaseHTTPRequestHandler):
             "usage": {
                 "prompt_tokens": 8,
                 "total_tokens": 8
-            }
-        }
-        return 200, response
-    
-    def mock_anthropic_response(self, body):
-        """Mock Anthropic Claude response"""
-        response = {
-            "id": "msg_mock_001",
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "text",
-                "text": "[DYNO MOCK RESPONSE] This is a simulated Claude response. All network calls are being tracked and mocked."
-            }],
-            "model": "claude-3-sonnet-20240229",
-            "stop_reason": "end_turn",
-            "usage": {
-                "input_tokens": 50,
-                "output_tokens": 50
             }
         }
         return 200, response

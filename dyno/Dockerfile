@@ -8,9 +8,16 @@ RUN apk add --no-cache \
     bash \
     git \
     curl \
-    go \
     musl-dev \
     gcc
+
+# Install newer Go version
+RUN curl -fsSL https://go.dev/dl/go1.25.7.linux-amd64.tar.gz -o /tmp/go.tar.gz && \
+    rm -rf /usr/local/go && \
+    tar -C /usr/local -xzf /tmp/go.tar.gz && \
+    rm /tmp/go.tar.gz
+
+ENV PATH=/usr/local/go/bin:$PATH
 
 # Build godex from source (build context is project root)
 WORKDIR /build
@@ -37,18 +44,19 @@ RUN apk add --no-cache \
     jq
 
 # Install mock HTTP server dependencies
-RUN pip3 install --no-cache-dir flask requests
+RUN pip3 install --no-cache-dir --break-system-packages flask requests
 
 # Create directories
-RUN mkdir -p /dyno/logs /dyno/workspace /dyno/mocks
+RUN mkdir -p /dyno/logs /dyno/workspace /dyno/mocks /root/.godex
 
 # Copy built binary
 COPY --from=builder /build/godex /usr/local/bin/godex
 
-# Copy dyno scripts
-COPY dyno-mock-server.py /dyno/dyno-mock-server.py
-COPY dyno-entrypoint.sh /dyno/dyno-entrypoint.sh
-COPY dyno.env /dyno/dyno.env
+# Copy dyno scripts (from dyno/ folder in build context)
+COPY dyno/dyno-mock-server.py /dyno/dyno-mock-server.py
+COPY dyno/dyno-entrypoint.sh /dyno/dyno-entrypoint.sh
+COPY dyno/dyno.env /dyno/dyno.env
+COPY dyno/dummy-provider.yaml /root/.godex/providers.yaml
 
 RUN chmod +x /dyno/*.sh /dyno/dyno-mock-server.py
 
@@ -61,6 +69,8 @@ ENV DYNO_MOCK_HTTP=true
 ENV DYNO_MOCK_FILEOPS=true
 ENV DYNO_MOCK_COMMANDS=true
 ENV DYNO_TRACKING_ENABLED=true
+ENV CODEX_CONFIG_PATH=/root/.godex/providers.yaml
+ENV CODEX_PROVIDER_NAME=dyno-mock
 
 # Volume for outputs
 VOLUME ["/dyno/logs", "/dyno/workspace"]

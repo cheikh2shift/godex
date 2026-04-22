@@ -1,0 +1,10 @@
+providers:
+  - name: dyno-mock
+    type: ollama
+    endpoint: http://localhost:8888/v1
+    model: gpt-4
+    api_key: dummy-key-for-testing
+default_provider: dyno-mock
+vision_enabled: true
+vision_cli_downloaded: true
+

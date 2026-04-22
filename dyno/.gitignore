@@ -10,3 +10,6 @@ workspace/
 # OS
 .DS_Store
 Thumbs.db
+gtext/
+.git/
+.gtree

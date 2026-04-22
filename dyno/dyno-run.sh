@@ -14,12 +14,12 @@ log_error() { echo "[DYNO] ERROR: $1"; }
 build_dyno_image() {
     log_info "Building DYNO Docker image..."
     cd "$PROJECT_ROOT"
-build_dyno_image() {
-    log_info "Building DYNO Docker image..."
-    cd "$SCRIPT_DIR"
-    docker build -t "$DOCKER_IMAGE" .
+    docker build --no-cache -t "$DOCKER_IMAGE" -f "$SCRIPT_DIR/Dockerfile" .
     log_success "Built Docker image: $DOCKER_IMAGE"
 }
+
+run_dyno() {
+    local args="$@"
     log_info "Running godex in isolated DYNO container..."
     log_info "Arguments: $args"
 
@@ -39,11 +39,8 @@ build_dyno_image() {
         -e DYNO_TRACKING_ENABLED=true \
         -e DYNO_MOCK_HTTP=true \
         -e DYNO_MOCK_FILEOPS=true \
-        -e DYNO_MOCK_COMMANDS=true \
-        -e DYNO_LOG_DIR=/dyno/logs \
         -e GODEX_ARGS="$args" \
-        "$DOCKER_IMAGE" \
-        godex $args
+        "$DOCKER_IMAGE"
 
     log_success "DYNO execution completed"
 }
@@ -61,13 +58,13 @@ show_logs() {
 
 main() {
     local cmd="${1:-run}"
-    shift || true
-
+    
     case "$cmd" in
         build)
             build_dyno_image
             ;;
         run)
+            shift
             run_dyno "$@"
             ;;
         logs)
