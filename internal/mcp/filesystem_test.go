@@ -57,3 +57,24 @@ func TestFileSystemServer_SanitizesEmptyAllowedPaths(t *testing.T) {
 		t.Fatalf("expected default allowed path, got: %v", paths)
 	}
 }
+
+func TestFileSystemServer_ListDirectory_DoesNotPanicOnInfoError(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a dangling symlink so DirEntry.Info() returns an error.
+	linkPath := filepath.Join(tmp, "dangling-link")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), linkPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	server := NewFileSystemServer([]string{tmp}, false)
+	out, err := server.CallTool(context.Background(), "list_directory", map[string]interface{}{
+		"path": tmp,
+	})
+	if err != nil {
+		t.Fatalf("list_directory failed: %v", err)
+	}
+	if !strings.Contains(out, "dangling-link") {
+		t.Fatalf("expected listing to include dangling-link, got: %s", out)
+	}
+}

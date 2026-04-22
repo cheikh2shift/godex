@@ -345,12 +345,19 @@ func (s *FileSystemServer) listDirectory(args map[string]interface{}) (string, e
 
 	var result strings.Builder
 	for _, entry := range entries {
-		info, _ := entry.Info()
 		if entry.IsDir() {
 			result.WriteString(fmt.Sprintf("d %s/\n", entry.Name()))
-		} else {
-			result.WriteString(fmt.Sprintf("- %s (%d bytes)\n", entry.Name(), info.Size()))
+			continue
 		}
+
+		// entry.Info() can fail (e.g. dangling symlink, TOCTOU deletion during parallel tool runs).
+		// Don't panic; just omit the size.
+		info, err := entry.Info()
+		if err != nil || info == nil {
+			result.WriteString(fmt.Sprintf("- %s\n", entry.Name()))
+			continue
+		}
+		result.WriteString(fmt.Sprintf("- %s (%d bytes)\n", entry.Name(), info.Size()))
 	}
 
 	return result.String(), nil

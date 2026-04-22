@@ -4,7 +4,17 @@ providers:
     endpoint: http://localhost:8888/v1
     model: gpt-4
     api_key: dummy-key-for-testing
+    mcp_servers:
+      - name: filesystem
+        allowed_paths:
+          - /dyno
+          - /tmp
+      - name: bash
+        allowed_paths:
+          - /dyno
+          - /tmp
+      - name: webscraper
+        # Leave allowed_paths empty to allow all URLs in DYNO.
 default_provider: dyno-mock
 vision_enabled: true
 vision_cli_downloaded: true
-
