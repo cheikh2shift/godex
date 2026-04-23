@@ -2022,30 +2022,7 @@ Tips:
   - Up/Down arrows for command history
   - Ctrl+R to search past prompts
   - Tab to autocomplete / commands
-
-Available MCP tools:
-  filesystem:
-    read_file(path)       - Read a file
-    write_file(path, content) - Write to a file
-    list_directory(path) - List directory contents
-    create_directory(path) - Create a directory
-    delete_file(path)    - Delete a file
-    search_files(path, pattern) - Search for files
-    get_file_info(path)  - Get file information
-
-  bash:
-    run_command(command)  - Run a shell command
-
-  webscraper:
-    fetch_url(url)       - Fetch URL with JavaScript rendering
-    search_html(html, selector, text) - Search HTML content
-    get_links(html)      - Extract all links from HTML
-
-Examples:
-  > read_file /home/user/project/main.go
-  > write_file /home/user/project/test.txt "Hello World"
-  > run_command "ls -la"
-  > fetch_url "https://example.com"`)
+`)
 }
 
 func uniqueStrings(input []string) []string {
