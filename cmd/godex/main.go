@@ -2021,8 +2021,7 @@ Tips:
   - Paste multiline text - waits for more input automatically
   - Up/Down arrows for command history
   - Ctrl+R to search past prompts
-  - Tab to autocomplete / commands
-`)
+  - Tab to autocomplete / commands`)
 }
 
 func uniqueStrings(input []string) []string {
