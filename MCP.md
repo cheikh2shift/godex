@@ -94,6 +94,16 @@ mcp_servers:
 
 ## External MCP Servers
 
+## Built-in filesystem as an MCP server (stdio)
+
+GoDex can run its built-in filesystem implementation as a standalone MCP server over stdio:
+
+```bash
+godex mcp serve filesystem --allowed-path /home/user/project --allowed-path /tmp
+```
+
+Details: [MCP_BUILTIN_FILESYSTEM_SERVER.md](MCP_BUILTIN_FILESYSTEM_SERVER.md)
+
 ### Chrome MCP Controller
 
 Control Chrome tabs via a browser extension. Requires the [chrome-mcp](https://github.com/cheikh2shift/chrome-mcp) server and Chrome extension.

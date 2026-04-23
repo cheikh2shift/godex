@@ -1323,6 +1323,7 @@ Flags:
 MCP subcommands:
   godex mcp add --provider <name> --name <server> [options]
   godex mcp remove --provider <name> --name <server>
+  godex mcp serve filesystem [options]
 
 MCP add options:
   --name           MCP server name (filesystem, bash, webscraper, or external name)
@@ -1347,7 +1348,7 @@ func (s *stringList) Set(value string) error {
 
 func handleMCPSubcommand(args []string, configPath string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: godex mcp <add|remove> [options]")
+		return fmt.Errorf("usage: godex mcp <add|remove|serve> [options]")
 	}
 
 	isFilesystem := func(name string) bool {
@@ -1444,8 +1445,10 @@ func handleMCPSubcommand(args []string, configPath string) error {
 		if err := config.Save(configPath, cfg); err != nil {
 			return err
 		}
-		fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
-		return nil
+			fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
+			return nil
+	case "serve":
+		return handleMCPServeSubcommand(args[1:])
 	case "remove":
 		fs := flag.NewFlagSet("mcp remove", flag.ContinueOnError)
 		var providerName string

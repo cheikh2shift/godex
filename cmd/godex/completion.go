@@ -583,7 +583,7 @@ complete -c godex -l debug -s d -f
 complete -c godex -l completion -x -a "bash zsh fish" -d "Generate shell completion"
 complete -c godex -l llama-server -s l -x -d "External llama.cpp server URL"
 complete -c godex -n "__fish_use_subcommand" -a "mcp" -d "Manage MCP servers"
-complete -c godex -n "__fish_seen_subcommand_from mcp" -a "add remove" -d "MCP subcommand"
+complete -c godex -n "__fish_seen_subcommand_from mcp" -a "add remove serve" -d "MCP subcommand"
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l provider -x -a "(__godex_complete_providers)"
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l name -x -a "filesystem bash webscraper"
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l command -x
@@ -594,8 +594,12 @@ complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcomman
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from add" -l allowed-url -x
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from remove" -l provider -x -a "(__godex_complete_providers)"
 complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from remove" -l name -x -a "(__godex_complete_mcp_servers)"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from serve" -a "filesystem" -d "Serve built-in MCP server"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from serve; and __fish_seen_subcommand_from filesystem" -l allowed-path -x -a "(__fish_complete_directories)"
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from serve; and __fish_seen_subcommand_from filesystem" -l auto-confirm -f
+complete -c godex -n "__fish_seen_subcommand_from mcp; and __fish_seen_subcommand_from serve; and __fish_seen_subcommand_from filesystem" -l use-roots -x -a "true false"
 `, defaultConfigPath, defaultConfigPath, defaultConfigPath)
-}
+	}
 
 func printCompletionHelp() {
 	fmt.Print(`Shell completion for godex

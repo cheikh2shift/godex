@@ -222,6 +222,8 @@ GoDex includes built-in MCP servers:
 
 For detailed MCP configuration including external servers, see [MCP.md](MCP.md).
 
+To expose the built-in filesystem MCP server to other agents/clients over stdio, see [MCP_BUILTIN_FILESYSTEM_SERVER.md](MCP_BUILTIN_FILESYSTEM_SERVER.md).
+
 ### Hive Network
 
 GoDex supports a Hive network mode where multiple instances can delegate tasks to each other. See [HIVE.md](HIVE.md) for details.
