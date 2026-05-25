@@ -588,8 +588,8 @@ promptLoop:
 		}
 
 		type promptResult struct {
-			input string
 			err   error
+			input string
 		}
 		promptCancelCh := make(chan struct{}, 1)
 		promptResultCh := make(chan promptResult, 1)

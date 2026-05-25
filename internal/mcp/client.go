@@ -29,15 +29,16 @@ type Tool struct {
 	InputSchema json.RawMessage
 }
 
-type MCPToolExecutor struct {
-	serverName string
-	server     MCPServer
-	mcpClient  *client.Client
-	tools      []Tool
-	workingDir string
+type MCPToolExecutor struct { //betteralign:ignore
+	lastRequestID int64 // Must be first for 64-bit alignment on 32-bit platforms - it's accessed atomically
+	mcpClient     *client.Client
+	serverName    string
+	workingDir    string
 
-	lastRequestID int64
-	requestIDMu   sync.Mutex
+	server MCPServer
+	tools  []Tool
+
+	requestIDMu sync.Mutex
 }
 
 func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MCPToolExecutor, error) {

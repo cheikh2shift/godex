@@ -37,37 +37,38 @@ func llamaDebug(format string, args ...interface{}) {
 }
 
 type llamaProvider struct {
-	baseURL          string
-	model            string
-	modelIsHF        bool
 	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
-	messages         []map[string]interface{}
-	mu               sync.Mutex
-	sendMu           sync.Mutex
 	OnThink          func(string)
 	cancelFunc       context.CancelFunc
-	cancelGen        uint64
-	contextLimit     int
-	promptTokens     int
-	completionTokens int
 	statusCh         chan<- string
-	tools            []map[string]interface{}
 	pendingToolCalls map[string]string
 
-	serverCmd      *exec.Cmd
-	serverProcess  *os.Process
-	serverPort     int
-	serverPath     string
-	tokenizePath   string
-	externalServer bool
-	serverMu       sync.Mutex
-	serverReady    bool
-	serverStarted  bool
-	startMu        sync.Mutex
+	serverCmd     *exec.Cmd
+	serverProcess *os.Process
 
 	OnDownloadProgress func(DownloadProgress)
+	baseURL            string
+	model              string
+	serverPath         string
+	tokenizePath       string
+	messages           []map[string]interface{}
+	tools              []map[string]interface{}
+	cancelGen          uint64
+	contextLimit       int
+	promptTokens       int
+	completionTokens   int
+	serverPort         int
+	mu                 sync.Mutex
+	sendMu             sync.Mutex
+	serverMu           sync.Mutex
+	startMu            sync.Mutex
+
+	modelIsHF      bool
+	externalServer bool
+	serverReady    bool
+	serverStarted  bool
 }
 
 var (
@@ -475,10 +476,10 @@ func setCachedQuantization(modelID, quant string) {
 
 type progressWriter struct {
 	w          io.Writer
+	progressCh chan<- DownloadProgress
+	filename   string
 	total      int64
 	written    int64
-	filename   string
-	progressCh chan<- DownloadProgress
 }
 
 func (pw *progressWriter) Write(p []byte) (int, error) {
@@ -1325,13 +1326,13 @@ func (p *llamaProvider) TokenUsage() (int, int) {
 }
 
 type slotInfo struct {
-	ID           int  `json:"id"`
-	IsProcessing bool `json:"is_processing"`
-	NCtx         int  `json:"n_ctx"`
-	IDTask       int  `json:"id_task"`
-	NextToken    []struct {
+	NextToken []struct {
 		NDecoded int `json:"n_decoded"`
 	} `json:"next_token"`
+	ID           int  `json:"id"`
+	NCtx         int  `json:"n_ctx"`
+	IDTask       int  `json:"id_task"`
+	IsProcessing bool `json:"is_processing"`
 }
 
 func (p *llamaProvider) countTokens(text string) int {

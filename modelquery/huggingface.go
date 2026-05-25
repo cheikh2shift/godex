@@ -14,16 +14,16 @@ type HuggingFaceModel struct {
 	Author       string   `json:"author"`
 	CreatedAt    string   `json:"createdAt"`
 	LastModified string   `json:"lastModified"`
-	Private      bool     `json:"private"`
-	Downloads    int      `json:"downloads"`
-	Guarded      bool     `json:"guarded"`
-	Likes        int      `json:"likes"`
-	Tags         []string `json:"tags"`
 	PipelineTag  string   `json:"pipeline_tag"`
+	Autotemp     string   `json:"__variant"`
+	Tags         []string `json:"tags"`
 	Siblings     []struct {
 		Rfilename string `json:"rfilename"`
 	} `json:"siblings"`
-	Autotemp string `json:"__variant"`
+	Downloads int  `json:"downloads"`
+	Likes     int  `json:"likes"`
+	Private   bool `json:"private"`
+	Guarded   bool `json:"guarded"`
 }
 
 // HuggingFaceResponse represents the response from HuggingFace API.

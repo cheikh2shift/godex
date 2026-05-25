@@ -16,18 +16,18 @@ import (
 )
 
 type cacheEntry struct {
-	html      string
 	expiresAt time.Time
+	html      string
 }
 
 type WebScraperServer struct {
-	allowedURLs   []string
-	tools         []Tool
 	browserCtx    context.Context
 	browserCancel context.CancelFunc
-	autoConfirm   bool
 	cache         map[string]cacheEntry
+	allowedURLs   []string
+	tools         []Tool
 	cacheMu       sync.Mutex
+	autoConfirm   bool
 }
 
 func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServer {

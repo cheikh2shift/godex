@@ -19,6 +19,10 @@ type MCPServer struct {
 
 // Provider describes a single LLM provider, referenced from the TUI agent.
 type Provider struct {
+	Temperature    *float64          `yaml:"temperature,omitempty"`
+	MaxToolRounds  *int              `yaml:"max_tool_rounds,omitempty"`
+	ToolTimeout    *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180
+	Params         map[string]string `yaml:"params,omitempty"`
 	Name           string            `yaml:"name"`
 	Type           string            `yaml:"type"`
 	Endpoint       string            `yaml:"endpoint"`
@@ -26,20 +30,16 @@ type Provider struct {
 	Description    string            `yaml:"description,omitempty"`
 	APIKey         string            `yaml:"api_key,omitempty"`
 	APIKeyEnv      string            `yaml:"api_key_env,omitempty"`
-	Temperature    *float64          `yaml:"temperature,omitempty"`
-	MaxToolRounds  *int              `yaml:"max_tool_rounds,omitempty"`
-	ToolTimeout    *int              `yaml:"tool_timeout,omitempty"` // in seconds, default 180
-	ContextLimit   int               `yaml:"context_limit,omitempty"`
-	Params         map[string]string `yaml:"params,omitempty"`
-	MCPServers     []MCPServer       `yaml:"mcp_servers,omitempty"`
 	LlamaServerURL string            `yaml:"-"` // CLI override for external llama.cpp server (not persisted)
+	MCPServers     []MCPServer       `yaml:"mcp_servers,omitempty"`
+	ContextLimit   int               `yaml:"context_limit,omitempty"`
 }
 
 // Config is a list of providers, with a default provider name for the CLI.
 type Config struct {
-	Providers           []Provider `yaml:"providers"`
-	DefaultProvider     string     `yaml:"default_provider,omitempty"`
 	VisionEnabled       *bool      `yaml:"vision_enabled,omitempty"`
+	DefaultProvider     string     `yaml:"default_provider,omitempty"`
+	Providers           []Provider `yaml:"providers"`
 	VisionCLIDownloaded bool       `yaml:"vision_cli_downloaded,omitempty"`
 }
 
