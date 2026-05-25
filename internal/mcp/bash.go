@@ -332,6 +332,8 @@ func (s *BashServer) isPathAllowed(path string) bool {
 	if path == "" {
 		return true
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for _, allowed := range s.allowedPaths {
 		if strings.HasPrefix(path, allowed) || path == allowed {
 			return true
@@ -348,12 +350,14 @@ func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}
 
 	if !s.isCommandAllowed(command) {
 		if interpreterRegex.MatchString(command) {
-			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, ruby, perl, etc.) are not allowed in run_command. Use run_python or run_node instead.")
+			return "", fmt.Errorf("INTERPRETER_BLOCKED: scripting interpreters (python, ruby, perl, etc.) are not allowed in run_command. Use run_python or run_node instead")
 		}
 		allowed, restrictedPath := s.checkCommandPaths(command)
 		if !allowed && restrictedPath != "" {
 			if s.autoConfirm {
+				s.mu.Lock()
 				s.allowedPaths = append(s.allowedPaths, restrictedPath)
+				s.mu.Unlock()
 				log.Printf("[BASH] Auto-confirmed restricted path: %s", restrictedPath)
 			} else {
 				return "", fmt.Errorf("PATH_RESTRICTED: path not allowed: %s", restrictedPath)
@@ -810,6 +814,8 @@ func (s *BashServer) AddPath(ctx context.Context, path string) error {
 	if path == "" {
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, p := range s.allowedPaths {
 		if p == path {
 			return nil
@@ -824,6 +830,8 @@ func (s *BashServer) TempAddPath(path string) {
 	if path == "" {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, p := range s.allowedPaths {
 		if p == path {
 			return
@@ -838,6 +846,8 @@ func (s *BashServer) AddURL(ctx context.Context, url string) error {
 
 func (s *BashServer) RemovePath(ctx context.Context, path string) error {
 	path = strings.TrimSpace(path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for i, p := range s.allowedPaths {
 		if p == path {
 			s.allowedPaths = append(s.allowedPaths[:i], s.allowedPaths[i+1:]...)
@@ -862,7 +872,9 @@ func (s *BashServer) Close() error {
 }
 
 func (s *BashServer) SetAllowedPaths(paths []string) {
+	s.mu.Lock()
 	s.allowedPaths = sanitizeAllowedPaths(paths)
+	s.mu.Unlock()
 }
 
 func (s *BashServer) AllowedPathsUpdated() {}

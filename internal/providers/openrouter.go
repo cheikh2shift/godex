@@ -44,15 +44,6 @@ type openRouterModelsResponse struct {
 	Data []openRouterModelInfo `json:"data"`
 }
 
-type toolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
 type responseToolCall struct {
 	ID        string
 	Name      string
@@ -681,7 +672,7 @@ func parseResponsesOutput(body []byte) (string, string, []responseToolCall, resp
 		case "function_call":
 			name, _ := item["name"].(string)
 			id, _ := item["id"].(string)
-			argsRaw, _ := item["arguments"]
+			argsRaw := item["arguments"]
 			argsStr := ""
 			switch v := argsRaw.(type) {
 			case string:

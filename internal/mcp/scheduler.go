@@ -20,17 +20,6 @@ type schedulerExt struct {
 		ListTasks() []interface{}
 		GetTask(id string) interface{}
 	}
-	mu interface {
-		Lock()
-		Unlock()
-	}
-	provider interface {
-		GetProvider(cfg interface{}) (interface{}, error)
-	}
-	providerMu interface {
-		Lock()
-		Unlock()
-	}
 }
 
 type TaskInfo struct {

@@ -441,23 +441,22 @@ func promptQuantizationSelection(maxOptions int, defaultIdx int) (int, error) {
 		return 0, fmt.Errorf("no quantization options available")
 	}
 	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Printf("\nSelect quantization (default: %d for Q4_K_M): ", defaultIdx+1)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return 0, err
-		}
-		input = strings.TrimSpace(input)
-		if input == "" {
-			return defaultIdx, nil
-		}
-		idx, err := strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > maxOptions {
-			fmt.Println("Invalid selection, using default Q4_K_M")
-			return defaultIdx, nil
-		}
-		return idx - 1, nil
+
+	fmt.Printf("\nSelect quantization (default: %d for Q4_K_M): ", defaultIdx+1)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return 0, err
 	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultIdx, nil
+	}
+	idx, err := strconv.Atoi(input)
+	if err != nil || idx < 1 || idx > maxOptions {
+		fmt.Println("Invalid selection, using default Q4_K_M")
+		return defaultIdx, nil
+	}
+	return idx - 1, nil
 }
 
 func getCachedQuantization(modelID string) (string, bool) {

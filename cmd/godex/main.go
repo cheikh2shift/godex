@@ -40,8 +40,6 @@ import (
 	"github.com/cheikh2shift/godex/modelquery"
 )
 
-var clipboardAvailable = true
-
 const (
 	defaultConfigFile = "providers.yaml"
 	sessionFileName   = "session.txt"
@@ -1445,8 +1443,8 @@ func handleMCPSubcommand(args []string, configPath string) error {
 		if err := config.Save(configPath, cfg); err != nil {
 			return err
 		}
-			fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
-			return nil
+		fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
+		return nil
 	case "serve":
 		return handleMCPServeSubcommand(args[1:])
 	case "remove":
@@ -2522,7 +2520,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 					allowedPaths := server.AllowedPaths()
 					if autoDenyRestrictedPaths {
 						log.Printf("[Hive] Auto-denied restricted path access: %s (allowed paths: %v)\n", path, allowedPaths)
-						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction.", path)
+						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction", path)
 					}
 					pathPromptMu.Lock()
 					selected := showPathRestrictionPrompt(path, allowedPaths)
@@ -2546,7 +2544,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 					case 2:
 						return "", ErrUserAborted
 					case 3:
-						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction.", path)
+						return "", fmt.Errorf("PATH_RESTRICTED: '%s' is not in allowed paths. Do NOT try to access this path. Find an alternative solution that does not require this file/path. If no alternative exists, respond with FINAL_ANSWER: and explain the restriction", path)
 					}
 					return "", err
 				}

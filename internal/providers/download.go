@@ -19,11 +19,6 @@ type hfRepoInfo struct {
 	} `json:"siblings"`
 }
 
-type hfFileInfo struct {
-	Size        int64  `json:"size"`
-	BlobHTTPURL string `json:"blobHTTPURL"`
-}
-
 func getGGUFFiles(ctx context.Context, modelID string) ([]string, error) {
 	url := fmt.Sprintf("%s/models/%s", huggingfaceAPI, modelID)
 

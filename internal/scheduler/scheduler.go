@@ -365,7 +365,7 @@ func (s *Scheduler) saveTask(task *ScheduledTask) error {
 		lastRunStr = task.LastRun.Format(time.RFC3339)
 	}
 	_, err := s.db.Exec(`
-		INSERT OR REPLACE INTO scheduled_tasks 
+		INSERT OR REPLACE INTO scheduled_tasks
 		(id, prompt, interval_sec, run_at, is_repeating, working_dir, created_at, last_run, run_count, last_error, last_output, provider_type, provider_name, provider_model)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Prompt, task.IntervalSec, task.RunAt, task.IsRepeating, task.WorkingDir,
@@ -866,10 +866,4 @@ func (s *Scheduler) Close() {
 	s.StopAllTasks()
 	s.wg.Wait()
 	s.db.Close()
-}
-
-type providerConfig struct {
-	Type  string `json:"type"`
-	Name  string `json:"name"`
-	Model string `json:"model"`
 }

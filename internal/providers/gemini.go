@@ -175,7 +175,7 @@ func (g *geminiProvider) Cancel() {
 }
 
 func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
-	return "", fmt.Errorf("Gemini provider does not support direct tool calls")
+	return "", fmt.Errorf("gemini provider does not support direct tool calls")
 }
 
 func (g *geminiProvider) ContextLimit() int {

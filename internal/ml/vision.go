@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"sync"
 )
 
 var DebugMode bool
@@ -19,12 +18,7 @@ type VisionResult struct {
 	Duration float64 `json:"duration_ms"`
 }
 
-var (
-	visionServer     *exec.Cmd
-	visionServerOnce sync.Once
-	visionServerErr  error
-	tesseractPath    string
-)
+var visionServer *exec.Cmd
 
 func visionDebug(format string, args ...interface{}) {
 	if DebugMode {
@@ -185,7 +179,6 @@ func StopVisionServer() {
 	if visionServer != nil && visionServer.Process != nil {
 		visionServer.Process.Signal(os.Kill)
 		visionServer = nil
-		visionServerOnce = sync.Once{}
 	}
 }
 

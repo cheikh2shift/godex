@@ -23,7 +23,6 @@ type cacheEntry struct {
 type WebScraperServer struct {
 	allowedURLs   []string
 	tools         []Tool
-	browserCtx    context.Context
 	browserCancel context.CancelFunc
 	autoConfirm   bool
 	cache         map[string]cacheEntry
