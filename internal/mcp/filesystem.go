@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/ml"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 func getIntArg(args map[string]interface{}, key, alias string) (float64, bool) {
@@ -664,7 +665,7 @@ func (s *FileSystemServer) searchFileText(args map[string]interface{}) (string, 
 			pattern = "(?i)" + pattern
 		}
 		var err error
-		regex, err = regexp.Compile(pattern)
+		regex, err = rxcache.Compile(pattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}
@@ -755,7 +756,7 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 		if !caseSensitive {
 			compiledPattern = "(?i)" + compiledPattern
 		}
-		regex, err = regexp.Compile(compiledPattern)
+		regex, err = rxcache.Compile(compiledPattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}
@@ -819,7 +820,7 @@ func (s *FileSystemServer) searchDirectoryText(args map[string]interface{}) (str
 			compiledPattern = "(?i)" + compiledPattern
 		}
 		var err error
-		regex, err = regexp.Compile(compiledPattern)
+		regex, err = rxcache.Compile(compiledPattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}

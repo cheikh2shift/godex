@@ -6,11 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 func TestResolveModelPathLocal(t *testing.T) {
@@ -36,7 +37,7 @@ func TestResolveModelPathLocal(t *testing.T) {
 }
 
 func TestQuantizationRegexParsing(t *testing.T) {
-	re := regexp.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
+	re := rxcache.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
 
 	tests := []struct {
 		filename  string
@@ -513,7 +514,7 @@ func min(a, b int) int {
 }
 
 func TestParseContextValueFromHTML(t *testing.T) {
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	tests := []struct {
 		html     string
