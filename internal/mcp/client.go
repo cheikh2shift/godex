@@ -232,11 +232,11 @@ func (m *MCPToolExecutor) AllowedPaths() []string {
 	return paths
 }
 
-func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	return m.callToolWithRetry(ctx, name, arguments, 0)
 }
 
-func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, arguments map[string]interface{}, attempt int) (string, error) {
+func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, arguments map[string]any, attempt int) (string, error) {
 	maxRetries := 1
 
 	if attempt >= maxRetries {
@@ -268,14 +268,14 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 	return result, nil
 }
 
-func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]interface{}) (string, error) {
+func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]any) (string, error) {
 	t := m.mcpClient.GetTransport()
 
 	request := transport.JSONRPCRequest{
 		JSONRPC: mcp.JSONRPC_VERSION,
 		ID:      mcp.NewRequestId(requestID),
 		Method:  "tools/call",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"name":      name,
 			"arguments": arguments,
 		},

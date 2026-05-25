@@ -15,7 +15,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/ml"
 )
 
-func getIntArg(args map[string]interface{}, key, alias string) (float64, bool) {
+func getIntArg(args map[string]any, key, alias string) (float64, bool) {
 	if v, ok := args[key].(float64); ok {
 		return v, true
 	}
@@ -145,7 +145,7 @@ func (s *FileSystemServer) Tools() []Tool {
 	return s.tools
 }
 
-func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	switch name {
 	case "read_file":
 		return s.readFile(arguments)
@@ -216,7 +216,7 @@ func (s *FileSystemServer) checkAndMaybeAddPath(path string) error {
 	return nil
 }
 
-func (s *FileSystemServer) readFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) readFile(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -234,7 +234,7 @@ func (s *FileSystemServer) readFile(args map[string]interface{}) (string, error)
 	return string(content), nil
 }
 
-func (s *FileSystemServer) readImage(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) readImage(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -254,7 +254,7 @@ func (s *FileSystemServer) readImage(args map[string]interface{}) (string, error
 	return summary, nil
 }
 
-func (s *FileSystemServer) readText(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) readText(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -274,7 +274,7 @@ func (s *FileSystemServer) readText(args map[string]interface{}) (string, error)
 	return text, nil
 }
 
-func (s *FileSystemServer) readPdf(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) readPdf(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -296,7 +296,7 @@ func (s *FileSystemServer) readPdf(args map[string]interface{}) (string, error) 
 	return text, nil
 }
 
-func (s *FileSystemServer) writeFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) writeFile(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -322,7 +322,7 @@ func (s *FileSystemServer) writeFile(args map[string]interface{}) (string, error
 	return fmt.Sprintf("Written %d bytes to %s", len(content), path), nil
 }
 
-func (s *FileSystemServer) listDirectory(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) listDirectory(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -363,7 +363,7 @@ func (s *FileSystemServer) listDirectory(args map[string]interface{}) (string, e
 	return result.String(), nil
 }
 
-func (s *FileSystemServer) createDirectory(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) createDirectory(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -380,7 +380,7 @@ func (s *FileSystemServer) createDirectory(args map[string]interface{}) (string,
 	return fmt.Sprintf("Created directory: %s", path), nil
 }
 
-func (s *FileSystemServer) deleteFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) deleteFile(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -409,7 +409,7 @@ func (s *FileSystemServer) deleteFile(args map[string]interface{}) (string, erro
 	return fmt.Sprintf("Deleted file: %s", path), nil
 }
 
-func (s *FileSystemServer) searchFiles(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) searchFiles(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -447,7 +447,7 @@ func (s *FileSystemServer) searchFiles(args map[string]interface{}) (string, err
 	return strings.Join(matches, "\n"), nil
 }
 
-func (s *FileSystemServer) getFileInfo(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) getFileInfo(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -466,7 +466,7 @@ func (s *FileSystemServer) getFileInfo(args map[string]interface{}) (string, err
 		info.Name(), info.Size(), info.IsDir(), info.ModTime().Format("2006-01-02 15:04:05")), nil
 }
 
-func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) readFileLineRange(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -507,7 +507,7 @@ func (s *FileSystemServer) readFileLineRange(args map[string]interface{}) (strin
 	return strings.Join(lines[startIdx:endIdx], "\n"), nil
 }
 
-func (s *FileSystemServer) replaceFirstInFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) replaceFirstInFile(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -547,7 +547,7 @@ func (s *FileSystemServer) replaceFirstInFile(args map[string]interface{}) (stri
 	return fmt.Sprintf("Replaced first occurrence of %s in %s", find, path), nil
 }
 
-func (s *FileSystemServer) replaceLineRange(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) replaceLineRange(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -601,7 +601,7 @@ func (s *FileSystemServer) replaceLineRange(args map[string]interface{}) (string
 	return fmt.Sprintf("Replaced lines %d-%d (%d lines deleted) with %d lines in %s", int(start), int(end), deletedLines, len(newLines), path), nil
 }
 
-func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) insertAtLine(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -640,7 +640,7 @@ func (s *FileSystemServer) insertAtLine(args map[string]interface{}) (string, er
 	return fmt.Sprintf("Inserted content at line %d in %s", int(lineNum), path), nil
 }
 
-func (s *FileSystemServer) searchFileText(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) searchFileText(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -715,7 +715,7 @@ func (s *FileSystemServer) searchFileText(args map[string]interface{}) (string, 
 	return strings.Join(results, "\n"), nil
 }
 
-func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) searchInFile(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -789,7 +789,7 @@ func (s *FileSystemServer) searchInFile(args map[string]interface{}) (string, er
 	return strings.Join(matches, "\n"), nil
 }
 
-func (s *FileSystemServer) searchDirectoryText(args map[string]interface{}) (string, error) {
+func (s *FileSystemServer) searchDirectoryText(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")

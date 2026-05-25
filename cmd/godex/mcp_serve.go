@@ -79,7 +79,7 @@ func serveFilesystemMCP(baseAllowedPaths []string, autoConfirm bool, useRoots bo
 			fs := mcp.NewFileSystemServer(allowed, autoConfirm)
 
 			args, _ := request.Params.Arguments.(map[string]any)
-			argMap := make(map[string]interface{}, len(args))
+			argMap := make(map[string]any, len(args))
 			for k, v := range args {
 				argMap[k] = v
 			}

@@ -23,7 +23,7 @@ type OpenRouterModel struct {
 	Pricing         OpenRouterPricing      `json:"pricing"`
 	TopProvider     OpenRouterTopProvider  `json:"top_provider"`
 	SupportedParams []string               `json:"supported_parameters"`
-	DefaultParams   map[string]interface{} `json:"default_parameters"`
+	DefaultParams   map[string]any `json:"default_parameters"`
 	ExpirationDate  string                 `json:"expiration_date"`
 }
 
