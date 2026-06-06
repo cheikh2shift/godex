@@ -51,7 +51,7 @@ func GetUnixTools() []Tool {
 }
 
 // HandleRunBashScript handles the run_bash_script command - only available on Unix
-func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]interface{}) (string, error) {
+func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]any) (string, error) {
 	code, ok := args["code"].(string)
 	if !ok || code == "" {
 		return "", fmt.Errorf("code is required")

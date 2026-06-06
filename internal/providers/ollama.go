@@ -475,7 +475,7 @@ func (o *ollamaProvider) Cancel() {
 	}
 }
 
-func (o *ollamaProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (o *ollamaProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("Ollama provider does not support direct tool calls, use MCP servers configured in provider")
 }
 

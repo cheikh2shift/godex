@@ -14,7 +14,7 @@ var DebugMode bool
 type Tool struct {
 	Name        string
 	Description string
-	InputSchema map[string]interface{}
+	InputSchema map[string]any
 }
 
 type Message struct {
@@ -28,7 +28,7 @@ type Provider interface {
 	SetThinkCallback(func(string))
 	Cancel()
 	Tools() []Tool
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (string, error)
 	Close() error
 	ContextLimit() int
 	TokenUsage() (input int, output int)

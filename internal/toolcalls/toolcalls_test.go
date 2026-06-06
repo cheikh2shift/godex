@@ -19,7 +19,7 @@ func TestExtractAllToolCalls_PlainJSON(t *testing.T) {
 	if calls[0]["name"] != "run_command" {
 		t.Fatalf("expected name=run_command, got %#v", calls[0]["name"])
 	}
-	args, ok := calls[0]["arguments"].(map[string]interface{})
+	args, ok := calls[0]["arguments"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected arguments map, got %#v", calls[0]["arguments"])
 	}

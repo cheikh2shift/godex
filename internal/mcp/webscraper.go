@@ -100,7 +100,7 @@ func (s *WebScraperServer) checkAndMaybeAddURL(rawURL string) error {
 	return nil
 }
 
-func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	switch name {
 	case "fetch_url":
 		return s.fetchURL(arguments)
@@ -111,7 +111,7 @@ func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments 
 	}
 }
 
-func (s *WebScraperServer) fetchURL(args map[string]interface{}) (string, error) {
+func (s *WebScraperServer) fetchURL(args map[string]any) (string, error) {
 	rawURL, ok := args["url"].(string)
 	if !ok {
 		return "", fmt.Errorf("url is required")
@@ -245,7 +245,7 @@ func (s *WebScraperServer) applyLineRange(content string, start, end float64) st
 	return strings.Join(lines[startIdx:endIdx], "\n")
 }
 
-func (s *WebScraperServer) getLinks(args map[string]interface{}) (string, error) {
+func (s *WebScraperServer) getLinks(args map[string]any) (string, error) {
 	htmlContent, ok := args["html"].(string)
 	if !ok {
 		return "", fmt.Errorf("html is required")

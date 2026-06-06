@@ -308,7 +308,7 @@ func (s *BashServer) Tools() []Tool {
 	return s.tools
 }
 
-func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (s *BashServer) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	switch name {
 	case "run_command":
 		runCmdMu.Lock()
@@ -341,7 +341,7 @@ func (s *BashServer) isPathAllowed(path string) bool {
 	return false
 }
 
-func (s *BashServer) runCommand(ctx context.Context, args map[string]interface{}) (string, error) {
+func (s *BashServer) runCommand(ctx context.Context, args map[string]any) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
 		return "", fmt.Errorf("command is required")
@@ -626,7 +626,7 @@ func (s *BashServer) runSyncCommand(ctx context.Context, command string, timeout
 	return stdoutStr, nil
 }
 
-func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
+func (s *BashServer) killCommand(args map[string]any) (string, error) {
 	// Try job_id first (new format)
 	jobID, hasJobID := args["job_id"].(string)
 
@@ -666,7 +666,7 @@ func (s *BashServer) killCommand(args map[string]interface{}) (string, error) {
 	return fmt.Sprintf("Killed job %s", jobID), nil
 }
 
-func (s *BashServer) killAllBackground(args map[string]interface{}) (string, error) {
+func (s *BashServer) killAllBackground(args map[string]any) (string, error) {
 	killed := s.jobTracker.KillAll()
 	if len(killed) == 0 {
 		return "No background jobs running", nil
@@ -752,7 +752,7 @@ func (s *BashServer) GetJob(jobID string) (*Job, bool) {
 	return s.jobTracker.Get(jobID)
 }
 
-func (s *BashServer) runPython(ctx context.Context, args map[string]interface{}) (string, error) {
+func (s *BashServer) runPython(ctx context.Context, args map[string]any) (string, error) {
 	code, ok := args["code"]
 	if !ok {
 		return "", fmt.Errorf("code is required: args=%v", args)
@@ -778,7 +778,7 @@ func (s *BashServer) runPython(ctx context.Context, args map[string]interface{})
 	return string(output), nil
 }
 
-func (s *BashServer) runNode(ctx context.Context, args map[string]interface{}) (string, error) {
+func (s *BashServer) runNode(ctx context.Context, args map[string]any) (string, error) {
 	code, ok := args["code"]
 	if !ok {
 		return "", fmt.Errorf("code is required: args=%v", args)

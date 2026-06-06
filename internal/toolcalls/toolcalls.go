@@ -8,9 +8,9 @@ import (
 )
 
 // ExtractAllToolCalls extracts tool calls from a model response in a variety of common formats.
-// It returns items shaped as: {"name": string, "arguments": map[string]interface{}}.
-func ExtractAllToolCalls(text string) []map[string]interface{} {
-	var results []map[string]interface{}
+// It returns items shaped as: {"name": string, "arguments": map[string]any}.
+func ExtractAllToolCalls(text string) []map[string]any {
+	var results []map[string]any
 
 	candidates := []string{text}
 	if normalized := normalizeToolCallText(text); normalized != text {
@@ -25,7 +25,7 @@ func ExtractAllToolCalls(text string) []map[string]interface{} {
 			content = strings.TrimSpace(content)
 
 			// Try to parse the whole block as one JSON object
-			var data map[string]interface{}
+			var data map[string]any
 			if err := json.Unmarshal([]byte(content), &data); err == nil {
 				if _, ok := data["name"].(string); ok {
 					results = append(results, processToolData(data))
@@ -41,7 +41,7 @@ func ExtractAllToolCalls(text string) []map[string]interface{} {
 
 			// If not a single object, try sanitizing multi-line strings
 			sanitized := sanitizeMultilineJson(content)
-			var sanitizedData map[string]interface{}
+			var sanitizedData map[string]any
 			if err := json.Unmarshal([]byte(sanitized), &sanitizedData); err == nil {
 				if _, ok := sanitizedData["name"].(string); ok {
 					results = append(results, processToolData(sanitizedData))
@@ -76,7 +76,7 @@ func ExtractAllToolCalls(text string) []map[string]interface{} {
 				if len(m) > 1 {
 					nameRe := rxcache.MustCompile(`tool\s*=>\s*"([^"]+)"`)
 					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
-						results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
+						results = append(results, map[string]any{"name": nameMatch[1], "arguments": map[string]any{}})
 					}
 				}
 			}
@@ -88,11 +88,11 @@ func ExtractAllToolCalls(text string) []map[string]interface{} {
 			for _, m := range nativeMatches {
 				name := m[0]
 				argsStr := m[1]
-				var args map[string]interface{}
+				var args map[string]any
 				if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-					args = map[string]interface{}{"_raw": argsStr}
+					args = map[string]any{"_raw": argsStr}
 				}
-				results = append(results, map[string]interface{}{"name": name, "arguments": args})
+				results = append(results, map[string]any{"name": name, "arguments": args})
 			}
 		}
 
@@ -104,16 +104,16 @@ func ExtractAllToolCalls(text string) []map[string]interface{} {
 	return results
 }
 
-func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
+func extractToolCallsFromJSONArray(text string) []map[string]any {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return nil
 	}
-	var items []map[string]interface{}
+	var items []map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
 		return nil
 	}
-	var results []map[string]interface{}
+	var results []map[string]any
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -125,11 +125,11 @@ func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
 		if tool, ok := item["tool"].(string); ok {
 			args := parseToolArgs(item)
 			if len(args) == 0 {
-				if params, ok := item["parameters"].(map[string]interface{}); ok {
+				if params, ok := item["parameters"].(map[string]any); ok {
 					args = params
 				}
 			}
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"name":      tool,
 				"arguments": args,
 			})
@@ -296,8 +296,8 @@ func extractCodeBlockContent(text string) []string {
 	return results
 }
 
-func extractJsonObjects(text string) []map[string]interface{} {
-	var results []map[string]interface{}
+func extractJsonObjects(text string) []map[string]any {
+	var results []map[string]any
 	startIdx := -1
 	braceCount := 0
 
@@ -312,7 +312,7 @@ func extractJsonObjects(text string) []map[string]interface{} {
 				braceCount--
 				if braceCount == 0 && startIdx != -1 {
 					potentialJSON := text[startIdx : i+1]
-					var data map[string]interface{}
+					var data map[string]any
 					if err := json.Unmarshal([]byte(potentialJSON), &data); err == nil {
 						if _, ok := data["name"].(string); ok {
 							results = append(results, processToolData(data))
@@ -325,7 +325,7 @@ func extractJsonObjects(text string) []map[string]interface{} {
 	return results
 }
 
-func processToolData(data map[string]interface{}) map[string]interface{} {
+func processToolData(data map[string]any) map[string]any {
 	name, _ := data["name"].(string)
 	args := parseToolArgs(data)
 
@@ -338,33 +338,33 @@ func processToolData(data map[string]interface{}) map[string]interface{} {
 			args[k] = s
 		}
 	}
-	return map[string]interface{}{"name": name, "arguments": args}
+	return map[string]any{"name": name, "arguments": args}
 }
 
-func parseToolArgs(data map[string]interface{}) map[string]interface{} {
-	if a, ok := data["arguments"].(map[string]interface{}); ok {
+func parseToolArgs(data map[string]any) map[string]any {
+	if a, ok := data["arguments"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["args"].(map[string]interface{}); ok {
+	if a, ok := data["args"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["parameters"].(map[string]interface{}); ok {
+	if a, ok := data["parameters"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["params"].(map[string]interface{}); ok {
+	if a, ok := data["params"].(map[string]any); ok {
 		return a
 	}
 	if raw, ok := data["parameters"].(string); ok && strings.TrimSpace(raw) != "" {
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
 			return parsed
 		}
 	}
 	if raw, ok := data["arguments"].(string); ok && strings.TrimSpace(raw) != "" {
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
 			return parsed
 		}
 	}
-	return make(map[string]interface{})
+	return make(map[string]any)
 }

@@ -14,18 +14,18 @@ type SchedulerServer struct {
 
 type schedulerExt struct {
 	scheduler interface {
-		AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
+		AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error)
 		StopTask(id string) bool
 		RemoveTask(id string) bool
-		ListTasks() []interface{}
-		GetTask(id string) interface{}
+		ListTasks() []any
+		GetTask(id string) any
 	}
 	mu interface {
 		Lock()
 		Unlock()
 	}
 	provider interface {
-		GetProvider(cfg interface{}) (interface{}, error)
+		GetProvider(cfg any) (any, error)
 	}
 	providerMu interface {
 		Lock()
@@ -46,13 +46,13 @@ type TaskInfo struct {
 }
 
 func NewSchedulerServer(scheduler interface {
-	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
+	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error)
 	StopTask(id string) bool
 	RemoveTask(id string) bool
-	ListTasks() []interface{}
-	GetTask(id string) interface{}
+	ListTasks() []any
+	GetTask(id string) any
 }, providerGetter interface {
-	GetProvider(cfg interface{}) (interface{}, error)
+	GetProvider(cfg any) (any, error)
 }) *SchedulerServer {
 	return &SchedulerServer{
 		scheduler: &schedulerExt{
@@ -97,7 +97,7 @@ func (s *SchedulerServer) Tools() []Tool {
 	}
 }
 
-func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	if name != "scheduler" {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -139,12 +139,12 @@ func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[st
 	}
 
 	var (
-		task interface{}
+		task any
 		err  error
 	)
 
 	type schedulerWithRepeat interface {
-		AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error)
+		AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (any, error)
 	}
 	if sr, ok := s.scheduler.scheduler.(schedulerWithRepeat); ok {
 		task, err = sr.AddTaskWithRepeat(prompt, intervalSec, runAt, isRepeating, "current", "current", "current")

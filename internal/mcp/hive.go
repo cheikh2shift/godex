@@ -36,7 +36,7 @@ func (s *HiveServer) Tools() []Tool {
 	}
 }
 
-func (s *HiveServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (s *HiveServer) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	switch name {
 	case "hive_list":
 		instances, err := s.manager.Instances()
@@ -55,7 +55,7 @@ func (s *HiveServer) CallTool(ctx context.Context, name string, args map[string]
 		targetID, _ := args["target_id"].(string)
 
 		var requiredTools []string
-		if toolsRaw, ok := args["required_tools"].([]interface{}); ok {
+		if toolsRaw, ok := args["required_tools"].([]any); ok {
 			for _, t := range toolsRaw {
 				if s, ok := t.(string); ok {
 					requiredTools = append(requiredTools, s)
