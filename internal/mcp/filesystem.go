@@ -513,7 +513,7 @@ func (s *FileSystemServer) replaceFirstInFile(args map[string]any) (string, erro
 
 	find, ok := args["find"].(string)
 	if !ok || find == "" {
-		return "", fmt.Errorf("find text is required")
+		return "", fmt.Errorf("argument `find` is required")
 	}
 
 	replace, ok := args["replace"].(string)

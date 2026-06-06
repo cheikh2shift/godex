@@ -35,9 +35,10 @@ type MCPToolExecutor struct { //betteralign:ignore
 	serverName    string
 	workingDir    string
 
-	server MCPServer
+	server atomic.Pointer[MCPServer]
 	tools  []Tool
 
+	mu          sync.RWMutex
 	requestIDMu sync.Mutex
 }
 
@@ -46,7 +47,8 @@ func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MC
 		serverName: server.Name,
 		workingDir: workingDir,
 	}
-	executor.server.Store(server)
+	serverCopy := server
+	executor.server.Store(&serverCopy)
 
 	if err := executor.connect(ctx); err != nil {
 		return nil, err
@@ -56,7 +58,11 @@ func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MC
 }
 
 func (m *MCPToolExecutor) connect(ctx context.Context) error {
-	server := m.server.Load().(MCPServer)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mcpClient, tools, err := connect(ctx, server, buildArgs(server, m.workingDir))
@@ -123,7 +129,11 @@ func (m *MCPToolExecutor) ensureConnected(ctx context.Context) error {
 	// Do not hold the lock till connecting
 	m.mu.Unlock()
 
-	server := m.server.Load().(MCPServer)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
 	client, tools, err := connect(ctx, server, buildArgs(server, wd))
 	if err != nil {
 		return err
@@ -180,7 +190,11 @@ func listTools(ctx context.Context, mcpClient *client.Client) ([]Tool, error) {
 }
 
 func (m *MCPToolExecutor) Name() string {
-	return m.server.Load().(MCPServer).Name
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return ""
+	}
+	return serverPtr.Name
 }
 
 func (m *MCPToolExecutor) Tools() []Tool {
@@ -190,7 +204,11 @@ func (m *MCPToolExecutor) Tools() []Tool {
 }
 
 func (m *MCPToolExecutor) AddPath(ctx context.Context, path string) error {
-	server := m.server.Load().(MCPServer)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
 	if func() bool {
 		for _, p := range server.AllowedPaths {
 			if p == path {
@@ -199,7 +217,7 @@ func (m *MCPToolExecutor) AddPath(ctx context.Context, path string) error {
 		}
 
 		server.AllowedPaths = append(server.AllowedPaths, path)
-		m.server.Store(server)
+		m.server.Store(&server)
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -222,7 +240,11 @@ func (m *MCPToolExecutor) AddURL(ctx context.Context, url string) error {
 }
 
 func (m *MCPToolExecutor) TempAddPath(path string) {
-	server := m.server.Load().(MCPServer)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return
+	}
+	server := *serverPtr
 	for _, p := range server.AllowedPaths {
 		if p == path {
 			return
@@ -230,12 +252,16 @@ func (m *MCPToolExecutor) TempAddPath(path string) {
 	}
 
 	server.AllowedPaths = append(server.AllowedPaths, path)
-	m.server.Store(server)
+	m.server.Store(&server)
 }
 
 func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
 	if func() bool {
-		server := m.server.Load().(MCPServer)
+		serverPtr := m.server.Load()
+		if serverPtr == nil {
+			return true
+		}
+		server := *serverPtr
 		found := -1
 		for i, p := range server.AllowedPaths {
 			if p == path {
@@ -249,7 +275,7 @@ func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
 		}
 
 		server.AllowedPaths = append(server.AllowedPaths[:found], server.AllowedPaths[found+1:]...)
-		m.server.Store(server)
+		m.server.Store(&server)
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -272,10 +298,12 @@ func (m *MCPToolExecutor) RemoveURL(ctx context.Context, url string) error {
 }
 
 func (m *MCPToolExecutor) AllowedPaths() []string {
-	server := m.server.Load().(MCPServer)
-	paths := server.AllowedPaths
-	if len(paths) != 0 {
-		return paths
+	serverPtr := m.server.Load()
+	if serverPtr != nil {
+		paths := serverPtr.AllowedPaths
+		if len(paths) != 0 {
+			return paths
+		}
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -460,7 +488,11 @@ func contains(slice []string, val string) bool {
 }
 
 func (m *MCPToolExecutor) GetContext() string {
-	server := m.server.Load().(MCPServer)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return ""
+	}
+	server := *serverPtr
 	var b strings.Builder
 	b.WriteString("MCP Server: " + server.Name + "\n")
 	b.WriteString("Command: " + server.Command + "\n")

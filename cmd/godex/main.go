@@ -3189,6 +3189,11 @@ func parseToolArgs(data map[string]any) map[string]any {
 func shouldExecuteToolCall(text string) ([]map[string]any, bool) {
 	toolCalls := extractAllToolCalls(text)
 	if len(toolCalls) == 0 {
+
+		if strings.Contains(text, "<tool_code>") {
+			return []map[string]any{{}}, true
+		}
+
 		return nil, false
 	}
 	return toolCalls, true
