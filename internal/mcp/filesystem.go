@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/ml"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 func getIntArg(args map[string]any, key, alias string) (float64, bool) {
@@ -107,11 +108,6 @@ func NewFileSystemServer(allowedPaths []string, autoConfirm bool) *FileSystemSer
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"find":{"type":"string","description":"Text to find (plain string, not regex)"},"replace":{"type":"string","description":"Replacement text"}},"required":["path","find","replace"]}`),
 			},
 			{
-				Name:        "replace_line_range",
-				Description: "Delete a range of lines and insert new content at that location in a file",
-				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"start":{"type":"integer","description":"Start line number (1-indexed)"},"end":{"type":"integer","description":"End line number (inclusive)"},"new_content":{"type":"string","description":"New content to insert at the deleted location"},"start_line":{"type":"integer","description":"Alias for start"},"end_line":{"type":"integer","description":"Alias for end"}},"required":["path","start","end","new_content"]}`),
-			},
-			{
 				Name:        "insert_at_line",
 				Description: "Insert content at a specific line number",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute path to the file"},"line":{"type":"integer","description":"Line number to insert at (1-indexed, 0 = append at end)"},"content":{"type":"string","description":"Content to insert"}},"required":["path","line","content"]}`),
@@ -171,8 +167,6 @@ func (s *FileSystemServer) CallTool(ctx context.Context, name string, arguments 
 		return s.readFileLineRange(arguments)
 	case "replace_first_in_file":
 		return s.replaceFirstInFile(arguments)
-	case "replace_line_range":
-		return s.replaceLineRange(arguments)
 	case "insert_at_line":
 		return s.insertAtLine(arguments)
 	case "search_file_text":
@@ -547,60 +541,6 @@ func (s *FileSystemServer) replaceFirstInFile(args map[string]any) (string, erro
 	return fmt.Sprintf("Replaced first occurrence of %s in %s", find, path), nil
 }
 
-func (s *FileSystemServer) replaceLineRange(args map[string]any) (string, error) {
-	path, ok := args["path"].(string)
-	if !ok {
-		return "", fmt.Errorf("path is required")
-	}
-
-	if err := s.checkAndMaybeAddPath(path); err != nil {
-		return "", err
-	}
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
-	}
-
-	lines := strings.Split(string(content), "\n")
-	start, ok := getIntArg(args, "start", "start_line")
-	if !ok {
-		return "", fmt.Errorf("start is required")
-	}
-	end, ok := getIntArg(args, "end", "end_line")
-	if !ok {
-		return "", fmt.Errorf("end is required")
-	}
-	newContent, ok := args["new_content"].(string)
-	if !ok {
-		return "", fmt.Errorf("new_content is required")
-	}
-
-	startIdx := int(start) - 1
-	endIdx := int(end)
-
-	if startIdx < 0 || startIdx >= len(lines) {
-		return "", fmt.Errorf("start line out of range")
-	}
-	if endIdx < startIdx {
-		return "", fmt.Errorf("end line must be greater than or equal to start line")
-	}
-	if endIdx > len(lines) {
-		endIdx = len(lines)
-	}
-
-	deletedLines := endIdx - startIdx
-	newLines := strings.Split(newContent, "\n")
-
-	result := append(lines[:startIdx], append(newLines, lines[endIdx:]...)...)
-
-	if err := os.WriteFile(path, []byte(strings.Join(result, "\n")), 0644); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
-	}
-
-	return fmt.Sprintf("Replaced lines %d-%d (%d lines deleted) with %d lines in %s", int(start), int(end), deletedLines, len(newLines), path), nil
-}
-
 func (s *FileSystemServer) insertAtLine(args map[string]any) (string, error) {
 	path, ok := args["path"].(string)
 	if !ok {
@@ -664,7 +604,7 @@ func (s *FileSystemServer) searchFileText(args map[string]any) (string, error) {
 			pattern = "(?i)" + pattern
 		}
 		var err error
-		regex, err = regexp.Compile(pattern)
+		regex, err = rxcache.Compile(pattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}
@@ -755,7 +695,7 @@ func (s *FileSystemServer) searchInFile(args map[string]any) (string, error) {
 		if !caseSensitive {
 			compiledPattern = "(?i)" + compiledPattern
 		}
-		regex, err = regexp.Compile(compiledPattern)
+		regex, err = rxcache.Compile(compiledPattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}
@@ -819,7 +759,7 @@ func (s *FileSystemServer) searchDirectoryText(args map[string]any) (string, err
 			compiledPattern = "(?i)" + compiledPattern
 		}
 		var err error
-		regex, err = regexp.Compile(compiledPattern)
+		regex, err = rxcache.Compile(compiledPattern)
 		if err != nil {
 			return "", fmt.Errorf("invalid regex pattern: %w", err)
 		}

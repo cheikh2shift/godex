@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 const (
@@ -294,7 +294,7 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 	}
 
 	quantToFile := make(map[string]string)
-	quantRe := regexp.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
+	quantRe := rxcache.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
 	for _, f := range ggufFiles {
 		matches := quantRe.FindStringSubmatch(f)
 		if len(matches) >= 2 {

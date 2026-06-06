@@ -10,11 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 var runCmdMu sync.Mutex
@@ -178,9 +179,9 @@ type BashServer struct {
 }
 
 var (
-	cdRegex          = regexp.MustCompile(`(?i)^cd\s+(\S+)`)
-	interpreterRegex = regexp.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|ruby|perl|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
-	pathRegex        = regexp.MustCompile(`(?:^|\s)([/\\]+[^\s/\\]+(?:/[^\s/\\]*)*|[\.]{1,2}[/\\]|(?:~|\$(?:HOME|\w+))[/\\][^\s/\\]+)`)
+	cdRegex          = rxcache.MustCompile(`(?i)^cd\s+(\S+)`)
+	interpreterRegex = rxcache.MustCompile(`(?i)(^|\s)(python[0-9.]*|pypy|ruby|perl|python|bash|sh|zsh|fish|r|lua|lua5|tcl|expect)(\s|$)`)
+	pathRegex        = rxcache.MustCompile(`(?:^|\s)([/\\]+[^\s/\\]+(?:/[^\s/\\]*)*|[\.]{1,2}[/\\]|(?:~|\$(?:HOME|\w+))[/\\][^\s/\\]+)`)
 )
 
 func extractPathsFromCommand(command string) []string {

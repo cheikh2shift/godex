@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 const (
@@ -169,7 +169,7 @@ func (o *ollamaProvider) fetchOllamaLibraryContext() error {
 		return err
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 	matches := re.FindStringSubmatch(string(body))
 	if len(matches) >= 2 {
 		contextStr := matches[1]
@@ -203,7 +203,7 @@ func GetOllamaContextLimit(model string) (int, error) {
 		return 0, err
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 	matches := re.FindStringSubmatch(string(body))
 	if len(matches) >= 2 {
 		contextStr := matches[1]

@@ -2,8 +2,9 @@ package toolcalls
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
+
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 // ExtractAllToolCalls extracts tool calls from a model response in a variety of common formats.
@@ -69,11 +70,11 @@ func ExtractAllToolCalls(text string) []map[string]any {
 
 		// Safety fallback for the specific [TOOL_CALL] format
 		if len(results) == 0 {
-			toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
+			toolCallRe := rxcache.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
 			tcMatches := toolCallRe.FindAllStringSubmatch(candidate, -1)
 			for _, m := range tcMatches {
 				if len(m) > 1 {
-					nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
+					nameRe := rxcache.MustCompile(`tool\s*=>\s*"([^"]+)"`)
 					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
 						results = append(results, map[string]any{"name": nameMatch[1], "arguments": map[string]any{}})
 					}
@@ -139,7 +140,7 @@ func extractToolCallsFromJSONArray(text string) []map[string]any {
 
 func extractNativeToolCalls(text string) [][2]string {
 	var results [][2]string
-	re := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
+	re := rxcache.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
 	matches := re.FindAllStringSubmatchIndex(text, -1)
 	for _, m := range matches {
 		if len(m) < 4 {
@@ -194,8 +195,8 @@ func normalizeToolCallText(text string) string {
 
 	nonEmpty := 0
 	withMargin := 0
-	marginRe := regexp.MustCompile(`^\s*│`)
-	stripRe := regexp.MustCompile(`^\s*│\s?`)
+	marginRe := rxcache.MustCompile(`^\s*│`)
+	stripRe := rxcache.MustCompile(`^\s*│\s?`)
 
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {

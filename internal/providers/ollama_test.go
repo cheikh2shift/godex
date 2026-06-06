@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 func TestParseOllamaLibraryContextRegex(t *testing.T) {
@@ -69,7 +70,7 @@ func TestParseOllamaLibraryContextRegex(t *testing.T) {
 		},
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,7 +100,7 @@ func TestParseOllamaLibraryContextRegex(t *testing.T) {
 }
 
 func TestExtractContextFromOllamaHTML(t *testing.T) {
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	realisticHTML := `
 	<!DOCTYPE html>
@@ -176,7 +177,7 @@ func TestExtractContextFromOllamaHTMLVariations(t *testing.T) {
 		},
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	for _, v := range variations {
 		t.Run(v.name, func(t *testing.T) {
@@ -205,7 +206,7 @@ func TestExtractContextNoMatch(t *testing.T) {
 		`<div>just numbers 128K here</div>`,
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	for _, html := range noMatchCases {
 		matches := re.FindStringSubmatch(html)
@@ -285,7 +286,7 @@ func TestFetchOllamaLibraryContextIntegration(t *testing.T) {
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {

@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cheikh2shift/godex/internal/rxcache"
 	"github.com/chromedp/chromedp"
 	"golang.org/x/net/html"
 )
@@ -204,7 +204,7 @@ func (s *WebScraperServer) processContent(htmlContent, grepPattern string, start
 }
 
 func (s *WebScraperServer) applyGrep(htmlContent, pattern string) (string, error) {
-	re, err := regexp.Compile(pattern)
+	re, err := rxcache.Compile(pattern)
 	if err != nil {
 		return "", fmt.Errorf("invalid grep pattern: %v", err)
 	}
