@@ -14,16 +14,16 @@ type GeminiModelsResponse struct {
 
 // GeminiModel represents a model from the Gemini API.
 type GeminiModel struct {
+	Temperature                *float64 `json:"temperature,omitempty"`
+	TopP                       *float64 `json:"topP,omitempty"`
+	TopK                       *int     `json:"topK,omitempty"`
 	Name                       string   `json:"name"`
 	Version                    string   `json:"version"`
 	DisplayName                string   `json:"displayName"`
 	Description                string   `json:"description"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 	InputTokenLimit            int      `json:"inputTokenLimit"`
 	OutputTokenLimit           int      `json:"outputTokenLimit"`
-	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
-	Temperature                *float64 `json:"temperature,omitempty"`
-	TopP                       *float64 `json:"topP,omitempty"`
-	TopK                       *int     `json:"topK,omitempty"`
 }
 
 // listGeminiModels queries Google's Gemini API for available models.

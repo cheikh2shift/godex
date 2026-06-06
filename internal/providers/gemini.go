@@ -18,17 +18,17 @@ const DefaultGeminiModel = "gemini-2.5-flash"
 type geminiProvider struct {
 	client           *genai.Client
 	cfg              *config.Provider
-	model            string
 	temperature      *float64
-	cancelMu         sync.Mutex
-	mu               sync.Mutex
 	cancelFunc       context.CancelFunc
+	statusCh         chan<- string
+	model            string
+	messages         []Message
 	cancelGen        uint64
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
-	messages         []Message
-	statusCh         chan<- string
+	cancelMu         sync.Mutex
+	mu               sync.Mutex
 }
 
 func init() {
@@ -174,8 +174,8 @@ func (g *geminiProvider) Cancel() {
 	}
 }
 
-func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
-	return "", fmt.Errorf("gemini provider does not support direct tool calls")
+func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	return "", fmt.Errorf("Gemini provider does not support direct tool calls")
 }
 
 func (g *geminiProvider) ContextLimit() int {

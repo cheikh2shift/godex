@@ -18,7 +18,7 @@ func (f *fakeToolServer) Name() string { return f.name }
 func (f *fakeToolServer) Tools() []mcp.Tool {
 	return f.tools
 }
-func (f *fakeToolServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (f *fakeToolServer) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	if name == "run_command" {
 		return "ok", nil
 	}
@@ -27,7 +27,7 @@ func (f *fakeToolServer) CallTool(ctx context.Context, name string, args map[str
 
 func TestScheduler_GetToolsDescription_MatchesMainFormat(t *testing.T) {
 	s := &Scheduler{}
-	s.SetServers([]interface{}{
+	s.SetServers([]any{
 		&fakeToolServer{
 			name: "bash",
 			tools: []mcp.Tool{
@@ -50,7 +50,7 @@ func TestScheduler_GetToolsDescription_MatchesMainFormat(t *testing.T) {
 
 func TestScheduler_CallTool_FindsTool(t *testing.T) {
 	s := &Scheduler{}
-	s.SetServers([]interface{}{
+	s.SetServers([]any{
 		&fakeToolServer{
 			name: "bash",
 			tools: []mcp.Tool{
@@ -62,7 +62,7 @@ func TestScheduler_CallTool_FindsTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	out, err := s.callTool(ctx, "run_command", map[string]interface{}{"command": "echo hi"}, 1)
+	out, err := s.callTool(ctx, "run_command", map[string]any{"command": "echo hi"}, 1)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -73,7 +73,7 @@ func TestScheduler_CallTool_FindsTool(t *testing.T) {
 
 func TestScheduler_CallTool_ServerNameCompatibility(t *testing.T) {
 	s := &Scheduler{}
-	s.SetServers([]interface{}{
+	s.SetServers([]any{
 		&fakeToolServer{
 			name: "bash",
 			tools: []mcp.Tool{
@@ -85,7 +85,7 @@ func TestScheduler_CallTool_ServerNameCompatibility(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	out, err := s.callTool(ctx, "Bash", map[string]interface{}{"command": "echo hi"}, 1)
+	out, err := s.callTool(ctx, "Bash", map[string]any{"command": "echo hi"}, 1)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}

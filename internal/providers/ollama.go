@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 const (
@@ -25,22 +25,22 @@ const (
 )
 
 type ollamaProvider struct {
-	baseURL          string
-	model            string
 	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
-	systemPrompt     string
-	messages         []map[string]string
-	mu               sync.Mutex
-	sendMu           sync.Mutex
 	OnThink          func(string)
 	cancelFunc       context.CancelFunc
+	statusCh         chan<- string
+	baseURL          string
+	model            string
+	systemPrompt     string
+	messages         []map[string]string
 	cancelGen        uint64
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
-	statusCh         chan<- string
+	mu               sync.Mutex
+	sendMu           sync.Mutex
 	visionChecked    bool
 	visionSupported  bool
 }
@@ -169,7 +169,7 @@ func (o *ollamaProvider) fetchOllamaLibraryContext() error {
 		return err
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 	matches := re.FindStringSubmatch(string(body))
 	if len(matches) >= 2 {
 		contextStr := matches[1]
@@ -203,7 +203,7 @@ func GetOllamaContextLimit(model string) (int, error) {
 		return 0, err
 	}
 
-	re := regexp.MustCompile(`(\d+)[Kk]\s*context\s*window`)
+	re := rxcache.MustCompile(`(\d+)[Kk]\s*context\s*window`)
 	matches := re.FindStringSubmatch(string(body))
 	if len(matches) >= 2 {
 		contextStr := matches[1]
@@ -403,8 +403,8 @@ func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []
 }
 
 type ollamaError struct {
-	statusCode int
 	message    string
+	statusCode int
 }
 
 func (e *ollamaError) Error() string {
@@ -475,8 +475,8 @@ func (o *ollamaProvider) Cancel() {
 	}
 }
 
-func (o *ollamaProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
-	return "", fmt.Errorf("ollama provider does not support direct tool calls, use MCP servers configured in provider")
+func (o *ollamaProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	return "", fmt.Errorf("Ollama provider does not support direct tool calls, use MCP servers configured in provider")
 }
 
 func (o *ollamaProvider) ContextLimit() int {

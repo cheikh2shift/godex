@@ -23,34 +23,34 @@ const (
 )
 
 type Instance struct {
+	StartedAt    time.Time `json:"started_at"`
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Model        string    `json:"model"`
+	WorkingDir   string    `json:"working_dir"`
+	MCPServers   []string  `json:"mcp_servers"`
 	MaxTokens    int       `json:"max_tokens"`
 	Port         int       `json:"port"`
-	StartedAt    time.Time `json:"started_at"`
 	PID          int       `json:"pid"`
-	MCPServers   []string  `json:"mcp_servers"`
-	WorkingDir   string    `json:"working_dir"`
 	InputTokens  int       `json:"input_tokens"`
 	OutputTokens int       `json:"output_tokens"`
 }
 
 type Manager struct {
+	listener  net.Listener
+	statusCh  chan<- string
+	handler   func(context.Context, string) (string, error)
+	srv       *http.Server
+	closed    chan struct{}
+	results   chan HiveResult
+	statsCh   chan HiveStats
+	stats     HiveStats
 	codeHash  string
 	code      string
 	baseDir   string
 	instance  Instance
-	statusCh  chan<- string
-	handler   func(context.Context, string) (string, error)
-	srv       *http.Server
-	listener  net.Listener
 	closeOnce sync.Once
-	closed    chan struct{}
-	results   chan HiveResult
 	statsMu   sync.Mutex
-	statsCh   chan HiveStats
-	stats     HiveStats
 }
 
 type HiveResult struct {
@@ -61,8 +61,8 @@ type HiveResult struct {
 }
 
 type HiveStats struct {
-	DelegatedCount int
 	LatestCommand  string
+	DelegatedCount int
 }
 
 func (m *Manager) Status(msg string) {

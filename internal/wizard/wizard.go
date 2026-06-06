@@ -346,10 +346,10 @@ type selectOption struct {
 }
 
 type selectModel struct {
+	result      string
 	options     []selectOption
 	cursor      int
 	done        bool
-	result      string
 	allowCancel bool
 }
 
@@ -434,8 +434,8 @@ func selectPrompt(title string, options []selectOption, defaultVal string, allow
 }
 
 type multiSelectModel struct {
-	options     []selectOption
 	selected    map[int]bool
+	options     []selectOption
 	cursor      int
 	done        bool
 	allowCancel bool
@@ -581,9 +581,9 @@ func openBrowser(urlStr string) error {
 }
 
 type oauthCallback struct {
-	code     string
 	err      error
 	done     chan struct{}
+	code     string
 	received bool
 }
 

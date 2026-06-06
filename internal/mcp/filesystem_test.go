@@ -27,7 +27,7 @@ func TestFileSystemServer_DefaultAllowsCwd(t *testing.T) {
 	}
 
 	server := NewFileSystemServer(nil, false)
-	out, err := server.CallTool(context.Background(), "list_directory", map[string]interface{}{
+	out, err := server.CallTool(context.Background(), "list_directory", map[string]any{
 		"path": ".",
 	})
 	if err != nil {
@@ -68,7 +68,7 @@ func TestFileSystemServer_ListDirectory_DoesNotPanicOnInfoError(t *testing.T) {
 	}
 
 	server := NewFileSystemServer([]string{tmp}, false)
-	out, err := server.CallTool(context.Background(), "list_directory", map[string]interface{}{
+	out, err := server.CallTool(context.Background(), "list_directory", map[string]any{
 		"path": tmp,
 	})
 	if err != nil {

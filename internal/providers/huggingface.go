@@ -18,17 +18,17 @@ import (
 const defaultHFBaseURL = "https://router.huggingface.co/v1"
 
 type huggingfaceProvider struct {
+	temperature *float64
+	client      *http.Client
+	cancelFunc  context.CancelFunc
+	statusCh    chan<- string
 	baseURL     string
 	model       string
 	apiKey      string
-	temperature *float64
-	client      *http.Client
-	cancelMu    sync.Mutex
-	cancelFunc  context.CancelFunc
-	cancelGen   uint64
 	messages    []Message
+	cancelGen   uint64
+	cancelMu    sync.Mutex
 	mu          sync.Mutex
-	statusCh    chan<- string
 }
 
 func init() {
@@ -154,7 +154,7 @@ func (h *huggingfaceProvider) Cancel() {
 	}
 }
 
-func (h *huggingfaceProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (h *huggingfaceProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("huggingface provider does not support direct tool calls")
 }
 

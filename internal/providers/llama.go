@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cheikh2shift/godex/internal/config"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 )
 
 const (
@@ -30,44 +30,45 @@ const (
 	llamaRetryDelay           = 5 * time.Second
 )
 
-func llamaDebug(format string, args ...interface{}) {
+func llamaDebug(format string, args ...any) {
 	if DebugMode {
 		log.Printf("[llama.cpp] "+format, args...)
 	}
 }
 
 type llamaProvider struct {
-	baseURL          string
-	model            string
-	modelIsHF        bool
 	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
-	messages         []map[string]interface{}
-	mu               sync.Mutex
-	sendMu           sync.Mutex
 	OnThink          func(string)
 	cancelFunc       context.CancelFunc
-	cancelGen        uint64
-	contextLimit     int
-	promptTokens     int
-	completionTokens int
 	statusCh         chan<- string
-	tools            []map[string]interface{}
 	pendingToolCalls map[string]string
 
-	serverCmd      *exec.Cmd
-	serverProcess  *os.Process
-	serverPort     int
-	serverPath     string
-	tokenizePath   string
-	externalServer bool
-	serverMu       sync.Mutex
-	serverReady    bool
-	serverStarted  bool
-	startMu        sync.Mutex
+	serverCmd     *exec.Cmd
+	serverProcess *os.Process
 
 	OnDownloadProgress func(DownloadProgress)
+	baseURL            string
+	model              string
+	serverPath         string
+	tokenizePath       string
+	messages           []map[string]any
+	tools              []map[string]any
+	cancelGen          uint64
+	contextLimit       int
+	promptTokens       int
+	completionTokens   int
+	serverPort         int
+	mu                 sync.Mutex
+	sendMu             sync.Mutex
+	serverMu           sync.Mutex
+	startMu            sync.Mutex
+
+	modelIsHF      bool
+	externalServer bool
+	serverReady    bool
+	serverStarted  bool
 }
 
 var (
@@ -294,7 +295,7 @@ func resolveModelPathWithDownload(ctx context.Context, model string, downloadPro
 	}
 
 	quantToFile := make(map[string]string)
-	quantRe := regexp.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
+	quantRe := rxcache.MustCompile(`-([A-Za-z0-9_]+)\.gguf$`)
 	for _, f := range ggufFiles {
 		matches := quantRe.FindStringSubmatch(f)
 		if len(matches) >= 2 {
@@ -474,10 +475,10 @@ func setCachedQuantization(modelID, quant string) {
 
 type progressWriter struct {
 	w          io.Writer
+	progressCh chan<- DownloadProgress
+	filename   string
 	total      int64
 	written    int64
-	filename   string
-	progressCh chan<- DownloadProgress
 }
 
 func (pw *progressWriter) Write(p []byte) (int, error) {
@@ -609,7 +610,7 @@ func newLlamaProviderWithProgress(cfg *config.Provider, downloadProgress func(Do
 		cfg:                cfgCopy,
 		temperature:        cfg.Temperature,
 		client:             &http.Client{Timeout: defaultLlamaServerTimeout},
-		messages:           []map[string]interface{}{},
+		messages:           []map[string]any{},
 		contextLimit:       cfg.ContextLimit,
 		pendingToolCalls:   make(map[string]string),
 		serverPort:         port,
@@ -844,11 +845,11 @@ func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error)
 	defer p.sendMu.Unlock()
 
 	p.mu.Lock()
-	p.messages = append(p.messages, map[string]interface{}{
+	p.messages = append(p.messages, map[string]any{
 		"role":    "user",
 		"content": prompt,
 	})
-	messages := make([]map[string]interface{}, len(p.messages))
+	messages := make([]map[string]any, len(p.messages))
 	copy(messages, p.messages)
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -896,7 +897,7 @@ func (p *llamaProvider) Send(ctx context.Context, prompt string) (string, error)
 	}
 
 	p.mu.Lock()
-	p.messages = append(p.messages, map[string]interface{}{
+	p.messages = append(p.messages, map[string]any{
 		"role":    "assistant",
 		"content": response,
 	})
@@ -1003,8 +1004,8 @@ type llamaSendResult struct {
 	totalCompletionTokens int
 }
 
-func (p *llamaProvider) doSend(ctx context.Context, messages []map[string]interface{}) (llamaSendResult, error) {
-	reqBody := map[string]interface{}{
+func (p *llamaProvider) doSend(ctx context.Context, messages []map[string]any) (llamaSendResult, error) {
+	reqBody := map[string]any{
 		"model":    p.model,
 		"messages": messages,
 		"stream":   true,
@@ -1135,18 +1136,18 @@ func (p *llamaProvider) doSend(ctx context.Context, messages []map[string]interf
 	if len(toolCalls) > 0 {
 		var b strings.Builder
 		for i, tc := range toolCalls {
-			call := map[string]interface{}{
+			call := map[string]any{
 				"name": tc.Name,
 			}
 			if strings.TrimSpace(tc.Arguments) != "" {
-				var args map[string]interface{}
+				var args map[string]any
 				if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
 					call["arguments"] = args
 				} else {
-					call["arguments"] = map[string]interface{}{"_raw": tc.Arguments}
+					call["arguments"] = map[string]any{"_raw": tc.Arguments}
 				}
 			} else {
-				call["arguments"] = map[string]interface{}{}
+				call["arguments"] = map[string]any{}
 			}
 			payload, err := json.Marshal(call)
 			if err != nil {
@@ -1264,7 +1265,7 @@ func (p *llamaProvider) Cancel() {
 	}
 }
 
-func (p *llamaProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (p *llamaProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("llama.cpp provider does not support direct tool calls, use MCP servers")
 }
 
@@ -1324,13 +1325,13 @@ func (p *llamaProvider) TokenUsage() (int, int) {
 }
 
 type slotInfo struct {
-	ID           int  `json:"id"`
-	IsProcessing bool `json:"is_processing"`
-	NCtx         int  `json:"n_ctx"`
-	IDTask       int  `json:"id_task"`
-	NextToken    []struct {
+	NextToken []struct {
 		NDecoded int `json:"n_decoded"`
 	} `json:"next_token"`
+	ID           int  `json:"id"`
+	NCtx         int  `json:"n_ctx"`
+	IDTask       int  `json:"id_task"`
+	IsProcessing bool `json:"is_processing"`
 }
 
 func (p *llamaProvider) countTokens(text string) int {
@@ -1420,7 +1421,7 @@ func (p *llamaProvider) Reset() error {
 	defer p.mu.Unlock()
 
 	p.client = &http.Client{Timeout: defaultLlamaServerTimeout}
-	p.messages = []map[string]interface{}{}
+	p.messages = []map[string]any{}
 	p.promptTokens = 0
 	p.completionTokens = 0
 	p.pendingToolCalls = make(map[string]string)
@@ -1431,14 +1432,14 @@ func (p *llamaProvider) SetMessages(messages []Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.messages = make([]map[string]interface{}, 0, len(messages))
+	p.messages = make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		role := strings.TrimSpace(msg.Role)
 		content := msg.Content
 		if role == "" || content == "" {
 			continue
 		}
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    role,
 			"content": content,
 		})
@@ -1470,7 +1471,7 @@ func (p *llamaProvider) AppendMessages(messages []Message) error {
 		if _, ok := seen[key]; ok {
 			continue
 		}
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    role,
 			"content": content,
 		})

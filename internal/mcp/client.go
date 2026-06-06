@@ -29,14 +29,16 @@ type Tool struct {
 	InputSchema json.RawMessage
 }
 
-type MCPToolExecutor struct {
-	serverName    string
-	server        atomic.Value
+type MCPToolExecutor struct { //betteralign:ignore
+	lastRequestID int64 // Must be first for 64-bit alignment on 32-bit platforms - it's accessed atomically
 	mcpClient     *client.Client
-	tools         []Tool
+	serverName    string
 	workingDir    string
-	mu            sync.RWMutex
-	lastRequestID int64
+
+	server MCPServer
+	tools  []Tool
+
+	requestIDMu sync.Mutex
 }
 
 func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MCPToolExecutor, error) {
@@ -280,11 +282,11 @@ func (m *MCPToolExecutor) AllowedPaths() []string {
 	return []string{m.workingDir}
 }
 
-func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	return m.callToolWithRetry(ctx, name, arguments, 0)
 }
 
-func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, arguments map[string]interface{}, attempt int) (string, error) {
+func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, arguments map[string]any, attempt int) (string, error) {
 	maxRetries := 1
 
 	if attempt >= maxRetries {
@@ -318,7 +320,7 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 	return result, nil
 }
 
-func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]interface{}) (string, error) {
+func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]any) (string, error) {
 	var t transport.Interface
 	m.mu.RLock()
 	if client := m.mcpClient; client != nil {
@@ -333,7 +335,7 @@ func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestI
 		JSONRPC: mcp.JSONRPC_VERSION,
 		ID:      mcp.NewRequestId(requestID),
 		Method:  "tools/call",
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"name":      name,
 			"arguments": arguments,
 		},

@@ -13,8 +13,8 @@ type schedulerProviderGetter struct {
 	provider *config.Provider
 }
 
-func (s *schedulerProviderGetter) GetProvider(cfg interface{}) (interface{}, error) {
-	cfgMap, ok := cfg.(map[string]interface{})
+func (s *schedulerProviderGetter) GetProvider(cfg any) (any, error) {
+	cfgMap, ok := cfg.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid config type")
 	}

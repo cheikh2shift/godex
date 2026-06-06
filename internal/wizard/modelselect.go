@@ -17,17 +17,17 @@ type searchResultMsg struct {
 }
 
 type modelSelectModel struct {
-	textInput      textinput.Model
-	results        []modelquery.Model
-	cursor         int
-	loading        bool
+	searchCancel   context.CancelFunc
 	provider       modelquery.Provider
-	searchDebounce time.Duration
-	done           bool
 	result         string
 	defaultValue   string
 	currentQuery   string
-	searchCancel   context.CancelFunc
+	results        []modelquery.Model
+	textInput      textinput.Model
+	cursor         int
+	searchDebounce time.Duration
+	loading        bool
+	done           bool
 	pendingSearch  bool
 }
 

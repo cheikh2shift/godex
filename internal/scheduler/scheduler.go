@@ -21,48 +21,48 @@ import (
 )
 
 type ScheduledTask struct {
-	ID            string    `json:"id"`
-	Prompt        string    `json:"prompt"`
-	IntervalSec   int       `json:"interval_sec"`
-	RunAt         string    `json:"run_at"`
-	IsRepeating   bool      `json:"is_repeating"`
-	WorkingDir    string    `json:"working_dir"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastRun       time.Time `json:"last_run"`
-	RunCount      int       `json:"run_count"`
+	ID            string    `json:"id"`
+	Prompt        string    `json:"prompt"`
+	RunAt         string    `json:"run_at"`
+	WorkingDir    string    `json:"working_dir"`
 	LastError     string    `json:"last_error"`
 	LastOutput    string    `json:"last_output"`
 	ProviderType  string    `json:"provider_type"`
 	ProviderName  string    `json:"provider_name"`
 	ProviderModel string    `json:"provider_model"`
+	IntervalSec   int       `json:"interval_sec"`
+	RunCount      int       `json:"run_count"`
+	IsRepeating   bool      `json:"is_repeating"`
 }
 
 type Scheduler struct {
+	provider       ProviderGetter
 	db             *sql.DB
 	tasks          map[string]*ScheduledTask
-	taskMu         sync.RWMutex
 	running        map[string]context.CancelFunc
-	runMu          sync.RWMutex
 	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	provider       ProviderGetter
-	servers        []ToolServer
 	onTaskFinished func(*ScheduledTask)
-	maxRounds      int
-	toolTimeout    int
+	statusCh       chan string
 	wd             string
 	os             string
-	statusCh       chan string
+	servers        []ToolServer
+	wg             sync.WaitGroup
+	maxRounds      int
+	toolTimeout    int
+	taskMu         sync.RWMutex
+	runMu          sync.RWMutex
 }
 
 type ProviderGetter interface {
-	GetProvider(cfg interface{}) (interface{}, error)
+	GetProvider(cfg any) (any, error)
 }
 
 type ToolServer interface {
 	Name() string
 	Tools() []mcp.Tool
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (string, error)
 }
 
 func getDefaultDBPath() string {
@@ -253,7 +253,7 @@ func (s *Scheduler) SetProviderGetter(pg ProviderGetter) {
 	s.provider = pg
 }
 
-func (s *Scheduler) SetServers(servers []interface{}) {
+func (s *Scheduler) SetServers(servers []any) {
 	s.servers = nil
 	for _, srv := range servers {
 		ts, ok := srv.(ToolServer)
@@ -307,20 +307,20 @@ func (s *Scheduler) generateID() (string, error) {
 }
 
 type SchedulerInterface interface {
-	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
-	AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error)
+	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error)
+	AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (any, error)
 	StopTask(id string) bool
 	RemoveTask(id string) bool
-	ListTasks() []interface{}
-	GetTask(id string) interface{}
+	ListTasks() []any
+	GetTask(id string) any
 }
 
-func (s *Scheduler) AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error) {
+func (s *Scheduler) AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error) {
 	isRepeating := intervalSec > 0
 	return s.AddTaskWithRepeat(prompt, intervalSec, runAt, isRepeating, providerType, providerName, providerModel)
 }
 
-func (s *Scheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error) {
+func (s *Scheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (any, error) {
 	if intervalSec <= 0 && runAt == "" {
 		return nil, fmt.Errorf("must specify either interval or run_at time")
 	}
@@ -441,15 +441,15 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 			task.LastOutput = result
 		}
 	} else if s.provider != nil {
-		var cfg interface{}
+		var cfg any
 		if task.ProviderType == "unknown" || task.ProviderType == "" || task.ProviderType == "current" {
-			cfg = map[string]interface{}{
+			cfg = map[string]any{
 				"type":  "current",
 				"name":  "current",
 				"model": "current",
 			}
 		} else {
-			cfg = map[string]interface{}{
+			cfg = map[string]any{
 				"type":  task.ProviderType,
 				"name":  task.ProviderName,
 				"model": task.ProviderModel,
@@ -514,7 +514,7 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 		return "", fmt.Errorf("no provider available")
 	}
 
-	cfg := map[string]interface{}{
+	cfg := map[string]any{
 		"type":  "current",
 		"name":  "current",
 		"model": "current",
@@ -580,7 +580,7 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 			if !ok {
 				continue
 			}
-			args, ok := tc["arguments"].(map[string]interface{})
+			args, ok := tc["arguments"].(map[string]any)
 			if !ok {
 				continue
 			}
@@ -737,7 +737,7 @@ func (s *Scheduler) looksLikeToolCall(text string) bool {
 		strings.Contains(text, "function") || strings.Contains(text, "(")
 }
 
-func (s *Scheduler) callTool(ctx context.Context, name string, args map[string]interface{}, timeoutSecs int) (string, error) {
+func (s *Scheduler) callTool(ctx context.Context, name string, args map[string]any, timeoutSecs int) (string, error) {
 	for _, server := range s.servers {
 		for _, t := range server.Tools() {
 			if t.Name == name {
@@ -837,7 +837,7 @@ func (s *Scheduler) RemoveTask(id string) bool {
 	return false
 }
 
-func (s *Scheduler) ListTasks() []interface{} {
+func (s *Scheduler) ListTasks() []any {
 	s.taskMu.RLock()
 	defer s.taskMu.RUnlock()
 
@@ -848,14 +848,14 @@ func (s *Scheduler) ListTasks() []interface{} {
 	sort.Slice(tasks, func(i, j int) bool {
 		return tasks[i].CreatedAt.Before(tasks[j].CreatedAt)
 	})
-	result := make([]interface{}, len(tasks))
+	result := make([]any, len(tasks))
 	for i, t := range tasks {
 		result[i] = t
 	}
 	return result
 }
 
-func (s *Scheduler) GetTask(id string) interface{} {
+func (s *Scheduler) GetTask(id string) any {
 	s.taskMu.RLock()
 	defer s.taskMu.RUnlock()
 	return s.tasks[id]

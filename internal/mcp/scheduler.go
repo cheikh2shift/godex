@@ -14,34 +14,34 @@ type SchedulerServer struct {
 
 type schedulerExt struct {
 	scheduler interface {
-		AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
+		AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error)
 		StopTask(id string) bool
 		RemoveTask(id string) bool
-		ListTasks() []interface{}
-		GetTask(id string) interface{}
+		ListTasks() []any
+		GetTask(id string) any
 	}
 }
 
 type TaskInfo struct {
-	ID          string    `json:"id"`
-	Prompt      string    `json:"prompt"`
-	IntervalSec int       `json:"interval_sec"`
-	RunAt       string    `json:"run_at"`
-	IsRepeating bool      `json:"is_repeating"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastRun     time.Time `json:"last_run"`
-	RunCount    int       `json:"run_count"`
+	ID          string    `json:"id"`
+	Prompt      string    `json:"prompt"`
+	RunAt       string    `json:"run_at"`
 	LastError   string    `json:"last_error"`
+	IntervalSec int       `json:"interval_sec"`
+	RunCount    int       `json:"run_count"`
+	IsRepeating bool      `json:"is_repeating"`
 }
 
 func NewSchedulerServer(scheduler interface {
-	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error)
+	AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error)
 	StopTask(id string) bool
 	RemoveTask(id string) bool
-	ListTasks() []interface{}
-	GetTask(id string) interface{}
+	ListTasks() []any
+	GetTask(id string) any
 }, providerGetter interface {
-	GetProvider(cfg interface{}) (interface{}, error)
+	GetProvider(cfg any) (any, error)
 }) *SchedulerServer {
 	return &SchedulerServer{
 		scheduler: &schedulerExt{
@@ -86,7 +86,7 @@ func (s *SchedulerServer) Tools() []Tool {
 	}
 }
 
-func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	if name != "scheduler" {
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -128,12 +128,12 @@ func (s *SchedulerServer) CallTool(ctx context.Context, name string, args map[st
 	}
 
 	var (
-		task interface{}
+		task any
 		err  error
 	)
 
 	type schedulerWithRepeat interface {
-		AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error)
+		AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (any, error)
 	}
 	if sr, ok := s.scheduler.scheduler.(schedulerWithRepeat); ok {
 		task, err = sr.AddTaskWithRepeat(prompt, intervalSec, runAt, isRepeating, "current", "current", "current")

@@ -6,27 +6,28 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cheikh2shift/godex/internal/rxcache"
 	"github.com/chromedp/chromedp"
 	"golang.org/x/net/html"
 )
 
 type cacheEntry struct {
-	html      string
 	expiresAt time.Time
+	html      string
 }
 
 type WebScraperServer struct {
+	browserCtx    context.Context
+	browserCancel context.CancelFunc
+	cache         map[string]cacheEntry
 	allowedURLs   []string
 	tools         []Tool
-	browserCancel context.CancelFunc
-	autoConfirm   bool
-	cache         map[string]cacheEntry
 	cacheMu       sync.Mutex
+	autoConfirm   bool
 }
 
 func NewWebScraperServer(allowedURLs []string, autoConfirm bool) *WebScraperServer {
@@ -99,7 +100,7 @@ func (s *WebScraperServer) checkAndMaybeAddURL(rawURL string) error {
 	return nil
 }
 
-func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (string, error) {
+func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
 	switch name {
 	case "fetch_url":
 		return s.fetchURL(arguments)
@@ -110,7 +111,7 @@ func (s *WebScraperServer) CallTool(ctx context.Context, name string, arguments 
 	}
 }
 
-func (s *WebScraperServer) fetchURL(args map[string]interface{}) (string, error) {
+func (s *WebScraperServer) fetchURL(args map[string]any) (string, error) {
 	rawURL, ok := args["url"].(string)
 	if !ok {
 		return "", fmt.Errorf("url is required")
@@ -203,7 +204,7 @@ func (s *WebScraperServer) processContent(htmlContent, grepPattern string, start
 }
 
 func (s *WebScraperServer) applyGrep(htmlContent, pattern string) (string, error) {
-	re, err := regexp.Compile(pattern)
+	re, err := rxcache.Compile(pattern)
 	if err != nil {
 		return "", fmt.Errorf("invalid grep pattern: %v", err)
 	}
@@ -244,7 +245,7 @@ func (s *WebScraperServer) applyLineRange(content string, start, end float64) st
 	return strings.Join(lines[startIdx:endIdx], "\n")
 }
 
-func (s *WebScraperServer) getLinks(args map[string]interface{}) (string, error) {
+func (s *WebScraperServer) getLinks(args map[string]any) (string, error) {
 	htmlContent, ok := args["html"].(string)
 	if !ok {
 		return "", fmt.Errorf("html is required")

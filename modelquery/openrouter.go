@@ -13,26 +13,26 @@ type OpenRouterModelsResponse struct {
 
 // OpenRouterModel represents a model from the OpenRouter API.
 type OpenRouterModel struct {
+	DefaultParams   map[string]interface{} `json:"default_parameters"`
+	Pricing         OpenRouterPricing      `json:"pricing"`
+	Architecture    OpenRouterArchitecture `json:"architecture"`
 	ID              string                 `json:"id"`
 	CanonicalSlug   string                 `json:"canonical_slug"`
 	Name            string                 `json:"name"`
-	Created         int64                  `json:"created"`
 	Description     string                 `json:"description"`
-	ContextLength   int                    `json:"context_length"`
-	Architecture    OpenRouterArchitecture `json:"architecture"`
-	Pricing         OpenRouterPricing      `json:"pricing"`
-	TopProvider     OpenRouterTopProvider  `json:"top_provider"`
-	SupportedParams []string               `json:"supported_parameters"`
-	DefaultParams   map[string]interface{} `json:"default_parameters"`
 	ExpirationDate  string                 `json:"expiration_date"`
+	SupportedParams []string               `json:"supported_parameters"`
+	TopProvider     OpenRouterTopProvider  `json:"top_provider"`
+	Created         int64                  `json:"created"`
+	ContextLength   int                    `json:"context_length"`
 }
 
 // OpenRouterArchitecture describes the model's technical capabilities.
 type OpenRouterArchitecture struct {
-	InputModalities  []string `json:"input_modalities"`
-	OutputModalities []string `json:"output_modalities"`
 	Tokenizer        string   `json:"tokenizer"`
 	InstructType     string   `json:"instruct_type"`
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
 }
 
 // OpenRouterPricing contains pricing information for the model.

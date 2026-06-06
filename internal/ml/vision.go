@@ -20,7 +20,7 @@ type VisionResult struct {
 
 var visionServer *exec.Cmd
 
-func visionDebug(format string, args ...interface{}) {
+func visionDebug(format string, args ...any) {
 	if DebugMode {
 		log.Printf("[vision] "+format, args...)
 	}

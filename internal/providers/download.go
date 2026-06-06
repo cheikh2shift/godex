@@ -85,9 +85,9 @@ func getDownloadURL(modelID, filename string) string {
 }
 
 type DownloadProgress struct {
+	Filename   string
 	Downloaded int64
 	Total      int64
-	Filename   string
 }
 
 var quantOrder = map[string]int{

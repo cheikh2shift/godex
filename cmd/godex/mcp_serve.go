@@ -79,7 +79,7 @@ func serveFilesystemMCP(baseAllowedPaths []string, autoConfirm bool, useRoots bo
 			fs := mcp.NewFileSystemServer(allowed, autoConfirm)
 
 			args, _ := request.Params.Arguments.(map[string]any)
-			argMap := make(map[string]interface{}, len(args))
+			argMap := make(map[string]any, len(args))
 			for k, v := range args {
 				argMap[k] = v
 			}
@@ -171,16 +171,6 @@ func serveFilesystemMCP(baseAllowedPaths []string, autoConfirm bool, useRoots bo
 			"replace": map[string]any{"type": "string", "description": "Replacement text."},
 		},
 		Required: []string{"path", "find", "replace"},
-	})
-	addProxyTool("replace_line_range", "Replace a range of lines in a file.", mcplib.ToolInputSchema{
-		Type: "object",
-		Properties: map[string]any{
-			"path":        map[string]any{"type": "string", "description": "File path."},
-			"start":       map[string]any{"type": "number", "description": "Start line number (1-indexed)."},
-			"end":         map[string]any{"type": "number", "description": "End line number (inclusive)."},
-			"new_content": map[string]any{"type": "string", "description": "New content to insert at the deleted location."},
-		},
-		Required: []string{"path", "start", "end", "new_content"},
 	})
 	addProxyTool("insert_at_line", "Insert content at a specific line number.", mcplib.ToolInputSchema{
 		Type: "object",
