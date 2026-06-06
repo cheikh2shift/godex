@@ -59,7 +59,7 @@ func RunWizard(destination string) error {
 			return defaultVal
 		}
 		if existingProvider.Type != "" && provider.Type != "" &&
-			strings.ToLower(existingProvider.Type) != strings.ToLower(provider.Type) {
+			!strings.EqualFold(existingProvider.Type, provider.Type) {
 			switch field {
 			case "model", "description", "endpoint", "api_key_env":
 				return defaultVal
@@ -337,10 +337,7 @@ func looksLikePromptEcho(input string) bool {
 			return true
 		}
 	}
-	if strings.Contains(input, "]:") {
-		return true
-	}
-	return false
+	return strings.Contains(input, "]:")
 }
 
 type selectOption struct {

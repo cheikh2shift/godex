@@ -35,18 +35,20 @@ type MCPToolExecutor struct { //betteralign:ignore
 	serverName    string
 	workingDir    string
 
-	server MCPServer
+	server atomic.Pointer[MCPServer]
 	tools  []Tool
 
+	mu          sync.RWMutex
 	requestIDMu sync.Mutex
 }
 
 func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MCPToolExecutor, error) {
 	executor := &MCPToolExecutor{
 		serverName: server.Name,
-		server:     server,
 		workingDir: workingDir,
 	}
+	serverCopy := server
+	executor.server.Store(&serverCopy)
 
 	if err := executor.connect(ctx); err != nil {
 		return nil, err
@@ -56,11 +58,26 @@ func NewMCPServer(ctx context.Context, server MCPServer, workingDir string) (*MC
 }
 
 func (m *MCPToolExecutor) connect(ctx context.Context) error {
-	args := m.buildArgs()
-
-	mcpClient, err := client.NewStdioMCPClient(m.server.Command, m.server.Env, args...)
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mcpClient, tools, err := connect(ctx, server, buildArgs(server, m.workingDir))
 	if err != nil {
-		return fmt.Errorf("failed to create MCP client for %s: %w", m.server.Name, err)
+		return err
+	}
+	m.mcpClient = mcpClient
+	m.tools = tools
+	return nil
+}
+
+func connect(ctx context.Context, server MCPServer, args []string) (*client.Client, []Tool, error) {
+	mcpClient, err := client.NewStdioMCPClient(server.Command, server.Env, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create MCP client for %s: %w", server.Name, err)
 	}
 
 	_, err = mcpClient.Initialize(ctx, mcp.InitializeRequest{
@@ -74,65 +91,80 @@ func (m *MCPToolExecutor) connect(ctx context.Context) error {
 	})
 	if err != nil {
 		_ = mcpClient.Close()
-		return fmt.Errorf("failed to initialize MCP client for %s: %w", m.server.Name, err)
+		return nil, nil, fmt.Errorf("failed to initialize MCP client for %s: %w", server.Name, err)
 	}
 
 	tools, err := listTools(ctx, mcpClient)
 	if err != nil {
 		_ = mcpClient.Close()
-		return fmt.Errorf("failed to list tools for %s: %w", m.server.Name, err)
+		return nil, nil, fmt.Errorf("failed to list tools for %s: %w", server.Name, err)
 	}
 
-	m.mcpClient = mcpClient
-	m.tools = tools
-	return nil
+	return mcpClient, tools, nil
 }
 
-// ping checks if the MCP client is still responsive
-func (m *MCPToolExecutor) ping(ctx context.Context) error {
-	if m.mcpClient == nil {
-		return fmt.Errorf("client is nil")
-	}
-
+// pingClient checks if the MCP client is still responsive
+func pingClient(ctx context.Context, client client.MCPClient) error {
 	// Create a context with 2 second deadline
 	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	return m.mcpClient.Ping(pingCtx)
+	return client.Ping(pingCtx)
 }
 
 // ensureConnected pings the client and reconnects if needed
 func (m *MCPToolExecutor) ensureConnected(ctx context.Context) error {
-	if m.mcpClient == nil {
-		return m.connect(ctx)
-	}
-
-	if err := m.ping(ctx); err != nil {
-		// Ping failed, close and reconnect
-		_ = m.mcpClient.Close()
-		m.mcpClient = nil
-
-		if err := m.connect(ctx); err != nil {
-			return fmt.Errorf("failed to reconnect after ping failure: %w", err)
+	m.mu.Lock()
+	client := m.mcpClient
+	wd := m.workingDir
+	if client != nil {
+		if pingClient(ctx, client) == nil {
+			m.mu.Unlock()
+			return nil
 		}
+		// Ping failed, close and reconnect
+		_ = client.Close()
+		m.mcpClient = nil
 	}
+	// Do not hold the lock till connecting
+	m.mu.Unlock()
+
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
+	client, tools, err := connect(ctx, server, buildArgs(server, wd))
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// Guard against another goroutine having reconnected while we were unlocked
+	if m.mcpClient != nil { // assume it's ok
+		_ = client.Close()
+		return nil
+	}
+
+	m.mcpClient, m.tools = client, tools
 	return nil
 }
 
-func (m *MCPToolExecutor) buildArgs() []string {
-	paths := m.server.AllowedPaths
+func buildArgs(server MCPServer, workingDir string) []string {
+	paths := server.AllowedPaths
 	if len(paths) == 0 {
-		paths = []string{m.workingDir}
+		paths = []string{workingDir}
 	}
 
-	if m.server.Name == "filesystem" || contains(m.server.Args, "server-filesystem") {
+	if server.Name == "filesystem" || contains(server.Args, "server-filesystem") {
 		args := []string{"-y", "@modelcontextprotocol/server-filesystem"}
 		args = append(args, paths...)
 		return args
 	}
 
-	if len(m.server.Args) > 0 {
-		return m.server.Args
+	if len(server.Args) > 0 {
+		return server.Args
 	}
 
 	return nil
@@ -158,25 +190,45 @@ func listTools(ctx context.Context, mcpClient *client.Client) ([]Tool, error) {
 }
 
 func (m *MCPToolExecutor) Name() string {
-	return m.server.Name
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return ""
+	}
+	return serverPtr.Name
 }
 
 func (m *MCPToolExecutor) Tools() []Tool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.tools
 }
 
 func (m *MCPToolExecutor) AddPath(ctx context.Context, path string) error {
-	for _, p := range m.server.AllowedPaths {
-		if p == path {
-			return nil
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return fmt.Errorf("server not initialized")
+	}
+	server := *serverPtr
+	if func() bool {
+		for _, p := range server.AllowedPaths {
+			if p == path {
+				return true
+			}
 		}
+
+		server.AllowedPaths = append(server.AllowedPaths, path)
+		m.server.Store(&server)
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_ = m.mcpClient.Close()
+		m.mcpClient = nil
+		return false
+	}() {
+		return nil
 	}
 
-	m.server.AllowedPaths = append(m.server.AllowedPaths, path)
-
-	_ = m.mcpClient.Close()
-
-	if err := m.connect(ctx); err != nil {
+	if err := m.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to reconnect with new path: %w", err)
 	}
 
@@ -188,33 +240,53 @@ func (m *MCPToolExecutor) AddURL(ctx context.Context, url string) error {
 }
 
 func (m *MCPToolExecutor) TempAddPath(path string) {
-	for _, p := range m.server.AllowedPaths {
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return
+	}
+	server := *serverPtr
+	for _, p := range server.AllowedPaths {
 		if p == path {
 			return
 		}
 	}
 
-	m.server.AllowedPaths = append(m.server.AllowedPaths, path)
+	server.AllowedPaths = append(server.AllowedPaths, path)
+	m.server.Store(&server)
 }
 
 func (m *MCPToolExecutor) RemovePath(ctx context.Context, path string) error {
-	found := -1
-	for i, p := range m.server.AllowedPaths {
-		if p == path {
-			found = i
-			break
+	if func() bool {
+		serverPtr := m.server.Load()
+		if serverPtr == nil {
+			return true
 		}
-	}
+		server := *serverPtr
+		found := -1
+		for i, p := range server.AllowedPaths {
+			if p == path {
+				found = i
+				break
+			}
+		}
 
-	if found == -1 {
+		if found == -1 {
+			return true
+		}
+
+		server.AllowedPaths = append(server.AllowedPaths[:found], server.AllowedPaths[found+1:]...)
+		m.server.Store(&server)
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		_ = m.mcpClient.Close()
+		m.mcpClient = nil
+		return false
+	}() {
 		return nil
 	}
 
-	m.server.AllowedPaths = append(m.server.AllowedPaths[:found], m.server.AllowedPaths[found+1:]...)
-
-	_ = m.mcpClient.Close()
-
-	if err := m.connect(ctx); err != nil {
+	if err := m.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to reconnect after removing path: %w", err)
 	}
 
@@ -226,11 +298,16 @@ func (m *MCPToolExecutor) RemoveURL(ctx context.Context, url string) error {
 }
 
 func (m *MCPToolExecutor) AllowedPaths() []string {
-	paths := m.server.AllowedPaths
-	if len(paths) == 0 {
-		return []string{m.workingDir}
+	serverPtr := m.server.Load()
+	if serverPtr != nil {
+		paths := serverPtr.AllowedPaths
+		if len(paths) != 0 {
+			return paths
+		}
 	}
-	return paths
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return []string{m.workingDir}
 }
 
 func (m *MCPToolExecutor) CallTool(ctx context.Context, name string, arguments map[string]any) (string, error) {
@@ -257,8 +334,10 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 		}
 
 		if isRetryableError(err.Error()) && attempt < maxRetries {
+			m.mu.Lock()
 			_ = m.mcpClient.Close()
 			m.mcpClient = nil
+			m.mu.Unlock()
 			if reconnectErr := m.connect(ctx); reconnectErr == nil {
 				return m.callToolWithRetry(ctx, name, arguments, attempt+1)
 			}
@@ -270,7 +349,15 @@ func (m *MCPToolExecutor) callToolWithRetry(ctx context.Context, name string, ar
 }
 
 func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestID int64, name string, arguments map[string]any) (string, error) {
-	t := m.mcpClient.GetTransport()
+	var t transport.Interface
+	m.mu.RLock()
+	if client := m.mcpClient; client != nil {
+		t = client.GetTransport()
+	}
+	m.mu.RUnlock()
+	if t == nil {
+		return "", fmt.Errorf("nil client")
+	}
 
 	request := transport.JSONRPCRequest{
 		JSONRPC: mcp.JSONRPC_VERSION,
@@ -296,7 +383,7 @@ func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestI
 
 	select {
 	case <-ctx.Done():
-		m.sendCancelledNotification(context.Background(), requestID, ctx.Err().Error())
+		sendCancelledNotification(context.Background(), t, requestID, ctx.Err().Error())
 		return "", ctx.Err()
 	case response := <-resultCh:
 		return m.parseToolResponse(response)
@@ -305,9 +392,7 @@ func (m *MCPToolExecutor) callToolWithCancellation(ctx context.Context, requestI
 	}
 }
 
-func (m *MCPToolExecutor) sendCancelledNotification(ctx context.Context, requestID int64, reason string) {
-	t := m.mcpClient.GetTransport()
-
+func sendCancelledNotification(ctx context.Context, t transport.Interface, requestID int64, reason string) {
 	notification := mcp.JSONRPCNotification{
 		JSONRPC: mcp.JSONRPC_VERSION,
 		Notification: mcp.Notification{
@@ -369,16 +454,20 @@ func isRetryableError(errMsg string) bool {
 }
 
 func (m *MCPToolExecutor) Close() error {
-	if m.mcpClient != nil {
-		return m.closeWithTimeout(2 * time.Second)
+	m.mu.Lock()
+	client := m.mcpClient
+	m.mcpClient = nil
+	m.mu.Unlock()
+	if client != nil {
+		return closeWithTimeout(client, 2*time.Second)
 	}
 	return nil
 }
 
-func (m *MCPToolExecutor) closeWithTimeout(timeout time.Duration) error {
+func closeWithTimeout(client *client.Client, timeout time.Duration) error {
 	done := make(chan error, 1)
 	go func() {
-		done <- m.mcpClient.Close()
+		done <- client.Close()
 	}()
 
 	select {
@@ -399,10 +488,15 @@ func contains(slice []string, val string) bool {
 }
 
 func (m *MCPToolExecutor) GetContext() string {
+	serverPtr := m.server.Load()
+	if serverPtr == nil {
+		return ""
+	}
+	server := *serverPtr
 	var b strings.Builder
-	b.WriteString("MCP Server: " + m.server.Name + "\n")
-	b.WriteString("Command: " + m.server.Command + "\n")
-	b.WriteString("Args: " + strings.Join(m.server.Args, " ") + "\n")
-	b.WriteString("Allowed Paths: " + strings.Join(m.server.AllowedPaths, ", ") + "\n")
+	b.WriteString("MCP Server: " + server.Name + "\n")
+	b.WriteString("Command: " + server.Command + "\n")
+	b.WriteString("Args: " + strings.Join(server.Args, " ") + "\n")
+	b.WriteString("Allowed Paths: " + strings.Join(server.AllowedPaths, ", ") + "\n")
 	return b.String()
 }

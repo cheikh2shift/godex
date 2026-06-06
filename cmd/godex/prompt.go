@@ -660,9 +660,7 @@ func (m *promptModel) handleScheduleTab(value string) bool {
 		return true
 	}
 	m.scheduleList = nil
-	for _, id := range matches {
-		m.scheduleList = append(m.scheduleList, id)
-	}
+	m.scheduleList = append(m.scheduleList, matches...)
 	m.resetCompletion()
 	return true
 }
