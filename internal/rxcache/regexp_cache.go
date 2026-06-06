@@ -13,9 +13,9 @@ const globalCacheLimit = 1000
 var globalCache = RegexpCache{m: make(map[string]*regexp.Regexp, globalCacheLimit), limit: globalCacheLimit}
 
 type RegexpCache struct {
-	mu    sync.RWMutex
 	m     map[string]*regexp.Regexp
 	limit int
+	mu    sync.RWMutex
 }
 
 func (c *RegexpCache) MustCompile(pattern string) *regexp.Regexp {

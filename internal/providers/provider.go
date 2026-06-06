@@ -12,9 +12,9 @@ var DebugMode bool
 
 // Tool represents an executable tool.
 type Tool struct {
+	InputSchema map[string]any
 	Name        string
 	Description string
-	InputSchema map[string]any
 }
 
 type Message struct {

@@ -22,18 +22,18 @@ var runCmdMu sync.Mutex
 
 // Job represents a running background job managed by a goroutine
 type Job struct {
-	ID       string
-	Command  string
-	PID      int
+	ExitedAt time.Time
+	Started  time.Time
 	Ctx      context.Context
 	Cancel   context.CancelFunc
 	Done     chan struct{}
+	ID       string
+	Command  string
 	Output   strings.Builder
-	Mu       sync.Mutex
+	PID      int
 	ExitCode int
+	Mu       sync.Mutex
 	Exited   bool
-	ExitedAt time.Time
-	Started  time.Time
 }
 
 // JobTracker manages all background jobs
@@ -169,13 +169,13 @@ func (t *JobTracker) JobStatus(id string) (string, bool) {
 }
 
 type BashServer struct {
+	jobTracker   *JobTracker
 	allowedPaths []string
 	tools        []Tool
-	jobTracker   *JobTracker
-	autoConfirm  bool
+	failedStarts []string
 	mu           sync.RWMutex
 	failedMu     sync.Mutex
-	failedStarts []string
+	autoConfirm  bool
 }
 
 var (

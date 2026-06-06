@@ -25,22 +25,22 @@ const (
 )
 
 type ollamaProvider struct {
-	baseURL          string
-	model            string
 	cfg              *config.Provider
 	temperature      *float64
 	client           *http.Client
-	systemPrompt     string
-	messages         []map[string]string
-	mu               sync.Mutex
-	sendMu           sync.Mutex
 	OnThink          func(string)
 	cancelFunc       context.CancelFunc
+	statusCh         chan<- string
+	baseURL          string
+	model            string
+	systemPrompt     string
+	messages         []map[string]string
 	cancelGen        uint64
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
-	statusCh         chan<- string
+	mu               sync.Mutex
+	sendMu           sync.Mutex
 	visionChecked    bool
 	visionSupported  bool
 }
@@ -403,8 +403,8 @@ func (o *ollamaProvider) doSend(ctx context.Context, endpoint string, payload []
 }
 
 type ollamaError struct {
-	statusCode int
 	message    string
+	statusCode int
 }
 
 func (e *ollamaError) Error() string {

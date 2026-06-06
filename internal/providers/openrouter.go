@@ -31,13 +31,13 @@ func getMaxHistoryMessages() int {
 }
 
 type openRouterModelInfo struct {
-	ID            string  `json:"id"`
-	CanonicalSlug string  `json:"canonical_slug"`
-	Name          string  `json:"name"`
-	ContextLength float64 `json:"context_length"`
+	ID            string `json:"id"`
+	CanonicalSlug string `json:"canonical_slug"`
+	Name          string `json:"name"`
 	Architecture  struct {
 		InputModalities []string `json:"input_modalities"`
 	} `json:"architecture"`
+	ContextLength float64 `json:"context_length"`
 }
 
 type openRouterModelsResponse struct {
@@ -67,26 +67,26 @@ type reasoningDetail struct {
 }
 
 type openRouterProvider struct {
+	temperature      *float64
+	client           *http.Client
+	pendingToolCalls map[string]string // tool_call_id -> function_name for tracking
+	cancelFunc       context.CancelFunc
+	OnThink          func(string)
+	statusCh         chan<- string
 	baseURL          string
 	model            string
 	apiKey           string
-	temperature      *float64
-	client           *http.Client
 	systemPrompt     string
 	messages         []map[string]any
-	pendingToolCalls map[string]string // tool_call_id -> function_name for tracking
 	tools            []map[string]any
-	cancelMu         sync.Mutex
-	cancelFunc       context.CancelFunc
 	cancelGen        uint64
 	contextLimit     int
 	promptTokens     int
 	completionTokens int
+	cancelMu         sync.Mutex
+	mu               sync.Mutex
 	visionChecked    bool
 	visionSupported  bool
-	OnThink          func(string)
-	mu               sync.Mutex
-	statusCh         chan<- string
 }
 
 func (p *openRouterProvider) emitStatus(msg string) {

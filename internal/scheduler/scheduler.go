@@ -21,38 +21,38 @@ import (
 )
 
 type ScheduledTask struct {
-	ID            string    `json:"id"`
-	Prompt        string    `json:"prompt"`
-	IntervalSec   int       `json:"interval_sec"`
-	RunAt         string    `json:"run_at"`
-	IsRepeating   bool      `json:"is_repeating"`
-	WorkingDir    string    `json:"working_dir"`
 	CreatedAt     time.Time `json:"created_at"`
 	LastRun       time.Time `json:"last_run"`
-	RunCount      int       `json:"run_count"`
+	ID            string    `json:"id"`
+	Prompt        string    `json:"prompt"`
+	RunAt         string    `json:"run_at"`
+	WorkingDir    string    `json:"working_dir"`
 	LastError     string    `json:"last_error"`
 	LastOutput    string    `json:"last_output"`
 	ProviderType  string    `json:"provider_type"`
 	ProviderName  string    `json:"provider_name"`
 	ProviderModel string    `json:"provider_model"`
+	IntervalSec   int       `json:"interval_sec"`
+	RunCount      int       `json:"run_count"`
+	IsRepeating   bool      `json:"is_repeating"`
 }
 
 type Scheduler struct {
+	provider       ProviderGetter
 	db             *sql.DB
 	tasks          map[string]*ScheduledTask
-	taskMu         sync.RWMutex
 	running        map[string]context.CancelFunc
-	runMu          sync.RWMutex
 	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	provider       ProviderGetter
-	servers        []ToolServer
 	onTaskFinished func(*ScheduledTask)
-	maxRounds      int
-	toolTimeout    int
+	statusCh       chan string
 	wd             string
 	os             string
-	statusCh       chan string
+	servers        []ToolServer
+	wg             sync.WaitGroup
+	maxRounds      int
+	toolTimeout    int
+	taskMu         sync.RWMutex
+	runMu          sync.RWMutex
 }
 
 type ProviderGetter interface {

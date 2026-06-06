@@ -19,18 +19,18 @@ type HistoryDB struct {
 }
 
 type Entry struct {
-	ID        int64
+	Timestamp time.Time
 	WD        string
 	Command   string
-	Timestamp time.Time
+	ID        int64
 }
 
 type Commit struct {
-	ID        int64
+	CreatedAt time.Time
 	WD        string
 	Ref       string
 	Message   string
-	CreatedAt time.Time
+	ID        int64
 }
 
 func New(dbPath string) (*HistoryDB, error) {

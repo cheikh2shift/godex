@@ -34,15 +34,15 @@ type schedulerExt struct {
 }
 
 type TaskInfo struct {
-	ID          string    `json:"id"`
-	Prompt      string    `json:"prompt"`
-	IntervalSec int       `json:"interval_sec"`
-	RunAt       string    `json:"run_at"`
-	IsRepeating bool      `json:"is_repeating"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastRun     time.Time `json:"last_run"`
-	RunCount    int       `json:"run_count"`
+	ID          string    `json:"id"`
+	Prompt      string    `json:"prompt"`
+	RunAt       string    `json:"run_at"`
 	LastError   string    `json:"last_error"`
+	IntervalSec int       `json:"interval_sec"`
+	RunCount    int       `json:"run_count"`
+	IsRepeating bool      `json:"is_repeating"`
 }
 
 func NewSchedulerServer(scheduler interface {

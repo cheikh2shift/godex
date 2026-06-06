@@ -49,39 +49,39 @@ var commandTips = map[string]string{
 }
 
 type promptModel struct {
-	basePrompt      string
-	contPrompt      string
-	input           textinput.Model
-	lines           []string
-	multiline       bool
-	history         []string
-	historyIndex    int
-	historyDraft    string
-	submitted       bool
-	aborted         bool
-	completions     []string
-	completeSeed    string
-	completeIdx     int
-	showCompletions bool
-	width           int
-	modelName       string
-	contextUsage    int
-	contextLimit    int
 	historyDB       *history.HistoryDB
-	wd              string
-	searchMode      bool
-	searchInput     textinput.Model
-	searchIndex     int
-	searchResults   []string
-	statusMessage   string
-	commitList      []string
-	scheduleList    []string
 	statusCh        <-chan string
 	delegateCh      <-chan hive.HiveStats
-	delegateCount   int
-	delegateLatest  string
-	statusHidden    bool
 	Cancelled       chan struct{}
+	basePrompt      string
+	contPrompt      string
+	historyDraft    string
+	completeSeed    string
+	modelName       string
+	wd              string
+	statusMessage   string
+	delegateLatest  string
+	lines           []string
+	history         []string
+	completions     []string
+	searchResults   []string
+	commitList      []string
+	scheduleList    []string
+	input           textinput.Model
+	searchInput     textinput.Model
+	historyIndex    int
+	completeIdx     int
+	width           int
+	contextUsage    int
+	contextLimit    int
+	searchIndex     int
+	delegateCount   int
+	multiline       bool
+	submitted       bool
+	aborted         bool
+	showCompletions bool
+	searchMode      bool
+	statusHidden    bool
 }
 
 func newPromptModel(prompt string, history []string, modelName string, contextUsage int, contextLimit int, historyDB *history.HistoryDB, wd string, statusCh <-chan string, delegateCh <-chan hive.HiveStats) promptModel {
@@ -844,8 +844,8 @@ type selectOption struct {
 type statusMsg string
 
 type delegateMsg struct {
-	Count  int
 	Latest string
+	Count  int
 }
 
 func (m *promptModel) applyStatusMessage(msg statusMsg) {

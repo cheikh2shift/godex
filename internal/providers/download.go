@@ -20,8 +20,8 @@ type hfRepoInfo struct {
 }
 
 type hfFileInfo struct {
-	Size        int64  `json:"size"`
 	BlobHTTPURL string `json:"blobHTTPURL"`
+	Size        int64  `json:"size"`
 }
 
 func getGGUFFiles(ctx context.Context, modelID string) ([]string, error) {
@@ -90,9 +90,9 @@ func getDownloadURL(modelID, filename string) string {
 }
 
 type DownloadProgress struct {
+	Filename   string
 	Downloaded int64
 	Total      int64
-	Filename   string
 }
 
 var quantOrder = map[string]int{
