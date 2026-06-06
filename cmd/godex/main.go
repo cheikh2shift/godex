@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +34,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/mcp"
 	"github.com/cheikh2shift/godex/internal/ml"
 	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 	"github.com/cheikh2shift/godex/internal/scheduler"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
@@ -1445,8 +1445,8 @@ func handleMCPSubcommand(args []string, configPath string) error {
 		if err := config.Save(configPath, cfg); err != nil {
 			return err
 		}
-			fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
-			return nil
+		fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
+		return nil
 	case "serve":
 		return handleMCPServeSubcommand(args[1:])
 	case "remove":
@@ -2852,11 +2852,11 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 
 		// Safety fallback for the specific [TOOL_CALL] format
 		if len(results) == 0 {
-			toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
+			toolCallRe := rxcache.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
 			tcMatches := toolCallRe.FindAllStringSubmatch(candidate, -1)
 			for _, m := range tcMatches {
 				if len(m) > 1 {
-					nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
+					nameRe := rxcache.MustCompile(`tool\s*=>\s*"([^"]+)"`)
 					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
 						results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
 					}
@@ -2922,7 +2922,7 @@ func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
 
 func extractNativeToolCalls(text string) [][2]string {
 	var results [][2]string
-	re := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
+	re := rxcache.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
 	matches := re.FindAllStringSubmatchIndex(text, -1)
 	for _, m := range matches {
 		if len(m) < 4 {
@@ -2977,8 +2977,8 @@ func normalizeToolCallText(text string) string {
 
 	nonEmpty := 0
 	withMargin := 0
-	marginRe := regexp.MustCompile(`^\s*│`)
-	stripRe := regexp.MustCompile(`^\s*│\s?`)
+	marginRe := rxcache.MustCompile(`^\s*│`)
+	stripRe := rxcache.MustCompile(`^\s*│\s?`)
 
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -3004,7 +3004,7 @@ func normalizeToolCallText(text string) string {
 // Only replaces the first occurrence at the start of the command
 func fixDriveLetterPath(cmd string) string {
 	// Match :/<path> at start and convert to cd /<path>
-	re := regexp.MustCompile(`(?i)^:\/(.+)`)
+	re := rxcache.MustCompile(`(?i)^:\/(.+)`)
 	match := re.FindStringSubmatch(cmd)
 	if match == nil {
 		return cmd
@@ -3128,7 +3128,7 @@ func extractJsonObjects(text string) []map[string]interface{} {
 }
 
 func extractThinkingText(text string) string {
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\n.*?\\n```")
+	codeBlockRe := rxcache.MustCompile("(?s)```(?:json)?\\n.*?\\n```")
 	thinking := codeBlockRe.ReplaceAllString(text, "")
 	thinking = strings.TrimSpace(thinking)
 	return thinking
