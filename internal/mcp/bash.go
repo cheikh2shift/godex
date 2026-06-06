@@ -346,7 +346,12 @@ func (s *BashServer) isPathAllowed(path string) bool {
 func (s *BashServer) runCommand(ctx context.Context, args map[string]any) (string, error) {
 	command, ok := args["command"].(string)
 	if !ok {
-		return "", fmt.Errorf("command is required")
+
+		command, ok = args["cmd"].(string)
+
+		if !ok {
+			return "", fmt.Errorf("command is required")
+		}
 	}
 
 	if !s.isCommandAllowed(command) {
