@@ -9,10 +9,10 @@ import (
 )
 
 type fakeProviderGetter struct {
-	p interface{}
+	p any
 }
 
-func (f *fakeProviderGetter) GetProvider(cfg interface{}) (interface{}, error) {
+func (f *fakeProviderGetter) GetProvider(cfg any) (any, error) {
 	return f.p, nil
 }
 
@@ -34,7 +34,7 @@ type countingToolServer struct {
 
 func (c *countingToolServer) Name() string      { return c.name }
 func (c *countingToolServer) Tools() []mcp.Tool { return c.tools }
-func (c *countingToolServer) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (c *countingToolServer) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	c.calls++
 	return "ok", nil
 }

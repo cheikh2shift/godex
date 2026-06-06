@@ -47,7 +47,7 @@ The server exposes a subset of GoDex’s filesystem tools, including:
 - `create_directory`, `delete_file`
 - `search_files`, `search_in_file`, `search_directory_text`, `search_file_text`
 - `get_file_info`, `read_file_line_range`
-- `replace_first_in_file`, `replace_line_range`, `insert_at_line`
+- `replace_first_in_file`, `insert_at_line`
 - `list_allowed_paths`
 
 ## Add to OpenCode

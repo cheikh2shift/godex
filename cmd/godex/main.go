@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +34,7 @@ import (
 	"github.com/cheikh2shift/godex/internal/mcp"
 	"github.com/cheikh2shift/godex/internal/ml"
 	"github.com/cheikh2shift/godex/internal/providers"
+	"github.com/cheikh2shift/godex/internal/rxcache"
 	"github.com/cheikh2shift/godex/internal/scheduler"
 	"github.com/cheikh2shift/godex/internal/wizard"
 	"github.com/cheikh2shift/godex/modelquery"
@@ -53,7 +53,7 @@ var ErrUserAborted = errors.New("user aborted")
 type MCPServer interface {
 	Name() string
 	Tools() []mcp.Tool
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (string, error)
 	AllowedPaths() []string
 	AddPath(ctx context.Context, path string) error
 	TempAddPath(path string)
@@ -305,9 +305,9 @@ func main() {
 	var providerTools []providers.Tool
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
-			var inputSchema map[string]interface{}
+			var inputSchema map[string]any
 			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
-				inputSchema = map[string]interface{}{}
+				inputSchema = map[string]any{}
 			}
 			providerTools = append(providerTools, providers.Tool{
 				Name:        tool.Name,
@@ -342,7 +342,7 @@ func main() {
 			playSound()
 		})
 		sched.SetProviderGetter(&schedulerProviderGetter{provider: provider})
-		var serverSlice []interface{} = make([]interface{}, len(servers))
+		var serverSlice []any = make([]any, len(servers))
 		for i, s := range servers {
 			serverSlice[i] = s
 		}
@@ -351,9 +351,9 @@ func main() {
 		schedulerServer := mcp.NewSchedulerServer(sched, &schedulerProviderGetter{provider: provider})
 		servers = append(servers, schedulerServer)
 		for _, tool := range schedulerServer.Tools() {
-			var inputSchema map[string]interface{}
+			var inputSchema map[string]any
 			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
-				inputSchema = map[string]interface{}{}
+				inputSchema = map[string]any{}
 			}
 			providerTools = append(providerTools, providers.Tool{
 				Name:        tool.Name,
@@ -439,9 +439,9 @@ func main() {
 			var providerTools []providers.Tool
 			for _, server := range servers {
 				for _, tool := range server.Tools() {
-					var inputSchema map[string]interface{}
+					var inputSchema map[string]any
 					if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
-						inputSchema = map[string]interface{}{}
+						inputSchema = map[string]any{}
 					}
 					providerTools = append(providerTools, providers.Tool{
 						Name:        tool.Name,
@@ -1087,7 +1087,7 @@ promptLoop:
 				hasError := false
 				for _, tc := range toolCalls {
 					toolName := tc["name"].(string)
-					args := tc["arguments"].(map[string]interface{})
+					args := tc["arguments"].(map[string]any)
 
 					if toolName == "read_image" && input != "" {
 						if _, ok := args["prompt"]; !ok {
@@ -1114,7 +1114,7 @@ promptLoop:
 						log.Printf("_raw found, unwrapping: type=%T", raw)
 						if rawStr, ok := raw.(string); ok {
 							log.Printf("_raw is string, length=%d", len(rawStr))
-							var rawMap map[string]interface{}
+							var rawMap map[string]any
 							if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
 								log.Printf("_raw unwrapped successfully: %+v", rawMap)
 								args = rawMap
@@ -1445,8 +1445,8 @@ func handleMCPSubcommand(args []string, configPath string) error {
 		if err := config.Save(configPath, cfg); err != nil {
 			return err
 		}
-			fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
-			return nil
+		fmt.Printf("Added MCP server %q to provider %q\n", serverName, provider.Name)
+		return nil
 	case "serve":
 		return handleMCPServeSubcommand(args[1:])
 	case "remove":
@@ -1509,11 +1509,11 @@ type mcpLog struct {
 	lines []string
 }
 
-func (m *mcpLog) Printf(format string, args ...interface{}) {
+func (m *mcpLog) Printf(format string, args ...any) {
 	m.lines = append(m.lines, fmt.Sprintf(format, args...))
 }
 
-func (m *mcpLog) Println(args ...interface{}) {
+func (m *mcpLog) Println(args ...any) {
 	m.lines = append(m.lines, fmt.Sprint(args...))
 }
 
@@ -1854,7 +1854,7 @@ func handleKill(servers []MCPServer, input string) {
 
 	for _, server := range servers {
 		if bs, ok := server.(*mcp.BashServer); ok {
-			result, err := bs.CallTool(context.Background(), "kill_command", map[string]interface{}{
+			result, err := bs.CallTool(context.Background(), "kill_command", map[string]any{
 				"pid": float64(pid),
 			})
 			if err != nil {
@@ -2269,7 +2269,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 			hasError := false
 			for _, tc := range toolCalls {
 				toolName := tc["name"].(string)
-				args := tc["arguments"].(map[string]interface{})
+				args := tc["arguments"].(map[string]any)
 
 				if toolName == "read_image" && input != "" {
 					if _, ok := args["prompt"]; !ok {
@@ -2292,7 +2292,7 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 
 				if raw, ok := args["_raw"]; ok {
 					if rawStr, ok := raw.(string); ok {
-						var rawMap map[string]interface{}
+						var rawMap map[string]any
 						if err := json.Unmarshal([]byte(rawStr), &rawMap); err == nil {
 							args = rawMap
 						}
@@ -2414,9 +2414,9 @@ func buildProviderTools(servers []MCPServer) []providers.Tool {
 	var providerTools []providers.Tool
 	for _, server := range servers {
 		for _, tool := range server.Tools() {
-			var inputSchema map[string]interface{}
+			var inputSchema map[string]any
 			if err := json.Unmarshal(tool.InputSchema, &inputSchema); err != nil {
-				inputSchema = map[string]interface{}{}
+				inputSchema = map[string]any{}
 			}
 			providerTools = append(providerTools, providers.Tool{
 				Name:        tool.Name,
@@ -2506,7 +2506,7 @@ func looksLikeToolCall(s string) bool {
 	return strings.Contains(s, "{") || strings.Contains(s, "}")
 }
 
-func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]interface{}, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {
+func callTool(ctx context.Context, servers []MCPServer, name string, args map[string]any, timeoutSecs int, autoDenyRestrictedPaths bool) (string, error) {
 
 	//log.Println("args", args)
 	normalizeToolPathArgs(name, args)
@@ -2557,7 +2557,7 @@ func callTool(ctx context.Context, servers []MCPServer, name string, args map[st
 	return "", fmt.Errorf("tool %s not found", name)
 }
 
-func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]interface{}, timeoutSecs int, supportsNativeToolCalls bool, verbose bool, autoDenyRestrictedPaths bool, promptContext string) ([]string, bool) {
+func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCalls []map[string]any, timeoutSecs int, supportsNativeToolCalls bool, verbose bool, autoDenyRestrictedPaths bool, promptContext string) ([]string, bool) {
 	if len(toolCalls) == 0 {
 		return nil, false
 	}
@@ -2572,7 +2572,7 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 		for i, tc := range toolCalls {
 			toolName := tc["name"].(string)
-			args := tc["arguments"].(map[string]interface{})
+			args := tc["arguments"].(map[string]any)
 			var argsStr []string
 			for k, v := range args {
 				argsStr = append(argsStr, fmt.Sprintf("%s=%v", k, v))
@@ -2594,11 +2594,11 @@ func executeToolCallsInParallel(ctx context.Context, servers []MCPServer, toolCa
 
 	for i, tc := range toolCalls {
 		wg.Add(1)
-		go func(index int, call map[string]interface{}, autoDeny bool) {
+		go func(index int, call map[string]any, autoDeny bool) {
 			defer wg.Done()
 
 			toolName := call["name"].(string)
-			args := call["arguments"].(map[string]interface{})
+			args := call["arguments"].(map[string]any)
 
 			if toolName == "read_image" && promptContext != "" {
 				if _, ok := args["prompt"]; !ok {
@@ -2731,7 +2731,7 @@ func showPathRestrictionPrompt(path string, allowedPaths []string) int {
 	return selectOptionPrompt("Path Restricted", options)
 }
 
-func normalizeToolPathArgs(toolName string, args map[string]interface{}) {
+func normalizeToolPathArgs(toolName string, args map[string]any) {
 	if !isFilesystemTool(toolName) {
 		return
 	}
@@ -2795,8 +2795,8 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-func extractAllToolCalls(text string) []map[string]interface{} {
-	var results []map[string]interface{}
+func extractAllToolCalls(text string) []map[string]any {
+	var results []map[string]any
 
 	candidates := []string{text}
 	if normalized := normalizeToolCallText(text); normalized != text {
@@ -2810,7 +2810,7 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 		for _, content := range codeBlocks {
 			content = strings.TrimSpace(content)
 			// Try to parse the whole block as one JSON object
-			var data map[string]interface{}
+			var data map[string]any
 			if err := json.Unmarshal([]byte(content), &data); err == nil {
 				if _, ok := data["name"].(string); ok {
 					results = append(results, processToolData(data))
@@ -2824,7 +2824,7 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 			}
 			// If not a single object, try sanitizing multi-line strings
 			sanitized := sanitizeMultilineJson(content)
-			var sanitizedData map[string]interface{}
+			var sanitizedData map[string]any
 			if err := json.Unmarshal([]byte(sanitized), &sanitizedData); err == nil {
 				if _, ok := sanitizedData["name"].(string); ok {
 					results = append(results, processToolData(sanitizedData))
@@ -2852,13 +2852,13 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 
 		// Safety fallback for the specific [TOOL_CALL] format
 		if len(results) == 0 {
-			toolCallRe := regexp.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
+			toolCallRe := rxcache.MustCompile(`(?s)\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]`)
 			tcMatches := toolCallRe.FindAllStringSubmatch(candidate, -1)
 			for _, m := range tcMatches {
 				if len(m) > 1 {
-					nameRe := regexp.MustCompile(`tool\s*=>\s*"([^"]+)"`)
+					nameRe := rxcache.MustCompile(`tool\s*=>\s*"([^"]+)"`)
 					if nameMatch := nameRe.FindStringSubmatch(m[1]); len(nameMatch) > 1 {
-						results = append(results, map[string]interface{}{"name": nameMatch[1], "arguments": map[string]interface{}{}})
+						results = append(results, map[string]any{"name": nameMatch[1], "arguments": map[string]any{}})
 					}
 				}
 			}
@@ -2870,11 +2870,11 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 			for _, m := range nativeMatches {
 				name := m[0]
 				argsStr := m[1]
-				var args map[string]interface{}
+				var args map[string]any
 				if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-					args = map[string]interface{}{"_raw": argsStr}
+					args = map[string]any{"_raw": argsStr}
 				}
-				results = append(results, map[string]interface{}{"name": name, "arguments": args})
+				results = append(results, map[string]any{"name": name, "arguments": args})
 			}
 		}
 
@@ -2886,16 +2886,16 @@ func extractAllToolCalls(text string) []map[string]interface{} {
 	return results
 }
 
-func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
+func extractToolCallsFromJSONArray(text string) []map[string]any {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return nil
 	}
-	var items []map[string]interface{}
+	var items []map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
 		return nil
 	}
-	var results []map[string]interface{}
+	var results []map[string]any
 	for _, item := range items {
 		if item == nil {
 			continue
@@ -2907,11 +2907,11 @@ func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
 		if tool, ok := item["tool"].(string); ok {
 			args := parseToolArgs(item)
 			if len(args) == 0 {
-				if params, ok := item["parameters"].(map[string]interface{}); ok {
+				if params, ok := item["parameters"].(map[string]any); ok {
 					args = params
 				}
 			}
-			results = append(results, map[string]interface{}{
+			results = append(results, map[string]any{
 				"name":      tool,
 				"arguments": args,
 			})
@@ -2922,7 +2922,7 @@ func extractToolCallsFromJSONArray(text string) []map[string]interface{} {
 
 func extractNativeToolCalls(text string) [][2]string {
 	var results [][2]string
-	re := regexp.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
+	re := rxcache.MustCompile(`\[TOOL_CALL:\s*([^\s|]+)\s*\|`)
 	matches := re.FindAllStringSubmatchIndex(text, -1)
 	for _, m := range matches {
 		if len(m) < 4 {
@@ -2977,8 +2977,8 @@ func normalizeToolCallText(text string) string {
 
 	nonEmpty := 0
 	withMargin := 0
-	marginRe := regexp.MustCompile(`^\s*│`)
-	stripRe := regexp.MustCompile(`^\s*│\s?`)
+	marginRe := rxcache.MustCompile(`^\s*│`)
+	stripRe := rxcache.MustCompile(`^\s*│\s?`)
 
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
@@ -3004,7 +3004,7 @@ func normalizeToolCallText(text string) string {
 // Only replaces the first occurrence at the start of the command
 func fixDriveLetterPath(cmd string) string {
 	// Match :/<path> at start and convert to cd /<path>
-	re := regexp.MustCompile(`(?i)^:\/(.+)`)
+	re := rxcache.MustCompile(`(?i)^:\/(.+)`)
 	match := re.FindStringSubmatch(cmd)
 	if match == nil {
 		return cmd
@@ -3098,8 +3098,8 @@ func extractCodeBlockContent(text string) []string {
 }
 
 // extractJsonObjects finds all balanced { ... } strings and tries to parse them as tool calls
-func extractJsonObjects(text string) []map[string]interface{} {
-	var results []map[string]interface{}
+func extractJsonObjects(text string) []map[string]any {
+	var results []map[string]any
 	startIdx := -1
 	braceCount := 0
 
@@ -3114,7 +3114,7 @@ func extractJsonObjects(text string) []map[string]interface{} {
 				braceCount--
 				if braceCount == 0 && startIdx != -1 {
 					potentialJson := text[startIdx : i+1]
-					var data map[string]interface{}
+					var data map[string]any
 					if err := json.Unmarshal([]byte(potentialJson), &data); err == nil {
 						if _, ok := data["name"].(string); ok {
 							results = append(results, processToolData(data))
@@ -3128,7 +3128,7 @@ func extractJsonObjects(text string) []map[string]interface{} {
 }
 
 func extractThinkingText(text string) string {
-	codeBlockRe := regexp.MustCompile("(?s)```(?:json)?\\n.*?\\n```")
+	codeBlockRe := rxcache.MustCompile("(?s)```(?:json)?\\n.*?\\n```")
 	thinking := codeBlockRe.ReplaceAllString(text, "")
 	thinking = strings.TrimSpace(thinking)
 	return thinking
@@ -3144,7 +3144,7 @@ func splitFinalAnswer(text string) (string, string, bool) {
 	return pre, final, true
 }
 
-func processToolData(data map[string]interface{}) map[string]interface{} {
+func processToolData(data map[string]any) map[string]any {
 	name, _ := data["name"].(string)
 	args := parseToolArgs(data)
 
@@ -3157,38 +3157,38 @@ func processToolData(data map[string]interface{}) map[string]interface{} {
 			args[k] = s
 		}
 	}
-	return map[string]interface{}{"name": name, "arguments": args}
+	return map[string]any{"name": name, "arguments": args}
 }
 
-func parseToolArgs(data map[string]interface{}) map[string]interface{} {
-	if a, ok := data["arguments"].(map[string]interface{}); ok {
+func parseToolArgs(data map[string]any) map[string]any {
+	if a, ok := data["arguments"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["args"].(map[string]interface{}); ok {
+	if a, ok := data["args"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["parameters"].(map[string]interface{}); ok {
+	if a, ok := data["parameters"].(map[string]any); ok {
 		return a
 	}
-	if a, ok := data["params"].(map[string]interface{}); ok {
+	if a, ok := data["params"].(map[string]any); ok {
 		return a
 	}
 	if raw, ok := data["parameters"].(string); ok && strings.TrimSpace(raw) != "" {
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
 			return parsed
 		}
 	}
 	if raw, ok := data["arguments"].(string); ok && strings.TrimSpace(raw) != "" {
-		var parsed map[string]interface{}
+		var parsed map[string]any
 		if err := json.Unmarshal([]byte(raw), &parsed); err == nil {
 			return parsed
 		}
 	}
-	return make(map[string]interface{})
+	return make(map[string]any)
 }
 
-func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
+func shouldExecuteToolCall(text string) ([]map[string]any, bool) {
 	toolCalls := extractAllToolCalls(text)
 	if len(toolCalls) == 0 {
 		return nil, false
@@ -3196,7 +3196,7 @@ func shouldExecuteToolCall(text string) ([]map[string]interface{}, bool) {
 	return toolCalls, true
 }
 
-func filterToolCallsByAvailability(servers []MCPServer, toolCalls []map[string]interface{}) ([]map[string]interface{}, []string) {
+func filterToolCallsByAvailability(servers []MCPServer, toolCalls []map[string]any) ([]map[string]any, []string) {
 	if len(toolCalls) == 0 {
 		return nil, nil
 	}
@@ -3206,7 +3206,7 @@ func filterToolCallsByAvailability(servers []MCPServer, toolCalls []map[string]i
 			available[tool.Name] = struct{}{}
 		}
 	}
-	var filtered []map[string]interface{}
+	var filtered []map[string]any
 	var missing []string
 	for _, tc := range toolCalls {
 		name, _ := tc["name"].(string)

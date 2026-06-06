@@ -9,11 +9,6 @@ Orchestration and parallel tasks? open another terminal tab and start a new inst
 
 ![GoDex demo](screen3.gif)
 
-## Requirements
-
-- **Go 1.25.7+** - Build from source
-- **Ollama** - For the default LLM backend (or use Gemini, OpenRouter, or llama.cpp)
-
 ## Table of Contents
 
 - [Requirements](#requirements)

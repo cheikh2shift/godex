@@ -77,8 +77,8 @@ type openRouterProvider struct {
 	model            string
 	apiKey           string
 	systemPrompt     string
-	messages         []map[string]interface{}
-	tools            []map[string]interface{}
+	messages         []map[string]any
+	tools            []map[string]any
 	cancelGen        uint64
 	contextLimit     int
 	promptTokens     int
@@ -186,7 +186,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	}
 	// Track only the user input in history
 	if userInput != "" {
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    "user",
 			"content": userInput,
 		})
@@ -196,7 +196,7 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	if maxHistory > 0 && len(p.messages) > maxHistory {
 		p.messages = p.messages[len(p.messages)-maxHistory:]
 	}
-	messages := make([]map[string]interface{}, len(p.messages))
+	messages := make([]map[string]any, len(p.messages))
 	copy(messages, p.messages)
 	p.mu.Unlock()
 
@@ -208,14 +208,14 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 		messages = prependSystemMessage(messages, systemMsg)
 	}
 
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model": p.model,
 		"input": buildResponsesInput(messages),
 	}
 
 	if len(p.tools) > 0 {
 		reqBody["tools"] = p.tools
-		reqBody["response_format"] = map[string]interface{}{
+		reqBody["response_format"] = map[string]any{
 			"type": "json_object",
 		}
 	}
@@ -328,14 +328,14 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 					p.pendingToolCalls[tc.ID] = tc.Name
 				}
 			}
-			p.messages = append(p.messages, map[string]interface{}{
+			p.messages = append(p.messages, map[string]any{
 				"role":    "assistant",
 				"content": assistantContent,
 			})
 			p.mu.Unlock()
 			return renderToolCalls(toolCalls), nil
 		}
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    "assistant",
 			"content": content,
 		})
@@ -347,8 +347,8 @@ func (p *openRouterProvider) Send(ctx context.Context, prompt string) (string, e
 	return "", lastErr
 }
 
-func buildResponsesInput(messages []map[string]interface{}) []map[string]interface{} {
-	input := make([]map[string]interface{}, 0, len(messages))
+func buildResponsesInput(messages []map[string]any) []map[string]any {
+	input := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		role, _ := msg["role"].(string)
 		content, _ := msg["content"].(string)
@@ -361,10 +361,10 @@ func buildResponsesInput(messages []map[string]interface{}) []map[string]interfa
 		if role == "assistant" {
 			contentType = "output_text"
 		}
-		input = append(input, map[string]interface{}{
+		input = append(input, map[string]any{
 			"type": "message",
 			"role": role,
-			"content": []map[string]interface{}{
+			"content": []map[string]any{
 				{
 					"type": contentType,
 					"text": content,
@@ -393,7 +393,7 @@ func buildSystemWorkingDirMessage(prompt string) string {
 	return fmt.Sprintf("You are operating in this working directory: %s", wd)
 }
 
-func prependSystemMessage(messages []map[string]interface{}, content string) []map[string]interface{} {
+func prependSystemMessage(messages []map[string]any, content string) []map[string]any {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return messages
@@ -407,8 +407,8 @@ func prependSystemMessage(messages []map[string]interface{}, content string) []m
 		return messages
 	}
 
-	out := make([]map[string]interface{}, 0, size)
-	out = append(out, map[string]interface{}{
+	out := make([]map[string]any, 0, size)
+	out = append(out, map[string]any{
 		"role":    "system",
 		"content": content,
 	})
@@ -436,9 +436,9 @@ func (p *openRouterProvider) Tools() []Tool {
 func (p *openRouterProvider) SetTools(tools []Tool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.tools = make([]map[string]interface{}, len(tools))
+	p.tools = make([]map[string]any, len(tools))
 	for i, t := range tools {
-		p.tools[i] = map[string]interface{}{
+		p.tools[i] = map[string]any{
 			"type":        "function",
 			"name":        t.Name,
 			"description": t.Description,
@@ -447,7 +447,7 @@ func (p *openRouterProvider) SetTools(tools []Tool) {
 	}
 }
 
-func (p *openRouterProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (p *openRouterProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("tools not supported in openrouter provider")
 }
 
@@ -460,7 +460,7 @@ func (p *openRouterProvider) SubmitToolResult(toolCallID, result string) {
 	delete(p.pendingToolCalls, toolCallID)
 
 	// Append tool result as a user message (tool role) for proper conversation tracking
-	p.messages = append(p.messages, map[string]interface{}{
+	p.messages = append(p.messages, map[string]any{
 		"role":         "tool",
 		"tool_call_id": toolCallID,
 		"name":         funcName,
@@ -489,7 +489,7 @@ func (p *openRouterProvider) TokenUsage() (int, int) {
 func (p *openRouterProvider) Reset() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.messages = []map[string]interface{}{}
+	p.messages = []map[string]any{}
 	p.pendingToolCalls = make(map[string]string)
 	p.promptTokens = 0
 	p.completionTokens = 0
@@ -502,14 +502,14 @@ func (p *openRouterProvider) SetMessages(messages []Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.messages = make([]map[string]interface{}, 0, len(messages))
+	p.messages = make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		role := strings.TrimSpace(msg.Role)
 		content := msg.Content
 		if role == "" || content == "" {
 			continue
 		}
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    role,
 			"content": content,
 		})
@@ -548,7 +548,7 @@ func (p *openRouterProvider) AppendMessages(messages []Message) error {
 		if _, ok := seen[key]; ok {
 			continue
 		}
-		p.messages = append(p.messages, map[string]interface{}{
+		p.messages = append(p.messages, map[string]any{
 			"role":    role,
 			"content": content,
 		})
@@ -595,7 +595,7 @@ func parseMaybeJSON(input string) string {
 	if text == "" {
 		return ""
 	}
-	var obj map[string]interface{}
+	var obj map[string]any
 	if err := json.Unmarshal([]byte(text), &obj); err == nil {
 		if message, ok := obj["message"].(string); ok && strings.TrimSpace(message) != "" {
 			return strings.TrimSpace(message)
@@ -628,7 +628,7 @@ type responsesUsage struct {
 
 func parseResponsesOutput(body []byte) (string, string, []responseToolCall, responsesUsage, bool) {
 	var resp struct {
-		Output []map[string]interface{} `json:"output"`
+		Output []map[string]any `json:"output"`
 		Usage  struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
@@ -649,9 +649,9 @@ func parseResponsesOutput(body []byte) (string, string, []responseToolCall, resp
 		typ, _ := item["type"].(string)
 		switch typ {
 		case "message":
-			if content, ok := item["content"].([]interface{}); ok {
+			if content, ok := item["content"].([]any); ok {
 				for _, c := range content {
-					ci, ok := c.(map[string]interface{})
+					ci, ok := c.(map[string]any)
 					if !ok {
 						continue
 					}
@@ -686,7 +686,7 @@ func parseResponsesOutput(body []byte) (string, string, []responseToolCall, resp
 			switch v := argsRaw.(type) {
 			case string:
 				argsStr = v
-			case map[string]interface{}:
+			case map[string]any:
 				if b, err := json.Marshal(v); err == nil {
 					argsStr = string(b)
 				}
@@ -725,18 +725,18 @@ func parseResponsesOutput(body []byte) (string, string, []responseToolCall, resp
 func renderToolCalls(calls []responseToolCall) string {
 	var b strings.Builder
 	for i, tc := range calls {
-		call := map[string]interface{}{
+		call := map[string]any{
 			"name": tc.Name,
 		}
 		if strings.TrimSpace(tc.Arguments) != "" {
-			var args map[string]interface{}
+			var args map[string]any
 			if err := json.Unmarshal([]byte(tc.Arguments), &args); err == nil {
 				call["arguments"] = args
 			} else {
-				call["arguments"] = map[string]interface{}{"_raw": tc.Arguments}
+				call["arguments"] = map[string]any{"_raw": tc.Arguments}
 			}
 		} else {
-			call["arguments"] = map[string]interface{}{}
+			call["arguments"] = map[string]any{}
 		}
 		payload, err := json.Marshal(call)
 		if err != nil {

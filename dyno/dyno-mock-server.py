@@ -90,15 +90,6 @@ DYNO_TOOL_CALL_BATCHES = [
             },
         },
         {
-            "name": "replace_line_range",
-            "arguments": {
-                "path": "/dyno/workspace/example_dir/example.txt",
-                "start_line": 2,
-                "end_line": 2,
-                "new_content": "replaced second line",
-            },
-        },
-        {
             "name": "search_directory_text",
             "arguments": {"path": "/dyno/workspace", "query": "replaced second line"},
         },
@@ -321,23 +312,6 @@ SYSTEM_TOOLS = [
                     "new": {"type": "string", "description": "Replacement text"}
                 },
                 "required": ["path", "old", "new"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "replace_line_range",
-            "description": "Replace a range of lines in a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path"},
-                    "start": {"type": "integer", "description": "Start line"},
-                    "end": {"type": "integer", "description": "End line"},
-                    "new": {"type": "string", "description": "New content"}
-                },
-                "required": ["path", "start", "end", "new"]
             }
         }
     },

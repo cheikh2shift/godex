@@ -45,6 +45,6 @@ func GetUnixTools() []Tool {
 }
 
 // HandleRunBashScript is not supported on Windows
-func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]interface{}) (string, error) {
+func (s *BashServer) HandleRunBashScript(ctx context.Context, args map[string]any) (string, error) {
 	return "", fmt.Errorf("run_bash_script is not supported on Windows")
 }

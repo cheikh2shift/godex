@@ -18,25 +18,25 @@ type fakeTask struct {
 	IsRepeating bool   `json:"is_repeating"`
 }
 
-func (f *fakeScheduler) AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (interface{}, error) {
+func (f *fakeScheduler) AddTask(prompt string, intervalSec int, runAt string, providerType, providerName, providerModel string) (any, error) {
 	return f.AddTaskWithRepeat(prompt, intervalSec, runAt, intervalSec > 0, providerType, providerName, providerModel)
 }
 
-func (f *fakeScheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (interface{}, error) {
+func (f *fakeScheduler) AddTaskWithRepeat(prompt string, intervalSec int, runAt string, isRepeating bool, providerType, providerName, providerModel string) (any, error) {
 	f.lastIsRepeating = isRepeating
 	return &fakeTask{ID: "ABCD", Prompt: prompt, IntervalSec: intervalSec, RunAt: runAt, IsRepeating: isRepeating}, nil
 }
 
 func (f *fakeScheduler) StopTask(id string) bool       { return true }
 func (f *fakeScheduler) RemoveTask(id string) bool     { return true }
-func (f *fakeScheduler) ListTasks() []interface{}      { return nil }
-func (f *fakeScheduler) GetTask(id string) interface{} { return nil }
+func (f *fakeScheduler) ListTasks() []any      { return nil }
+func (f *fakeScheduler) GetTask(id string) any { return nil }
 
 func TestSchedulerTool_RunOnceForcesNonRepeating(t *testing.T) {
 	fs := &fakeScheduler{}
 	server := NewSchedulerServer(fs, nil)
 
-	_, err := server.CallTool(context.Background(), "scheduler", map[string]interface{}{
+	_, err := server.CallTool(context.Background(), "scheduler", map[string]any{
 		"prompt":       "hi",
 		"interval_sec": float64(60),
 		"run_once":     true,

@@ -174,7 +174,7 @@ func (g *geminiProvider) Cancel() {
 	}
 }
 
-func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (g *geminiProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("Gemini provider does not support direct tool calls")
 }
 

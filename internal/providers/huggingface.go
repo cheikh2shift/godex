@@ -154,7 +154,7 @@ func (h *huggingfaceProvider) Cancel() {
 	}
 }
 
-func (h *huggingfaceProvider) CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (h *huggingfaceProvider) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	return "", fmt.Errorf("huggingface provider does not support direct tool calls")
 }
 

@@ -12,7 +12,7 @@ var DebugMode bool
 
 // Tool represents an executable tool.
 type Tool struct {
-	InputSchema map[string]interface{}
+	InputSchema map[string]any
 	Name        string
 	Description string
 }
@@ -28,7 +28,7 @@ type Provider interface {
 	SetThinkCallback(func(string))
 	Cancel()
 	Tools() []Tool
-	CallTool(ctx context.Context, name string, args map[string]interface{}) (string, error)
+	CallTool(ctx context.Context, name string, args map[string]any) (string, error)
 	Close() error
 	ContextLimit() int
 	TokenUsage() (input int, output int)
