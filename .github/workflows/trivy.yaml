@@ -1,5 +1,7 @@
 name: Security Scan
 on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   scan:
     runs-on: ubuntu-latest
