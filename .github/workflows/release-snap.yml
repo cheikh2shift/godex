@@ -146,24 +146,3 @@ jobs:
             echo "Uploading $snap_name to Snap Store..."
             snapcraft upload "$snap_name" --release "${SNAP_CHANNEL}"
           done
-
-      - name: Create GitHub Release
-        env:
-          TAG: ${{ steps.get_tag.outputs.TAG }}
-          VERSION: ${{ steps.get_tag.outputs.VERSION }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          snap_files=$(ls *.snap 2>/dev/null || true)
-          tar_files=$(ls *.tar.gz 2>/dev/null || true)
-          
-          # Generate checksums
-          : > SHA256SUMS
-          for f in $snap_files $tar_files; do
-            sha256sum "$f" >> SHA256SUMS
-          done
-          
-          gh release create "$TAG" \
-            --title "Release $TAG" \
-            --draft \
-            --notes "See https://github.com/anomalyco/godex/releases" \
-            $snap_files $tar_files SHA256SUMS
