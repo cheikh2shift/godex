@@ -13,8 +13,9 @@ Orchestration and parallel tasks? open another terminal tab and start a new inst
 
 - [Requirements](#requirements)
 - [Installation](#installation)
-  - [Quick Install](#quick-install-linuxmacos)
-  - [Docker](#quick-install-docker)
+  - [Quick Install (Linux/macOS)](#quick-install-linuxmacos)
+  - [Quick Install (Windows)](#quick-install-windows)
+  - [Quick Install (Docker)](#quick-install-docker)
   - [Build from Source](#build-from-source)
   - [Manual Download](#manual-download)
 - [Setting up providers](#setting-up-providers)
@@ -40,6 +41,14 @@ Orchestration and parallel tasks? open another terminal tab and start a new inst
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/cheikh2shift/godex/main/install.sh | sh
+```
+
+### Quick Install (Windows)
+
+Download the binary and place it in a directory on your `PATH` (e.g. `C:\Windows\System32` or `%LOCALAPPDATA%\Microsoft\WindowsApps`):
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/cheikh2shift/godex/releases/download/v0.26.2/godex-windows-amd64.exe" -OutFile "$env:LOCALAPPDATA\Microsoft\WindowsApps\godex.exe"
 ```
 
 ### Quick Install (Docker)
