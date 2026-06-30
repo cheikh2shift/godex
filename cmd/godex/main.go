@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -406,10 +407,7 @@ func main() {
 		}
 		hiveMgr, err = hive.NewManager(hiveCode, baseDir, provider.Model, maxTokens, getServerNames(servers), statusCh, func(ctx context.Context, prompt string) (string, error) {
 			native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
-			toolsDesc := ""
-			if !native {
-				toolsDesc = getToolsDescription(servers)
-			}
+			toolsDesc := getToolsDescription(servers)
 			fullPrompt := buildFullPrompt(native, toolsDesc, "", wd, prompt, "", hiveCode)
 			maxRounds := 10
 			if provider.MaxToolRounds != nil && *provider.MaxToolRounds > 0 {
@@ -629,10 +627,7 @@ promptLoop:
 				completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
 				sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
 				native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
-				toolsDesc := ""
-				if !native {
-					toolsDesc = getToolsDescription(servers)
-				}
+				toolsDesc := getToolsDescription(servers)
 				var hiveInstanceID string
 				if hiveMgr != nil {
 					hiveInstanceID = hiveMgr.Instance().ID
@@ -909,12 +904,7 @@ promptLoop:
 		}
 
 		nativeToolCalls := llmProvider.SupportsNativeToolCalls()
-		var toolsSection string
-		if nativeToolCalls {
-			toolsSection = ""
-		} else {
-			toolsSection = fmt.Sprintf("\nYou have access to these tools:\n%s\n", getToolsDescription(servers))
-		}
+		toolsSection := getToolsDescription(servers)
 
 		sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
 
@@ -1258,10 +1248,7 @@ promptLoop:
 					completionMsg := fmt.Sprintf("Hive worker %s has completed and sent back the following result:\n%s", workerLabel, payload)
 					sessionContext := buildSessionContext(prevSession, agentsContext, commitContextPath, commitContextRef, wd)
 					native := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
-					toolsDesc := ""
-					if !native {
-						toolsDesc = getToolsDescription(servers)
-					}
+					toolsDesc := getToolsDescription(servers)
 					var hiveInstanceID string
 					if hiveMgr != nil {
 						hiveInstanceID = hiveMgr.Instance().ID
@@ -2062,10 +2049,7 @@ func runSinglePrompt(ctx context.Context, provider *config.Provider, prompt stri
 	llmProvider, _ := agent.GetProvider(provider)
 	nativeToolCalls := llmProvider != nil && llmProvider.SupportsNativeToolCalls()
 
-	toolsDesc := ""
-	if !nativeToolCalls {
-		toolsDesc = getToolsDescription(servers)
-	}
+	toolsDesc := getToolsDescription(servers)
 	fullPrompt := buildFullPrompt(nativeToolCalls, toolsDesc, "", wd, prompt, tree, "")
 
 	// Get tool settings
@@ -2108,34 +2092,37 @@ func buildFullPrompt(nativeToolCalls bool, toolsSection, sessionContext, wd, inp
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
 `, osName, runtime.GOARCH, wd, hiveInfo)
 
-	if !nativeToolCalls {
-		shellName := "sh"
-		shellLimits := `- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
+	if strings.TrimSpace(toolsSection) != "" {
+		base += fmt.Sprintf("\nYou have access to these tools:\n%s\n", toolsSection)
+	}
+
+	shellName := "sh"
+	shellLimits := `- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
 - Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
 - Shell aliases are NOT expanded - use full command names`
-		if osName == "windows" {
-			shellName = "cmd.exe"
-			shellLimits = `- Use cmd.exe syntax (e.g., %USERPROFILE% not $HOME, %PATH% not $PATH)
+	if osName == "windows" {
+		shellName = "cmd.exe"
+		shellLimits = `- Use cmd.exe syntax (e.g., %USERPROFILE% not $HOME, %PATH% not $PATH)
 - PowerShell-specific commands may not work; prefer cmd.exe built-ins
 - Interactive commands will NOT work - use non-interactive alternatives`
-		}
-		base = fmt.Sprintf(`You have access to these tools:
-%s
+	}
 
-%s
-
+	base += fmt.Sprintf(`
 IMPORTANT: When you need to read files, search, or get directory contents, you MUST call the appropriate tool with the CORRECT path.
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
 
 BASH TOOL LIMITATIONS:
-- Commands run via `+"`"+`%s`+"`"+` (%s)
+- Commands run via `+"`"+`%s`+"`"+`
 - %s
 - NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
 - ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
 - ALWAYS use background: true when starting a webserver or a long-running background task
 - After starting a background process, use sleep before making requests to it
 - Use kill_command with the PID to stop background processes when done
+`, wd, shellName, shellLimits)
 
+	if !nativeToolCalls {
+		base += `
 To call tools, respond with one or more JSON objects, each in its own markdown code block.
 You can call multiple tools at once to be more efficient. If tools are independent of each other, call them in parallel for faster execution.
 When planning parallel tool calls, ensure there is no conflict - tools that modify the same resource (file, directory, process, etc.) should NOT be called in parallel; run them sequentially instead.
@@ -2150,8 +2137,7 @@ Example:
 }
 `+"```"+`
 
-IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-`, toolsSection, base, wd, shellName, shellLimits)
+IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.`
 	}
 
 	if strings.TrimSpace(tree) != "" {
@@ -2164,10 +2150,7 @@ User request: %s`, strings.TrimSpace(base), input)
 
 func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPServer, fullPrompt, input string, maxToolRounds int, toolTimeout int, llmProvider providers.Provider, verbose, debug, autoDenyRestrictedPaths bool, nocont bool, onToolCall func(string)) (string, error) {
 	prevRoundToolCalls := make(map[string]bool)
-	toolsDesc := ""
-	if llmProvider == nil || !llmProvider.SupportsNativeToolCalls() {
-		toolsDesc = getToolsDescription(servers)
-	}
+	toolsDesc := getToolsDescription(servers)
 
 	prevNoTool := false
 	for round := 0; round < maxToolRounds; round++ {
@@ -2386,10 +2369,10 @@ func runToolLoop(ctx context.Context, provider *config.Provider, servers []MCPSe
 }
 
 func buildContinuePrompt(llmProvider providers.Provider, servers []MCPServer, originalInput, continuePrompt string, currentRound, maxRounds int) string {
-	if llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
-		return fmt.Sprintf("Continue from where you left off. %s\n\nProvide your FINAL_ANSWER now.", continuePrompt)
-	}
 	toolsDesc := getToolsDescription(servers)
+	if llmProvider != nil && llmProvider.SupportsNativeToolCalls() {
+		return fmt.Sprintf("You have access to these tools:%s\n\nContinue from where you left off. %s\n\nProvide your FINAL_ANSWER now.", toolsDesc, continuePrompt)
+	}
 	toolCallFormat := "To call tools, respond with JSON in markdown code blocks:\n```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": {\n    \"arg1\": \"value1\"\n  }\n}\n```"
 	roundInfo := ""
 	if currentRound > 0 {
@@ -2413,6 +2396,40 @@ func getToolsDescription(servers []MCPServer) string {
 		desc.WriteString(fmt.Sprintf("\n[%s]\n", serverName))
 		for _, tool := range tools {
 			desc.WriteString(fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description))
+			var schema map[string]any
+			if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+				continue
+			}
+			props, _ := schema["properties"].(map[string]any)
+			required, _ := schema["required"].([]any)
+			reqSet := make(map[string]bool, len(required))
+			for _, r := range required {
+				if s, ok := r.(string); ok {
+					reqSet[s] = true
+				}
+			}
+			if len(props) > 0 {
+				// Sort for deterministic output
+				names := make([]string, 0, len(props))
+				for name := range props {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					p, _ := props[name].(map[string]any)
+					pType, _ := p["type"].(string)
+					pDesc, _ := p["description"].(string)
+					req := "optional"
+					if reqSet[name] {
+						req = "required"
+					}
+					if pDesc != "" {
+						desc.WriteString(fmt.Sprintf("    %s (%s, %s): %s\n", name, pType, req, pDesc))
+					} else {
+						desc.WriteString(fmt.Sprintf("    %s (%s, %s)\n", name, pType, req))
+					}
+				}
+			}
 		}
 	}
 	return desc.String()
