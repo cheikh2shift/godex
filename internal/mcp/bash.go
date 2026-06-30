@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -271,8 +272,8 @@ func NewBashServer(allowedPaths []string, autoConfirm bool) *BashServer {
 		jobTracker:   NewJobTracker(),
 		tools: []Tool{
 			{
-				Name:        "run_command",
-				Description: "Run a shell command and return its output. For servers/services/long-running processes, you MUST set background: true (killable via /kill or /killbg).",
+			Name:        "run_command",
+			Description: "Run a shell command and return its output. Uses cmd.exe on Windows, sh on Unix. For servers/services/long-running processes, you MUST set background: true (killable via /kill or /killbg).",
 				InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run"},"timeout":{"type":"number","description":"Timeout in seconds (default 180)"},"background":{"type":"boolean","description":"Run in background as a goroutine (default false)"}},"required":["command"]}`),
 			},
 			{
@@ -594,7 +595,12 @@ func (s *BashServer) runSyncCommand(ctx context.Context, command string, timeout
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
+	}
 	cmd.Stdin = nil // Close stdin to prevent interactive prompts from blocking
 
 	var stdout, stderr bytes.Buffer

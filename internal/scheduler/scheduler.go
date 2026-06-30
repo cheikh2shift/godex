@@ -663,7 +663,7 @@ func (s *Scheduler) executeWithTools(ctx context.Context, task *ScheduledTask) (
 }
 
 func (s *Scheduler) buildInitialPrompt(input, toolsDesc string, toolCallFormat string, nativeToolCalls bool) string {
-	osInfo := "linux"
+	osInfo := runtime.GOOS
 	if s.os != "" {
 		osInfo = s.os
 	}
@@ -692,7 +692,7 @@ func (s *Scheduler) buildContinuePrompt(continuePrompt, toolsDesc string, toolCa
 	if currentRound > 0 {
 		roundInfo = fmt.Sprintf("\n\nNOTE: You are on round %d/%d. Only call more tools if absolutely necessary.", currentRound, maxRounds)
 	}
-	osInfo := "linux"
+	osInfo := runtime.GOOS
 	if s.os != "" {
 		osInfo = s.os
 	}

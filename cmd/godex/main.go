@@ -2099,15 +2099,26 @@ func buildFullPrompt(nativeToolCalls bool, toolsSection, sessionContext, wd, inp
 		hiveInfo = fmt.Sprintf(`- Hive Instance ID: %s. You can't assign a task to yourself, but you can ask other hive workers to perform tasks for you.
 `, hiveInstanceID)
 	}
+	osName := runtime.GOOS
 	base += fmt.Sprintf(`CRITICAL INFORMATION:
 - Operating System: %s (%s)
 - Current working directory: %s
 %sUse this path when the user asks about "this folder", "current directory", or similar.
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-`, runtime.GOOS, runtime.GOARCH, wd, hiveInfo)
+`, osName, runtime.GOARCH, wd, hiveInfo)
 
 	if !nativeToolCalls {
+		shellName := "sh"
+		shellLimits := `- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
+- Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
+- Shell aliases are NOT expanded - use full command names`
+		if osName == "windows" {
+			shellName = "cmd.exe"
+			shellLimits = `- Use cmd.exe syntax (e.g., %USERPROFILE% not $HOME, %PATH% not $PATH)
+- PowerShell-specific commands may not work; prefer cmd.exe built-ins
+- Interactive commands will NOT work - use non-interactive alternatives`
+		}
 		base = fmt.Sprintf(`You have access to these tools:
 %s
 
@@ -2117,9 +2128,8 @@ IMPORTANT: When you need to read files, search, or get directory contents, you M
 Do NOT use example paths like "/path/to/directory" - use the actual path: %s
 
 BASH TOOL LIMITATIONS:
-- Shell variables like $HOME, $PATH are NOT expanded - use absolute paths instead
-- Interactive commands (vim, less, top) will NOT work - use non-interactive alternatives
-- Shell aliases are NOT expanded - use full command names
+- Commands run via `+"`"+`%s`+"`"+` (%s)
+- %s
 - NEVER run servers or long-running programs in foreground - they will hang. ALWAYS use background: true
 - ALWAYS use background: true for any server, daemon, or program that doesn't exit immediately
 - ALWAYS use background: true when starting a webserver or a long-running background task
@@ -2141,7 +2151,7 @@ Example:
 `+"```"+`
 
 IMPORTANT: Execute tools FIRST, perform any action asked for by the user, then provide the final answer. Do NOT include any final answer, summary, or "FINAL_ANSWER:" until AFTER you have executed all necessary tools and received their results. If you need to run commands/tests to verify something, run them first before answering.
-`, toolsSection, base, wd)
+`, toolsSection, base, wd, shellName, shellLimits)
 	}
 
 	if strings.TrimSpace(tree) != "" {
