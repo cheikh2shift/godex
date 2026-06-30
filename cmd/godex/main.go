@@ -2392,8 +2392,6 @@ func getToolsDescription(servers []MCPServer) string {
 		if len(tools) == 0 {
 			continue
 		}
-		serverName := server.Name()
-		desc.WriteString(fmt.Sprintf("\n[%s]\n", serverName))
 		for _, tool := range tools {
 			desc.WriteString(fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description))
 			var schema map[string]any
