@@ -479,6 +479,14 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
+		// Fallback: on Windows consoles that are not in raw / virtual-terminal
+		// input mode, Bubble Tea delivers Space as a printable rune rather than
+		// a KeySpace event. Accept that as a toggle so the multi-select works
+		// cross-platform (notably fixing the MCP picker on Windows).
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == ' ' {
+			m.selected[m.cursor] = !m.selected[m.cursor]
+			return m, nil
+		}
 	}
 	return m, nil
 }
